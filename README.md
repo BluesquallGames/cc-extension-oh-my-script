@@ -1,0 +1,1 @@
+# cc-extension-oh-my-script
