@@ -1,0 +1,25 @@
+{
+  "name": "@oms/worker",
+  "type": "module",
+  "exports": {
+    "./main": "./lib/main.js",
+    "./protocol": "./lib/protocol.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^18.17.1",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  },
+  "dependencies": {
+    "fs-extra": "^11.3.0",
+    "vue": "^3.5.13",
+    "winston": "^3.17.0",
+    "winston-transport": "*",
+    "yaml": "^2.7.0"
+  }
+}

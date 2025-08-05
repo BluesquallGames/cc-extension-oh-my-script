@@ -1,0 +1,20 @@
+{
+  "include": ["src"],
+  "exclude": ["packages"],
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "sourceMap": true,
+    "strict": true,
+    "types": [
+      "electron",
+      "sharp",
+      "./node_modules/@cocos/creator-types/engine",
+      "./node_modules/@cocos/creator-types/editor",
+    ],
+  },
+}
