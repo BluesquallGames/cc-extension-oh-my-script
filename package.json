@@ -16,7 +16,7 @@
   },
   "scripts": {
     "prepublishOnly": "npm run build",
-    "build": "vite build",
+    "build": "vite build && pnpm --filter=* run build",
     "dev": "vite build --watch"
   },
   "devDependencies": {
@@ -36,10 +36,5 @@
     "winston": "^3.17.0",
     "winston-transport": "*",
     "yaml": "^2.7.0"
-  },
-  "pnpm": {
-    "patchedDependencies": {
-      "vite": "patches/vite.patch"
-    }
   }
 }

@@ -2,8 +2,9 @@
   "include": ["src"],
   "compilerOptions": {
     "target": "es2020",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "verbatimModuleSyntax": true,
     "strict": true,
     "rootDir": "./src",
     "outDir": "./lib",
@@ -11,7 +12,8 @@
     "declaration": true,
     "declarationMap": true,
     "types": [
-      "node"
+      "node",
+      "@babel/core",
     ],
   },
 }

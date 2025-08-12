@@ -10,13 +10,12 @@ const printf = () => winston.format.printf(({ level, message, timestamp }) => {
 });
 
 export const logger = winston.createLogger({
-  level: 'debug',
   format: winston.format.combine(
     winston.format.splat(),
   ),
   transports: [
     new winston.transports.Console({
-      level: 'info',
+      level: 'debug',
       format: winston.format.combine(
         printf(),
       ),

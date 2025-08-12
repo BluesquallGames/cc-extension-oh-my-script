@@ -1,29 +1,70 @@
 import cp from 'node:child_process';
 import { logger } from '../logger.js';
-import { InvocationResult, InvocationReturnValue, InvocationMessage, InvocationParams, InvocationMethodId } from '@oms/worker/protocol';
+import { Ipc, InvocationMessage, ClientInvocationMethodId, ServerInvocationMethodId } from '@oms/worker/protocol';
 
 export class OmsBuilderAgent {
   constructor() {
 
   }
 
-  async rebuild() {
-    const channel = await this._setup();
-    await channel.invoke('rebuild', undefined);
+  async close() {
+    switch (this._state) {
+    case State.closing:
+    case State.closed:
+      return;
+    }
+
+    this._state = State.closing;
+    if (this._setupPromise) {
+      const setupPromise = this._setupPromise;
+      this._setupPromise = undefined;
+      try {
+        const serverAgent = await setupPromise;
+        serverAgent.childProcess.kill();
+      } catch (err) {
+        logger.error(`close builder agent failed: ${err}`);
+      } finally {
+        this._state = State.closed;
+      }
+    }
   }
 
-  private _setupPromise: Promise<Channel> | undefined = undefined;
+  async rebuild() {
+    switch (this._state) {
+    case State.closing:
+      logger.info('builder agent is not opened');
+      return;
+    }
+
+    const serverAgent = await this._setup();
+    await serverAgent.ipc.invoke('rebuild', undefined);
+  }
+
+  async restart() {
+    await this.close();
+    await this.rebuild();
+  }
+
+  private _state = State.closed;
+  private _setupPromise: Promise<ServerAgent> | undefined = undefined;
 
   private async _setup() {
     if (!this._setupPromise) {
-      this._setupPromise = this._doSetup();
+      this._state = State.opening;
+      this._setupPromise = this._doSetup().then((serverAgent) => {
+        this._state = State.opened;
+        return serverAgent;
+      }).catch((err) => {
+        this._state = State.closed;
+        throw err;
+      });
     }
     return this._setupPromise;
   }
 
-  private async _doSetup(): Promise<Channel> {
+  private async _doSetup(): Promise<ServerAgent> {
     const main = require.resolve('@oms/worker/main');
-    const childProcess = cp.spawn('node', ['--inspect', main], {
+    const childProcess = cp.spawn('node', ['--watch', '--inspect', main], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     });
     childProcess.stdout?.on('data', (data) => {
@@ -49,46 +90,50 @@ export class OmsBuilderAgent {
         reject(err);
       });
     });
-    const invocations: Map<number, (response: InvocationResult<InvocationMethodId>) => void> = new Map();
-    childProcess.on('message', (invocationResult: InvocationResult<InvocationMethodId>) => {
-      logger.debug(`Received message: ${JSON.stringify(invocationResult)}`);
-      const invocation = invocations.get(invocationResult.invocationId);
-      if (!invocation) {
-        logger.error(`No invocation found for message: ${JSON.stringify(invocationResult)}`);
-      } else {
-        invocation(invocationResult);
+
+    const ipc = new Ipc<ClientInvocationMethodId, ServerInvocationMethodId>({
+      send: (message) => {
+        childProcess.send(message);
+      },
+    });
+    childProcess.on('message', (message) => {
+      ipc.dispatch(message as InvocationMessage);
+    });
+
+    ipc.listen('build-failed', async (changes) => {
+      // ...
+    });
+
+    ipc.listen('build-success', async (changes) => {
+      for (const file of changes.affectedFiles) {
+        await Editor.Message.request('asset-db', 'reimport-asset', file)
       }
     });
-    let nextInvocationId = 1;
-    const channel = {
-      invoke: <T extends InvocationMethodId>(type: T, content: InvocationParams<T>) => {
-        const invocationId = nextInvocationId++;
-        const message: InvocationMessage<T> = {
-          invocationId,
-          method: type,
-          args: content,
-        };
-        logger.debug(`Sending message: ${JSON.stringify(message)}`);
-        childProcess.send(message);
-        return new Promise<InvocationReturnValue<T>>((resolve, reject) => {
-          invocations.set(invocationId, (response: InvocationResult<InvocationMethodId>) => {
-            invocations.delete(invocationId);
-            if (response.ok) {
-              resolve(response.returnValue as InvocationReturnValue<T>);
-            } else {
-              reject(new Error(response.error));
-            }
-          });
+
+    await new Promise<void>((resolve, reject) => {
+      ipc.listen('bootstrapped', async () => {
+        await ipc.invoke('setup', {
+          project: Editor.Project.path,
         });
-      },
-    };
-    await channel.invoke('setup', {
-      project: Editor.Project.path,
+        resolve();
+      });
     });
-    return channel;
+
+    return {
+      ipc,
+      childProcess,
+    };
   }
 }
 
-interface Channel {
-  invoke<T extends InvocationMethodId>(type: T, content: InvocationParams<T>): Promise<InvocationReturnValue<T>>;
+interface ServerAgent {
+  ipc: Ipc<ClientInvocationMethodId, ServerInvocationMethodId>;
+  childProcess: cp.ChildProcess;
+}
+
+enum State {
+  opening,
+  opened,
+  closing,
+  closed,
 }

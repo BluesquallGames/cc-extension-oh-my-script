@@ -1,24 +1,22 @@
 import assert from 'node:assert';
 import { OmsBuilder } from './oms-builder.js';
-import { InvocationParams, InvocationReturnValue, InvocationMethodId } from './protocol.js';
+import { ServerContext } from './server-context.js';
 
-let globalOmsBuilder: OmsBuilder | undefined = undefined;
+export function registerMessageHandlers(ctx: ServerContext) {
+  let globalOmsBuilder: OmsBuilder | undefined = undefined;
 
-export const messageHandlers: {
-  [key in InvocationMethodId]?: (message: InvocationParams<key>) => InvocationReturnValue<key>;
-} = {
-  setup: async (options) => {
+  ctx.ipc.listen('setup', async (args) => {
     assert(!globalOmsBuilder, 'omsBuilder already setup');
-    globalOmsBuilder = new OmsBuilder(options);
-  },
+    globalOmsBuilder = new OmsBuilder(ctx, args);
+  });
 
-  rebuild: async () => {
+  ctx.ipc.listen('rebuild', async () => {
     const omsBuilder = ensureOmsBuilder();
     await omsBuilder.rebuild();
-  },
-};
+  });
 
-function ensureOmsBuilder() {
-  assert(globalOmsBuilder, 'omsBuilder not setup');
-  return globalOmsBuilder;
+  function ensureOmsBuilder() {
+    assert(globalOmsBuilder, 'omsBuilder not setup');
+    return globalOmsBuilder;
+  }
 }

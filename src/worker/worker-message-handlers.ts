@@ -7,4 +7,8 @@ export const workerMessageHandlers = {
   rebuild: async () => {
     await omsBuilderAgent.rebuild();
   },
+
+  restart: async () => {
+    await omsBuilderAgent.restart();
+  },
 } satisfies Record<keyof typeof workerMessageDescriptions, () => Promise<void>>;

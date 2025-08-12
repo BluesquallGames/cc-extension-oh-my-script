@@ -22,6 +22,8 @@ async function getContributions(): Promise<Contributions> {
     }
   };
 
+  const menuPath = 'Oh My Script!';
+
   return {
     messages: {
       'open-devtools': {
@@ -35,7 +37,7 @@ async function getContributions(): Promise<Contributions> {
     },
     menu: [
       {
-        path: 'Oh My Script!',
+        path: menuPath,
         label: 'Open OMS Devtools',
         message: 'open-devtools',
         group: 'operation',
@@ -43,11 +45,19 @@ async function getContributions(): Promise<Contributions> {
       },
 
       {
-        path: 'Oh My Script!',
+        path: menuPath,
         label: 'Rebuild',
         message: 'rebuild' satisfies keyof typeof workerMessagesContribution,
         group: 'operation',
         order: 10,
+      },
+
+      {
+        path: menuPath,
+        label: 'Restart',
+        message: 'restart' satisfies keyof typeof workerMessagesContribution,
+        group: 'operation',
+        order: 11,
       },
     ],
   };
