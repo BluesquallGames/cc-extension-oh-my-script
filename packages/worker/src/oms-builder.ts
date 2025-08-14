@@ -52,6 +52,11 @@ export class OmsBuilder {
     const outDir = resolve(this._projectPath, 'temp', 'oms', 'out');
     await fs.ensureDir(outDir);
     await fs.emptyDir(outDir);
+    await fs.outputJSON(join(outDir, 'package.json'), {
+      type: 'module',
+    }, {
+      spaces: 2,
+    });
 
     const buildRecord = new BuildRecord({
       sourceRoot: this._sourceRoot,
@@ -379,8 +384,8 @@ class BuildRecord extends EventEmitter<{
     const outputOptions: rollup.OutputOptions = {
       dir: this._outDir,
       format: 'es',
-      chunkFileNames: '_chunks/[name]-[hash].mjs',
-      entryFileNames: '[name].mjs',
+      chunkFileNames: '_chunks/[name]-[hash].js',
+      entryFileNames: '[name].js',
       sourcemap: true,
       plugins: outputPlugins,
     };
