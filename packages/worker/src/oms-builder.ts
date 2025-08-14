@@ -49,10 +49,13 @@ export class OmsBuilder {
     await this._clean();
 
     const sourceRoot = this._sourceRoot;
+    const outDir = resolve(this._projectPath, 'temp', 'oms', 'out');
+    await fs.ensureDir(outDir);
+    await fs.emptyDir(outDir);
 
     const buildRecord = new BuildRecord({
       sourceRoot: this._sourceRoot,
-      outDir: resolve(this._projectPath, 'temp', 'oms', 'out'),
+      outDir,
       shadowDir: resolve(this._projectPath, 'assets/shadow-source'),
     });
 
