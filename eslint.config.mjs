@@ -1,6 +1,14 @@
-import stf from '@shrinktofit/eslint-plugin';
+// @ts-check
 
-export default [
+import stf from '@shrinktofit/eslint-plugin';
+import { defineConfig, globalIgnores } from 'eslint/config';
+
+export default defineConfig([
+  globalIgnores([
+    '**/node_modules/**/*.*',
+    '**/lib/*',
+    '**/dist/*',
+  ]),
   {
     settings: {
       node: {
@@ -8,13 +16,7 @@ export default [
       },
     },
   },
-  {
-    ignores: [
-      'node_modules',
-      '**/lib',
-      '**/dist',
-    ],
-  },
+  // @ts-expect-error
   ...stf.configs.recommended,
   {
     languageOptions: {
@@ -22,6 +24,7 @@ export default [
         tsconfigRootDir: import.meta.dirname,
         project: [
           'tsconfig.json',
+          'packages/*/tsconfig.json',
         ],
         projectService: {
           allowDefaultProject: [
@@ -43,4 +46,4 @@ export default [
       'n/no-unsupported-features/node-builtins': 'off',
     },
   },
-];
+]);

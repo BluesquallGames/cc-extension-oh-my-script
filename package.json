@@ -23,8 +23,9 @@
     "@cocos/creator-types": "^3.8.5",
     "@shrinktofit/eslint-plugin": "^0.0.9",
     "@types/fs-extra": "^11.0.4",
-    "@types/node": "^18.17.1",
+    "@types/node": "catalog:",
     "@vitejs/plugin-vue": "^5.2.1",
+    "eslint": "^9.33.0",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

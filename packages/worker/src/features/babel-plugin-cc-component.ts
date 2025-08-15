@@ -18,7 +18,7 @@ export function transformCCComponent(options: {
   const { uuidMap } = options;
   return {
     name: 'cc-component',
-    
+
     visitor: {
       Program: {
         enter(path) {

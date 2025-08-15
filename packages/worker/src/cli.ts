@@ -1,5 +1,5 @@
 import { logger } from './logger.js';
-import { OmsBuilder} from './oms-builder.js';
+import { OmsBuilder } from './oms-builder.js';
 import { Ipc } from './protocol.js';
 
 const builder = new OmsBuilder({

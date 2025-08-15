@@ -30,4 +30,6 @@ export interface Contributions {
   'scene'?: {
     script: string;
   };
+
+  'server'?: string;
 }

@@ -60,5 +60,6 @@ async function getContributions(): Promise<Contributions> {
         order: 11,
       },
     ],
+    server: './dist/contributions/server.cjs',
   };
 }

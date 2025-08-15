@@ -29,5 +29,4 @@ main().catch((err) => {
   logger.error('oms worker failed', err);
 });
 
-
 export {};

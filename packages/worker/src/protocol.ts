@@ -1,12 +1,12 @@
-import { type Serializable } from "node:child_process";
-import { logger } from "./logger.js";
+import { type Serializable } from 'node:child_process';
+import { logger } from './logger.js';
 
 export interface ClientInvocationMap {
-  'setup': (options: {
+  setup: (options: {
     project: string;
   }) => void;
 
-  'rebuild': () => void;
+  rebuild: () => void;
 }
 
 export type ClientInvocationMethodId = keyof ClientInvocationMap;
@@ -39,7 +39,7 @@ export enum InvocationDirection {
 export type InvocationError = {
   message: string;
   stack?: string;
-}
+};
 
 export type InvocationResultMessage<T extends InvocationMethodId> = {
   direction: InvocationDirection.returns;
