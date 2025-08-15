@@ -601,6 +601,12 @@ class BuildRecord<TBuildExtras> extends EventEmitter<{
       entryFileNames: '[name].js',
       sourcemap: true,
       plugins: outputPlugins,
+      manualChunks(id) {
+        if (id.includes('node_modules')) {
+          return 'vendor';
+        }
+        return null;
+      },
     };
 
     await rollupBuild.write(outputOptions);
