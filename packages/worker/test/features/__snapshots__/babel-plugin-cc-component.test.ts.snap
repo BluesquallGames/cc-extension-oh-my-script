@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`lack of filename 1`] = `
+"import { cclegacy as _ccLegacy } from 'cc';
+console.log('oops?');"
+`;
+
+exports[`lack of uuid 1`] = `
+"import { cclegacy as _ccLegacy } from 'cc';
+console.log('oops?');"
+`;
+
+exports[`well formed 1`] = `
+"import { cclegacy as _ccLegacy2 } from 'cc';
+_ccLegacy2._RF.push("123");
+import { cclegacy as _ccLegacy } from 'cc';
+console.log('oops?');
+_ccLegacy2._RF.pop();"
+`;

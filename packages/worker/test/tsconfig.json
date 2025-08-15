@@ -1,0 +1,16 @@
+{
+  "references": [{"path": "../"}],
+  "include": ["./"],
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "rootDir": ".",
+    "emitDeclarationOnly": true,
+    "composite": true,
+    "types": [
+      "node",
+      "vitest",
+    ],
+  },
+}

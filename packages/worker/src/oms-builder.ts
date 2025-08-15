@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import fs from 'fs-extra';
 import { logger } from './logger.js';
 import { ServerContext } from './server-context.js';
@@ -9,12 +9,16 @@ import rollupPluginBabel_ from '@rollup/plugin-babel';
 // @ts-expect-error
 import babelPluginProposalDecorators from '@babel/plugin-proposal-decorators';
 import babelPresetEnv from '@babel/preset-env';
-import  * as chokidar from 'chokidar';
+import * as chokidar from 'chokidar';
 import EventEmitter from 'node:events';
+import { transformCCComponent } from './features/babel-plugin-cc-component.js';
+import assert from 'node:assert';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
 const rollupPluginBabel = rollupPluginBabel_ as unknown as typeof rollupPluginBabel_.default;
+
+const mainBundleId = 'main';
 
 export class OmsBuilder {
   constructor(private _ctx: ServerContext, {
@@ -23,7 +27,7 @@ export class OmsBuilder {
     project: string;
   }) {
     this._projectPath = project;
-    this._sourceRoot = join(this._projectPath, 'src');
+    this._mainBundleSourceRoot = join(this._projectPath, 'src');
   }
 
   async rebuild() {
@@ -31,9 +35,8 @@ export class OmsBuilder {
   }
 
   private _projectPath: string;
-  private _sourceRoot: string;
-  private _buildRecord: BuildRecord | undefined;
-  private _entries: string[] = [];
+  private _mainBundleSourceRoot: string;
+  private _buildRecord: BuildRecord<BuildExtras> | undefined;
   private _watcher: chokidar.FSWatcher | undefined;
 
   private async _clean() {
@@ -48,7 +51,7 @@ export class OmsBuilder {
   private async _rebuild() {
     await this._clean();
 
-    const sourceRoot = this._sourceRoot;
+    const sourceRoot = this._mainBundleSourceRoot;
     const outDir = resolve(this._projectPath, 'temp', 'oms', 'out');
     await fs.ensureDir(outDir);
     await fs.emptyDir(outDir);
@@ -58,19 +61,48 @@ export class OmsBuilder {
       spaces: 2,
     });
 
-    const buildRecord = new BuildRecord({
-      sourceRoot: this._sourceRoot,
+    const buildRecord = new BuildRecord<BuildExtras>({
+      sourceRoot: this._mainBundleSourceRoot,
       outDir,
       shadowDir: resolve(this._projectPath, 'assets/shadow-source'),
     });
 
-    const entries: string[] = [];
     const currentWatchedInferredFiles = new Set<string>();
+    const bundles: Record<string, Bundle> = {};
+    const mainBundle = new Bundle(mainBundleId, this._mainBundleSourceRoot, resolve(this._projectPath, 'assets/oms-index.ts'));
+    bundles[mainBundle.id] = mainBundle;
 
-    const buildWithEntryChanged = () => {
+    let watcherReady = false;
+
+    const makeBundleEntryFilenameNoExtension = (bundleId: string) => {
+      return `bundle-${bundleId}`;
+    };
+
+    const build = (entryChanged: boolean) => {
+      if (!watcherReady) {
+        return;
+      }
+
+      if (!entryChanged) {
+        buildRecord.requestBuild();
+        return;
+      }
+
+      const bundleEntries: Record<string, string> = {};
+      const buildExtras: BuildExtras = {
+        bundles: [],
+      };
+      for (const [bundleId, bundle] of Object.entries(bundles)) {
+        if (bundle.empty) {
+          continue;
+        }
+        bundleEntries[makeBundleEntryFilenameNoExtension(bundleId)] = bundle.entry;
+        buildExtras.bundles.push(bundle);
+      }
+
       buildRecord.rebuild({
-        entries,
-      });
+        entries: bundleEntries,
+      }, buildExtras);
     };
 
     const watcher = chokidar.watch(sourceRoot, {
@@ -88,7 +120,8 @@ export class OmsBuilder {
     watcher
       .on('ready', () => {
         logger.debug('Watcher ready');
-        buildWithEntryChanged();
+        watcherReady = true;
+        build(true);
       })
       .on('error', (error) => {
         logger.error('Watcher error: %s', error);
@@ -97,20 +130,32 @@ export class OmsBuilder {
         logger.debug('Watcher event: %s, Path: %s', event, path);
       })
       .on('add', (path) => {
-        if (path.startsWith(sourceRoot)) {
-          entries.push(path);
-          buildWithEntryChanged();
+        if (currentWatchedInferredFiles.has(path)) {
+          return;
         }
+        const bundleId = this._getBundleId(path);
+        if (!bundleId) {
+          build(false);
+          return;
+        }
+        const bundle = bundles[bundleId];
+        assert.ok(bundle, `Bundle ${bundleId} not found`);
+        const buildEntryChanged = bundle.addSourceFile(path);
+        build(buildEntryChanged);
       })
       .on('change', (path) => {
-        buildRecord.requestBuild();
+        build(false);
       })
       .on('unlink', (path) => {
-        const index = entries.indexOf(path);
-        if (index !== -1) {
-          entries.splice(index, 1);
-          buildWithEntryChanged();
+        const bundleId = this._getBundleId(path);
+        if (!bundleId) {
+          build(false);
+          return;
         }
+        const bundle = bundles[bundleId];
+        assert.ok(bundle, `Bundle ${bundleId} not found`);
+        const bundleEntryChanged = bundle.deleteSourceFile(path);
+        build(bundleEntryChanged);
       })
       .on('addDir', (path) => {
         void 0;
@@ -125,11 +170,19 @@ export class OmsBuilder {
       this._ctx.ipc.invoke('build-failed', {});
     });
 
-    buildRecord.on('build-end', (buildResult) => {
+    buildRecord.on('build-end', async (buildResult, extras) => {
       nBuildEnds++;
 
+      const affectedFiles: string[] = [];
+      for (const bundle of extras.bundles) {
+        const proxyFile = bundle.proxyFile;
+        const bundleEntryOutFile = resolve(outDir, `${makeBundleEntryFilenameNoExtension(bundle.id)}.js`);
+        const proxyFileContent = this._renderProxyFile(proxyFile, bundleEntryOutFile, bundle.id);
+        await fs.outputFile(proxyFile, proxyFileContent, 'utf8');
+        affectedFiles.push(proxyFile);
+      }
       this._ctx.ipc.invoke('build-success', {
-        affectedFiles: [...buildResult.affectedFiles],
+        affectedFiles: [...affectedFiles],
       });
 
       logger.debug(`[Build x ${nBuildEnds}] Build end, inferred files: %s`, buildResult.inferredFiles);
@@ -154,6 +207,10 @@ export class OmsBuilder {
     this._watcher = watcher;
   }
 
+  private _getBundleId(path: string): string | undefined {
+    return mainBundleId;
+  }
+
   private *_listEntries(sourceRoot: string) {
     if (!fs.existsSync(sourceRoot)) {
       return;
@@ -164,6 +221,21 @@ export class OmsBuilder {
       }
     }
   }
+
+  private _renderProxyFile(proxyFilePath: string, bundleEntryPath: string, bundleId: string) {
+    let source = '';
+    source +=
+      `/// This file is generated by 'Oh My Script!' extension.\n` +
+      `/// It serves as entry of bundle ${bundleId}.\n` +
+      `/// Neither don't edit it, nor add it into version control system(eg. Git).\n` +
+      `\n`
+    source += `import '${makeRelativeImportSpecifier(dirname(proxyFilePath), bundleEntryPath)}';\n`;
+    return source;
+  }
+}
+
+interface BuildExtras {
+  bundles: Bundle[];
 }
 
 function* readDirRecurse(root: string, current: string = ''): Generator<string> {
@@ -178,7 +250,7 @@ function* readDirRecurse(root: string, current: string = ''): Generator<string> 
   }
 }
 
-function makeImportSpecifier(from: string, to: string) {
+function makeRelativeImportSpecifier(from: string, to: string) {
   let path = relative(from, to).replace(/\\/g, '/');
   if (path.startsWith('./')) {
     path = './' + path;
@@ -186,18 +258,126 @@ function makeImportSpecifier(from: string, to: string) {
   return path;
 }
 
+function makeAbsoluteImportSpecifier(file: string) {
+  return file.replace(/\\/g, '/');
+}
+
+class Bundle {
+  constructor(private _id: string, private _sourceRoot: string, private _proxyFile: string) {
+  }
+
+  get empty() {
+    return !this._indexModule && this._componentModules.length === 0;
+  }
+
+  get id() {
+    return this._id;
+  }
+
+  get entry() {
+    if (this._entryDirty) {
+      this._entrySource = this._makeEntrySource();
+      this._entryDirty = false;
+    }
+    return this._entrySource;
+  }
+
+  get proxyFile() {
+    return this._proxyFile;
+  }
+
+  /**
+   * @returns True if it cause the bundle's entry changed.
+   */
+  addSourceFile(sourceFile: string): boolean {
+    if (this._sourceFiles.includes(sourceFile)) {
+      logger.warn(`Bundle ${this._id} already includes ${sourceFile}`);
+      return false;
+    }
+    this._sourceFiles.push(sourceFile);
+    if (this._isComponentModule(sourceFile)) {
+      this._componentModules.push(sourceFile);
+      this._invalidateEntry();
+      return true;
+    } else if (this._isIndexModule(sourceFile)) {
+      this._indexModule = sourceFile;
+      this._invalidateEntry();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * @returns True if it cause the bundle's entry changed.
+   */
+  deleteSourceFile(sourceFile: string) {
+    const indexInBundle = this._sourceFiles.indexOf(sourceFile);
+    if (indexInBundle < 0) {
+      return false;
+    }
+    this._sourceFiles.splice(indexInBundle, 1);
+    if (this._indexModule === sourceFile) {
+      this._indexModule = sourceFile;
+      this._invalidateEntry();
+      return true;
+    } else {
+      const componentModuleIndex = this._componentModules.findIndex((m) => m === sourceFile);
+      if (componentModuleIndex >= 0) {
+        this._componentModules.splice(componentModuleIndex, 1);
+        this._invalidateEntry();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private _sourceFiles: string[] = [];
+  private _indexModule = '';
+  private _componentModules: string[] = [];
+  private _entryDirty = true;
+  private _entrySource = '';
+
+  private _isComponentModule(path: string) {
+    return /\.component\.[cm]?[jt]s$/.test(path.toLocaleLowerCase());
+  }
+
+  private _isIndexModule(path: string) {
+    const { dir, name } = parse(path);
+    return dir === this._sourceRoot && /index\.[cm]?[jt]s$/.test(name.toLocaleLowerCase());
+  }
+
+  private _invalidateEntry() {
+    this._entryDirty = true;
+    this._entrySource = '';
+  }
+
+  private _makeEntrySource() {
+    let source = '';
+    if (this._indexModule) {
+      source +=
+        `/// The index module.\n` +
+        `import '${makeAbsoluteImportSpecifier(this._indexModule)}';\n`;
+    }
+    for (const componentModule of this._componentModules) {
+      source += `import '${makeAbsoluteImportSpecifier(componentModule)}';\n`;
+    }
+    // Explicitly mark this as a module.
+    source += `export {};\n`;
+    return source;
+  }
+}
+
 interface InternalBuildOptions {
-  entries: string[],
+  entries: Record<string, string>;
 }
 
 interface BuildResult {
   inferredFiles: string[];
-  affectedFiles: string[];
 }
 
-class BuildRecord extends EventEmitter<{
+class BuildRecord<TBuildExtras> extends EventEmitter<{
   'build-start': [];
-  'build-end': [BuildResult];
+  'build-end': [BuildResult, TBuildExtras];
   'build-failed': [{
     message: string;
     stack?: string;
@@ -223,8 +403,9 @@ class BuildRecord extends EventEmitter<{
     this._cache = undefined;
   }
 
-  rebuild(options: InternalBuildOptions) {
+  rebuild(options: InternalBuildOptions, extras: TBuildExtras) {
     Object.assign(this._buildOptions, options);
+    this._extras = extras;
     this.requestBuild();
   }
 
@@ -242,8 +423,9 @@ class BuildRecord extends EventEmitter<{
   private _outDir: string;
   private _shadowDir: string;
   private _buildOptions: InternalBuildOptions = {
-    entries: [],
+    entries: {},
   };
+  private _extras: TBuildExtras | undefined = undefined;
 
   private _loopBuild() {
     this._nBuildRequests = 0;
@@ -254,11 +436,12 @@ class BuildRecord extends EventEmitter<{
           entries,
           ...passthroughBuildOptions
         } = this._buildOptions;
+        const extras = this._extras;
         const buildResult = await this._doBuild({
-          entries: [...entries],
+          entries: {...entries},
           ...passthroughBuildOptions,
         });
-        this.emit('build-end', buildResult);
+        this.emit('build-end', buildResult, extras!);
       } catch (error) {
         if (error instanceof Error) {
           this.emit('build-failed', {
@@ -286,45 +469,78 @@ class BuildRecord extends EventEmitter<{
       entries,
     } = options;
 
-    if (entries.length === 0) {
+    if (Object.keys(entries).length === 0) {
       logger.debug('No entry found, skip build');
       this._cache = undefined;
       return {
         inferredFiles: [],
-        affectedFiles: [],
       };
     }
 
-    const affectedFiles: string[] = [];
+    const uuidMap: Record<string, string> = {};
+
+    const ENTRY_MODULE_PREFIX = 'oms-entry\0';
+
+    const rollupEntries: Record<string, string> = {};
+    for (const key of Object.keys(entries)) {
+      rollupEntries[key] = ENTRY_MODULE_PREFIX + key;
+    }
 
     const babel = rollupPluginBabel({
-        extensions: [
-          '.js',
-          '.mjs',
-          '.cjs',
-          '.ts',
-          '.mts',
-          '.cts',
-        ],
-        babelHelpers: 'bundled',
-        babelrc: false,
-        skipPreflightCheck: true,
-        plugins: [
-          [babelPluginProposalDecorators, {
-            version: 'legacy',
-          }],
-        ],
-        presets: [
-          [babelPresetEnv, {
-            modules: false,
-            targets: {
-              node: '14',
-            },
-          } satisfies babelPresetEnv.Options],
-        ],
-      });
+      extensions: [
+        '.js',
+        '.mjs',
+        '.cjs',
+        '.ts',
+        '.mts',
+        '.cts',
+      ],
+      babelHelpers: 'bundled',
+      babelrc: false,
+      skipPreflightCheck: true,
+      plugins: [
+        [transformCCComponent({
+          uuidMap,
+        })],
+        [babelPluginProposalDecorators, {
+          version: 'legacy',
+        }],
+      ],
+      presets: [
+        [babelPresetEnv, {
+          modules: false,
+          targets: {
+            node: '14',
+          },
+        } satisfies babelPresetEnv.Options],
+      ],
+    });
 
     const inputPlugins: rollup.Plugin[] = [
+      {
+        name: 'oms:load-entry-modules',
+
+        resolveId(id, parent, info) {
+          if (info.isEntry && id.startsWith(ENTRY_MODULE_PREFIX)) {
+            return id;
+          }
+          return undefined;
+        },
+
+        load(id) {
+          if (id.startsWith(ENTRY_MODULE_PREFIX)) {
+            const entryModuleId = id.slice(ENTRY_MODULE_PREFIX.length);
+            const entryModuleSource = entries[entryModuleId];
+            if (entryModuleSource === undefined) {
+              this.error(`Unknown entry module ${entryModuleId}, where'd it import?`);
+            } else {
+              return entryModuleSource;
+            }
+          }
+          return undefined;
+        },
+      },
+
       rollupPluginCommonJS({
         extensions: [
           '.js',
@@ -336,7 +552,18 @@ class BuildRecord extends EventEmitter<{
         ],
       }),
 
-      rollupPluginNodeResolve(),
+      rollupPluginNodeResolve({
+        extensions: [
+          '.js',
+          '.mjs',
+          '.cjs',
+          '.ts',
+          '.mts',
+          '.cts',
+        ],
+        allowExportsFolderMapping: false,
+        preferBuiltins: false,
+      }),
 
       babel,
 
@@ -365,7 +592,7 @@ class BuildRecord extends EventEmitter<{
 
     const rollupBuild = await rollup.rollup({
       cache: this._cache,
-      input: entries,
+      input: rollupEntries,
       external(source, importer, isResolved) {
         if (['cc', 'cc/env'].includes(source)) {
           return true;
@@ -375,10 +602,9 @@ class BuildRecord extends EventEmitter<{
       plugins: inputPlugins,
     });
 
-    // this._cache = rollupBuild.cache;
+    this._cache = rollupBuild.cache;
 
     const outputPlugins: rollup.Plugin[] = [
-      this._makePluginOmsBuilder(affectedFiles),
     ];
 
     const outputOptions: rollup.OutputOptions = {
@@ -394,43 +620,6 @@ class BuildRecord extends EventEmitter<{
 
     return {
       inferredFiles: rollupBuild.watchFiles,
-      affectedFiles,
-    };
-  }
-
-  private _makePluginOmsBuilder(affectedFiles: string[]): rollup.Plugin {
-    const sourceRoot = this._sourceRoot;
-    const outDir = this._outDir;
-    const shadowDir = this._shadowDir;
-
-    return {
-      name: 'oms-builder',
-
-      async writeBundle(options, bundle) {
-        for (const [name, chunk] of Object.entries(bundle)) {
-          if (chunk.type === 'chunk') {
-            if (chunk.isEntry && !chunk.isImplicitEntry) {
-              if (!chunk.facadeModuleId) {
-                continue;
-              }
-              const relativePath = relative(sourceRoot, chunk.facadeModuleId);
-              if (isAbsolute(relativePath) || relativePath.startsWith('..')) {
-                this.warn(`Entry bundle ${name} is not under source root ${sourceRoot}, skip it`);
-              } else {
-                const shadowPath = resolve(shadowDir, relativePath);
-                fs.ensureDirSync(dirname(shadowPath));
-                const chunkFinalPath = resolve(outDir, chunk.fileName);
-                const specifierToChunk = makeImportSpecifier(dirname(shadowPath), chunkFinalPath);
-                await fs.writeFile(shadowPath, `
-                    /// This is shadow file generated from ${chunk.fileName}
-                    export * from '${specifierToChunk}';
-                    `, 'utf8');
-                affectedFiles.push(shadowPath);
-              }
-            }
-          }
-        }
-      },
     };
   }
 }
