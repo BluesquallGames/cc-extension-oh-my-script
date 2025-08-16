@@ -16,7 +16,7 @@ import EventEmitter from 'node:events';
 import { transformCCComponent, type UUIDProvider } from './features/babel-plugin-cc-component.js';
 import assert from 'node:assert';
 import dedent from 'dedent';
-import { extractInlineUUID, UUIDManager } from './uuid-manager.js';
+import { extractInlineUUID, UUIDManager, writeInlineUUID } from './uuid-manager.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -168,7 +168,7 @@ class OmsWatcher {
     this._queueTask({
       type: 'inlineUUIDs',
       exec: async () => {
-        await this._inlineUUIDs();
+        await this._execInlineUUIDs();
       },
     });
   }
@@ -430,8 +430,23 @@ class OmsWatcher {
     return dir === bundle.sourceRoot && /index\.[cm]?[jt]s$/.test(name.toLocaleLowerCase());
   }
 
-  private async _inlineUUIDs() {
-
+  private async _execInlineUUIDs() {
+    for (const [file, uuid] of this._uuidManager.centralizedModules()) {
+      let code = '';
+      try {
+        code = await fs.readFile(file, 'utf8');
+      } catch (err) {
+        logger.error(`Failed to read file ${file}: %o`, err);
+        continue;
+      }
+      const newCode = writeInlineUUID(code, uuid);
+      try {
+        await fs.writeFile(file, newCode, 'utf8');
+      } catch (err) {
+        logger.error(`Failed to write file ${file}: %o`, err);
+        continue;
+      }
+    }
   }
 }
 

@@ -1,11 +1,12 @@
 import babel from '@babel/core';
+import { basename } from 'node:path';
 
 const templateImport = babel.template.smart(`
 import { cclegacy as %%ccLegacy%% } from 'cc';
 `);
 
 const templatePush = babel.template.smart(`
-%%ccLegacy%%._RF.push(%%uuid%%);
+%%ccLegacy%%._RF.push({}, %%uuid%%, %%filename%%, undefined);
 `);
 
 const templatePop = babel.template.smart(`
@@ -36,6 +37,7 @@ export function transformCCComponent(options: {
           path.unshiftContainer('body', templatePush({
             ccLegacy: ccLegacyId,
             uuid: babel.types.stringLiteral(uuid),
+            filename: babel.types.stringLiteral(basename(filename)),
           }));
           path.unshiftContainer('body', templateImport({
             ccLegacy: ccLegacyId,

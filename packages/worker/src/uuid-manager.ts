@@ -53,6 +53,14 @@ export class UUIDManager {
     return this._map[module]?.uuid;
   }
 
+  *centralizedModules(): Generator<[string, string]> {
+    for (const [k, v] of Object.entries(this._map)) {
+      if (v.centralized) {
+        yield [k, v.uuid];
+      }
+    }
+  }
+
   delete(module: string) {
     return delete this._map[module];
   }
