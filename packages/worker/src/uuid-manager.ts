@@ -129,10 +129,24 @@ export function writeInlineUUID(code: string, uuid: string): string {
   const uuidLine = `/// <meta "uuid"="${uuid}"/>`;
   const info = extractUUIDInternal(code);
   if (!info) {
-    return `${uuidLine}\n${code}`;
+    let out = '';
+    out += uuidLine;
+    out += '\n';
+    if (code && !code.startsWith('\n')) {
+      out += '\n';
+    }
+    out += code;
+    return out;
   } else {
     const lines = info.lines;
-    lines.splice(info.uuidLine, 1, uuidLine);
+    const insertingLines = [uuidLine];
+    if (info.uuidLine > 0 && lines[info.uuidLine - 1] !== '') {
+      insertingLines.unshift('');
+    }
+    if (info.uuidLine < lines.length - 1 && lines[info.uuidLine + 1] !== '') {
+      insertingLines.push('');
+    }
+    lines.splice(info.uuidLine, 1, ...insertingLines);
     return lines.join('\n');
   }
 }

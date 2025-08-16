@@ -336,7 +336,7 @@ class OmsWatcher {
       currentWatchedInferredFiles.add(file);
     }
 
-    await this._uuidManager.saveCentralized(this._getCentralizedUUIDMappingPath());
+    await this._saveCentralizedUUIDs();
   }
 
   private _makeBundleEntryFilenameNoExtension(bundleId: string) {
@@ -356,6 +356,10 @@ class OmsWatcher {
 
   private async _loadCentralizedUUIDs() {
     await this._uuidManager.loadCentralized(this._getCentralizedUUIDMappingPath());
+  }
+
+  private async _saveCentralizedUUIDs() {
+    await this._uuidManager.saveCentralized(this._getCentralizedUUIDMappingPath());
   }
 
   private _getCentralizedUUIDMappingPath() {
@@ -447,6 +451,7 @@ class OmsWatcher {
         continue;
       }
     }
+    await this._saveCentralizedUUIDs();
   }
 }
 
