@@ -372,9 +372,9 @@ class OmsWatcher {
     let entryChanged = false;
     for (const [file, operation] of Object.entries(fileQueue)) {
       if (operation === 'add') {
-        entryChanged ||= await this._addWatchFile(file);
+        entryChanged = (await this._addWatchFile(file)) || entryChanged;
       } else {
-        entryChanged ||= await this._removeWatchFile(file);
+        entryChanged = (await this._removeWatchFile(file)) || entryChanged;
       }
     }
     return entryChanged;
@@ -394,9 +394,9 @@ class OmsWatcher {
       } catch (err) {
         logger.error(`Failed to assign UUID for ${path}: %o`, err);
       }
-      shouldRebuildBundle ||= bundle.addComponentModule(path);
+      shouldRebuildBundle = bundle.addComponentModule(path) || shouldRebuildBundle;
     } else if (this._isIndexModule(bundle, path)) {
-      shouldRebuildBundle ||= bundle.addIndexModule(path);
+      shouldRebuildBundle = bundle.addIndexModule(path) || shouldRebuildBundle;
     }
     return shouldRebuildBundle;
   }
@@ -417,9 +417,9 @@ class OmsWatcher {
     let shouldRebuildBundle = false;
     if (this._isComponentModule(bundle, path)) {
       this._uuidManager.delete(path);
-      shouldRebuildBundle ||= bundle.deleteComponentModule(path);
+      shouldRebuildBundle = bundle.deleteComponentModule(path) || shouldRebuildBundle;
     } else if (this._isIndexModule(bundle, path)) {
-      shouldRebuildBundle ||= bundle.deleteIndexModule(path);
+      shouldRebuildBundle = bundle.deleteIndexModule(path) || shouldRebuildBundle;
     }
     return shouldRebuildBundle;
   }
@@ -450,6 +450,7 @@ class OmsWatcher {
         logger.error(`Failed to write file ${file}: %o`, err);
         continue;
       }
+      this._uuidManager.update(file, uuid);
     }
     await this._saveCentralizedUUIDs();
   }
