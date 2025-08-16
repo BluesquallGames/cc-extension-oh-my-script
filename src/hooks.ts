@@ -59,6 +59,14 @@ async function getContributions(): Promise<Contributions> {
         group: 'operation',
         order: 11,
       },
+
+      {
+        path: menuPath,
+        label: 'Inline UUIDs',
+        message: 'inline-uuids' satisfies keyof typeof workerMessagesContribution,
+        group: 'operation',
+        order: 12,
+      },
     ],
     server: './dist/contributions/server.cjs',
   };

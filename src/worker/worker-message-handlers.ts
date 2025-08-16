@@ -4,11 +4,15 @@ import { workerMessageDescriptions } from './worker-message-descriptions.js';
 const omsBuilderAgent = new OmsBuilderAgent();
 
 export const workerMessageHandlers = {
-  rebuild: async () => {
+  'rebuild': async () => {
     await omsBuilderAgent.rebuild();
   },
 
-  restart: async () => {
+  'restart': async () => {
     await omsBuilderAgent.restart();
+  },
+
+  'inline-uuids': async () => {
+    await omsBuilderAgent.inlineUUIDs();
   },
 } satisfies Record<keyof typeof workerMessageDescriptions, () => Promise<void>>;

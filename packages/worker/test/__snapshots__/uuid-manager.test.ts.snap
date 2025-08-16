@@ -1,0 +1,12 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`extract and update 1`] = `
+"  
+
+ console.log('dummy')
+
+/// <meta "uuid"="56b55876-83c6-4435-aec6-d0e5398b7514"/>
+/// <meta "uuid"="cfd747d9-9b9d-4960-9499-c5de60e8bd64" />
+  
+"
+`;

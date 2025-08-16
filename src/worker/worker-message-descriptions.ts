@@ -1,4 +1,5 @@
 export const workerMessageDescriptions = {
-  rebuild: {},
-  restart: {},
+  'rebuild': {},
+  'restart': {},
+  'inline-uuids': {},
 } as const;

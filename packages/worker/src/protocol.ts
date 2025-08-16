@@ -2,11 +2,13 @@ import { type Serializable } from 'node:child_process';
 import { logger } from './logger.js';
 
 export interface ClientInvocationMap {
-  setup: (options: {
+  'setup': (options: {
     project: string;
   }) => void;
 
-  rebuild: () => void;
+  'rebuild': () => void;
+
+  'inline-uuids': () => void;
 }
 
 export type ClientInvocationMethodId = keyof ClientInvocationMap;

@@ -15,7 +15,11 @@ async function transform(code: string, filename: string | undefined, uuid: strin
     cwd: cwd,
     filename,
     plugins: [
-      transformCCComponent({ uuidMap }),
+      transformCCComponent({
+        uuidProvider(filename) {
+          return uuidMap[filename];
+        },
+      }),
     ],
   });
   if (!transformResult || !transformResult.code) {
@@ -24,7 +28,7 @@ async function transform(code: string, filename: string | undefined, uuid: strin
   return transformResult.code;
 }
 
-describe('transform', async () => {
+void describe('transform', () => {
   const code = dedent`
     import { cclegacy as _ccLegacy } from 'cc';
     console.log('oops?');
@@ -33,15 +37,15 @@ describe('transform', async () => {
   const filename = '_transform';
   const uuid = '123';
 
-  it('well formed', async () => {
+  void it('well formed', async () => {
     await expect(transform(code, filename, uuid)).resolves.matchSnapshot();
   });
 
-  it('lack of filename', async () => {
+  void it('lack of filename', async () => {
     await expect(transform(code, undefined, uuid)).resolves.matchSnapshot();
   });
 
-  it('lack of uuid', async () => {
+  void it('lack of uuid', async () => {
     await expect(transform(code, filename, undefined)).resolves.matchSnapshot();
   });
 });

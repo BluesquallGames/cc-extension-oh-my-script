@@ -12,10 +12,12 @@ const templatePop = babel.template.smart(`
 %%ccLegacy%%._RF.pop();
 `);
 
+export type UUIDProvider = (filename: string) => string | undefined;
+
 export function transformCCComponent(options: {
-  uuidMap: Record<string, string>;
+  uuidProvider: UUIDProvider;
 }): babel.PluginObj {
-  const { uuidMap } = options;
+  const { uuidProvider } = options;
   return {
     name: 'cc-component',
 
@@ -26,7 +28,7 @@ export function transformCCComponent(options: {
           if (!filename) {
             return;
           }
-          const uuid = uuidMap[filename];
+          const uuid = uuidProvider(filename);
           if (!uuid) {
             return;
           }

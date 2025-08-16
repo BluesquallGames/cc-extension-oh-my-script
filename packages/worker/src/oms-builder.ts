@@ -13,9 +13,10 @@ import babelPresetEnv from '@babel/preset-env';
 import babelPresetTypescript from '@babel/preset-typescript';
 import * as chokidar from 'chokidar';
 import EventEmitter from 'node:events';
-import { transformCCComponent } from './features/babel-plugin-cc-component.js';
+import { transformCCComponent, type UUIDProvider } from './features/babel-plugin-cc-component.js';
 import assert from 'node:assert';
 import dedent from 'dedent';
+import { extractInlineUUID, UUIDManager } from './uuid-manager.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -30,31 +31,30 @@ export class OmsBuilder {
     project: string;
   }) {
     this._projectPath = project;
-    this._mainBundleSourceRoot = join(this._projectPath, 'src');
   }
 
   async rebuild() {
     await this._rebuild();
   }
 
+  async inlineUUIDs() {
+    await this._watcher?.inlineUUIDs();
+  }
+
   private _projectPath: string;
-  private _mainBundleSourceRoot: string;
-  private _buildRecord: BuildRecord<BuildExtras> | undefined;
-  private _watcher: chokidar.FSWatcher | undefined;
+  private _watcher: OmsWatcher | undefined;
 
   private async _clean() {
-    await this._buildRecord?.abort();
-    this._buildRecord = undefined;
-    if (this._watcher) {
-      await this._watcher.close();
+    const watcher = this._watcher;
+    if (watcher) {
       this._watcher = undefined;
+      await watcher.close();
     }
   }
 
   private async _rebuild() {
     await this._clean();
 
-    const sourceRoot = this._mainBundleSourceRoot;
     const outDir = resolve(this._projectPath, 'temp', 'oms', 'out');
     await fs.ensureDir(outDir);
     await fs.emptyDir(outDir);
@@ -64,51 +64,49 @@ export class OmsBuilder {
       spaces: 2,
     });
 
+    assert(!this._watcher);
+    this._watcher = new OmsWatcher({
+      projectPath: this._projectPath,
+      outDir,
+      ctx: this._ctx,
+    });
+    await this._watcher.start();
+  }
+}
+
+class OmsWatcher {
+  constructor(options: {
+    projectPath: string;
+    outDir: string;
+    ctx: ServerContext;
+  }) {
+    const {
+      projectPath,
+      outDir,
+      ctx,
+    } = options;
+
+    this._projectPath = projectPath;
+    this._outDir = outDir;
+    this._mainBundleSourceRoot = join(projectPath, 'src');
+    this._ctx = ctx;
+
     const buildRecord = new BuildRecord<BuildExtras>({
       sourceRoot: this._mainBundleSourceRoot,
       outDir,
-      shadowDir: resolve(this._projectPath, 'assets/shadow-source'),
     });
+    this._buildRecord = buildRecord;
 
-    const currentWatchedInferredFiles = new Set<string>();
-    const bundles: Record<string, Bundle> = {};
-    const mainBundle = new Bundle(mainBundleId, this._mainBundleSourceRoot, resolve(this._projectPath, 'assets/oms-index.ts'));
-    bundles[mainBundle.id] = mainBundle;
+    const mainBundle = new Bundle(mainBundleId, this._mainBundleSourceRoot, resolve(projectPath, 'assets/oms-index.ts'));
+    this._bundles[mainBundle.id] = mainBundle;
 
-    let watcherReady = false;
+    const uuidManager = new UUIDManager(this._projectPath);
+    this._uuidManager = uuidManager;
 
-    const makeBundleEntryFilenameNoExtension = (bundleId: string) => {
-      return `bundle-${bundleId}`;
-    };
+    const uuidProvider = uuidManager.get.bind(uuidManager);
+    this._uuidProvider = uuidProvider;
 
-    const build = (entryChanged: boolean) => {
-      if (!watcherReady) {
-        return;
-      }
-
-      if (!entryChanged) {
-        buildRecord.requestBuild();
-        return;
-      }
-
-      const bundleEntries: Record<string, string> = {};
-      const buildExtras: BuildExtras = {
-        bundles: [],
-      };
-      for (const [bundleId, bundle] of Object.entries(bundles)) {
-        if (bundle.empty) {
-          continue;
-        }
-        bundleEntries[makeBundleEntryFilenameNoExtension(bundleId)] = bundle.entry;
-        buildExtras.bundles.push(bundle);
-      }
-
-      buildRecord.rebuild({
-        entries: bundleEntries,
-      }, buildExtras);
-    };
-
-    const watcher = chokidar.watch(sourceRoot, {
+    const watcher = chokidar.watch(this._mainBundleSourceRoot, {
       ignored: (path, stats) => {
         if (stats?.isFile()) {
           if (/\.[mc]?[jt]s$/.test(path.toLocaleLowerCase())) {
@@ -120,11 +118,12 @@ export class OmsBuilder {
       },
       persistent: true,
     });
+    this._fileWatcher = watcher;
     watcher
       .on('ready', () => {
         logger.debug('Watcher ready');
-        watcherReady = true;
-        build(true);
+        this._fileWatcherReady = true;
+        this._queueBuild();
       })
       .on('error', (error) => {
         logger.error('Watcher error: %s', error);
@@ -133,32 +132,18 @@ export class OmsBuilder {
         logger.debug('Watcher event: %s, Path: %s', event, path);
       })
       .on('add', (path) => {
-        if (currentWatchedInferredFiles.has(path)) {
+        if (this._currentWatchedInferredFiles.has(path)) {
           return;
         }
-        const bundleId = this._getBundleId(path);
-        if (!bundleId) {
-          build(false);
-          return;
-        }
-        const bundle = bundles[bundleId];
-        assert.ok(bundle, `Bundle ${bundleId} not found`);
-        const buildEntryChanged = bundle.addSourceFile(path);
-        build(buildEntryChanged);
+        this._fileQueue[path] = 'add';
+        this._queueBuild();
       })
       .on('change', (path) => {
-        build(false);
+        this._queueBuild();
       })
       .on('unlink', (path) => {
-        const bundleId = this._getBundleId(path);
-        if (!bundleId) {
-          build(false);
-          return;
-        }
-        const bundle = bundles[bundleId];
-        assert.ok(bundle, `Bundle ${bundleId} not found`);
-        const bundleEntryChanged = bundle.deleteSourceFile(path);
-        build(bundleEntryChanged);
+        this._fileQueue[path] = 'delete';
+        this._queueBuild();
       })
       .on('addDir', (path) => {
         void 0;
@@ -167,51 +152,86 @@ export class OmsBuilder {
         void 0;
       })
     ;
+  }
 
-    let nBuildEnds = 0;
-    buildRecord.on('build-failed', () => {
-      this._ctx.ipc.invoke('build-failed', {}).catch((err) => {
-        logger.error(err);
-      });
+  async start() {
+    await this._loadCentralizedUUIDs();
+  }
+
+  async close() {
+    await this._fileWatcher.close();
+    this._taskQueue.length = 0;
+    await this._runningPromise;
+  }
+
+  async inlineUUIDs() {
+    this._queueTask({
+      type: 'inlineUUIDs',
+      exec: async () => {
+        await this._inlineUUIDs();
+      },
     });
+  }
 
-    buildRecord.on('build-end', async (buildResult, extras) => {
-      nBuildEnds++;
+  private _projectPath: string;
+  private _outDir: string;
+  private _mainBundleSourceRoot: string;
+  private _ctx: ServerContext;
+  private _uuidManager: UUIDManager;
+  private _uuidProvider: UUIDProvider;
+  private _buildRecord: BuildRecord<BuildExtras>;
+  private _fileWatcher: chokidar.FSWatcher;
+  private _fileWatcherReady = false;
+  private _currentWatchedInferredFiles = new Set<string>();
+  private _nBuildEnds = 0;
+  private _bundles: Record<string, Bundle> = {};
+  private _taskQueue: OmsWatcherTask[] = [];
+  private _runningPromise: Promise<void> | undefined;
+  private _fileQueue: Record<string, 'add' | 'delete'> = {};
 
-      const affectedFiles: string[] = [];
-      for (const bundle of extras.bundles) {
-        const proxyFile = bundle.proxyFile;
-        const bundleEntryOutFile = resolve(outDir, `${makeBundleEntryFilenameNoExtension(bundle.id)}.js`);
-        const proxyFileContent = this._renderProxyFile(proxyFile, bundleEntryOutFile, bundle.id);
-        await fs.outputFile(proxyFile, proxyFileContent, 'utf8');
-        affectedFiles.push(proxyFile);
+  private _queueTask<TTask extends OmsWatcherTask>(task: TTask) {
+    for (const pendingTask of this._taskQueue) {
+      if (pendingTask.type === task.type) {
+        logger.debug(`Task [${task.type}] was pending, merged.`);
+        return;
       }
-      this._ctx.ipc.invoke('build-success', {
-        affectedFiles: [...affectedFiles],
-      }).catch((err) => {
-        logger.error(err);
-      });
+    }
+    logger.debug(`Queue task: [${task.type}]`);
+    this._taskQueue.push(task);
+    if (this._runningPromise) {
+      return;
+    }
+    logger.debug(`Start execute task queue`);
+    this._executeTasks();
+  }
 
-      logger.debug(`[Build x ${nBuildEnds}] Build end, inferred files: %s`, buildResult.inferredFiles);
-      for (const file of currentWatchedInferredFiles) {
-        if (!buildResult.inferredFiles.includes(file)) {
-          logger.debug('Unwatch file: %s', file);
-          watcher.unwatch(file);
+  private _executeTasks() {
+    assert.ok(!this._runningPromise);
+    const tasks = this._taskQueue.slice();
+    this._taskQueue.length = 0;
+    this._runningPromise = (async () => {
+      for (const task of tasks) {
+        try {
+          logger.debug(`Execute task: [${task.type}]`);
+          await task.exec();
+          logger.debug(`Task [${task.type}] done`);
+        } catch (err) {
+          logger.debug(`Task [${task.type}] failed`);
+          logger.error(err);
         }
       }
-      for (const file of buildResult.inferredFiles) {
-        if (!currentWatchedInferredFiles.has(file)) {
-          logger.debug('Watch file: %s', file);
-          watcher.add(file);
+    })()
+      .catch((err) => {
+        logger.error(err);
+      })
+      .finally(() => {
+        this._runningPromise = undefined;
+        if (this._taskQueue.length !== 0) {
+          this._executeTasks();
+        } else {
+          logger.debug('Task queue empty, idling.');
         }
-      }
-      currentWatchedInferredFiles.clear();
-      for (const file of buildResult.inferredFiles) {
-        currentWatchedInferredFiles.add(file);
-      }
-    });
-
-    this._watcher = watcher;
+      });
   }
 
   private _getBundleId(path: string): string | undefined {
@@ -229,6 +249,100 @@ export class OmsBuilder {
     }
   }
 
+  private _queueBuild() {
+    if (!this._fileWatcherReady) {
+      return;
+    }
+    this._queueTask({
+      type: 'build',
+      exec: async () => {
+        await this._execBuild();
+      },
+    });
+  }
+
+  private async _execBuild() {
+    try {
+      const buildResult = await this._doExecBuild();
+      if (buildResult.ok) {
+        await this._onBuildEnd(buildResult.buildResult, buildResult.extras);
+      } else {
+        await this._ctx.ipc.invoke('build-failed', {});
+      }
+    } catch (err) {
+      void err;
+      await this._ctx.ipc.invoke('build-failed', {});
+    }
+  }
+
+  private async _doExecBuild() {
+    const entryChanged = await this._executeFileQueue();
+    if (!entryChanged) {
+      return this._buildRecord.build();
+    }
+
+    const bundleEntries: Record<string, string> = {};
+    const buildExtras: BuildExtras = {
+      bundles: [],
+    };
+    for (const [bundleId, bundle] of Object.entries(this._bundles)) {
+      if (bundle.empty) {
+        continue;
+      }
+      bundleEntries[this._makeBundleEntryFilenameNoExtension(bundleId)] = bundle.entry;
+      buildExtras.bundles.push(bundle);
+    }
+
+    return this._buildRecord.rebuild({
+      entries: bundleEntries,
+      uuidProvider: this._uuidProvider,
+    }, buildExtras);
+  }
+
+  private async _onBuildEnd(buildResult: BuildResult, extras: BuildExtras) {
+    this._nBuildEnds++;
+
+    const affectedFiles: string[] = [];
+    for (const bundle of extras.bundles) {
+      const proxyFile = bundle.proxyFile;
+      const bundleEntryOutFile = resolve(this._outDir, `${this._makeBundleEntryFilenameNoExtension(bundle.id)}.js`);
+      const proxyFileContent = this._renderProxyFile(proxyFile, bundleEntryOutFile, bundle.id);
+      await fs.outputFile(proxyFile, proxyFileContent, 'utf8');
+      affectedFiles.push(proxyFile);
+    }
+    this._ctx.ipc.invoke('build-success', {
+      affectedFiles: [...affectedFiles],
+    }).catch((err) => {
+      logger.error(err);
+    });
+
+    logger.debug(`[Build x ${this._nBuildEnds}] Build end, inferred files: %s`, buildResult.inferredFiles);
+    const currentWatchedInferredFiles = this._currentWatchedInferredFiles;
+    const watcher = this._fileWatcher;
+    for (const file of currentWatchedInferredFiles) {
+      if (!buildResult.inferredFiles.includes(file)) {
+        logger.debug('Unwatch file: %s', file);
+        watcher.unwatch(file);
+      }
+    }
+    for (const file of buildResult.inferredFiles) {
+      if (!currentWatchedInferredFiles.has(file)) {
+        logger.debug('Watch file: %s', file);
+        watcher.add(file);
+      }
+    }
+    currentWatchedInferredFiles.clear();
+    for (const file of buildResult.inferredFiles) {
+      currentWatchedInferredFiles.add(file);
+    }
+
+    await this._uuidManager.saveCentralized(this._getCentralizedUUIDMappingPath());
+  }
+
+  private _makeBundleEntryFilenameNoExtension(bundleId: string) {
+    return `bundle-${bundleId}`;
+  }
+
   private _renderProxyFile(proxyFilePath: string, bundleEntryPath: string, bundleId: string) {
     let source = '';
     source
@@ -239,7 +353,98 @@ export class OmsBuilder {
     source += `import '${makeRelativeImportSpecifier(dirname(proxyFilePath), bundleEntryPath)}';\n`;
     return source;
   }
+
+  private async _loadCentralizedUUIDs() {
+    await this._uuidManager.loadCentralized(this._getCentralizedUUIDMappingPath());
+  }
+
+  private _getCentralizedUUIDMappingPath() {
+    return join(this._projectPath, 'oms', 'uuids.json');
+  }
+
+  private async _executeFileQueue() {
+    const fileQueue = this._fileQueue;
+    this._fileQueue = {};
+    let entryChanged = false;
+    for (const [file, operation] of Object.entries(fileQueue)) {
+      if (operation === 'add') {
+        entryChanged ||= await this._addWatchFile(file);
+      } else {
+        entryChanged ||= await this._removeWatchFile(file);
+      }
+    }
+    return entryChanged;
+  }
+
+  private async _addWatchFile(path: string) {
+    const bundleId = this._getBundleId(path);
+    if (!bundleId) {
+      return false;
+    }
+    const bundle = this._bundles[bundleId];
+    assert.ok(bundle, `Bundle ${bundleId} not found`);
+    let shouldRebuildBundle = false;
+    if (this._isComponentModule(bundle, path)) {
+      try {
+        await this._ensureUUID(path);
+      } catch (err) {
+        logger.error(`Failed to assign UUID for ${path}: %o`, err);
+      }
+      shouldRebuildBundle ||= bundle.addComponentModule(path);
+    } else if (this._isIndexModule(bundle, path)) {
+      shouldRebuildBundle ||= bundle.addIndexModule(path);
+    }
+    return shouldRebuildBundle;
+  }
+
+  private async _ensureUUID(module: string) {
+    const code = await fs.readFile(module, 'utf8');
+    const inlineUUID = extractInlineUUID(code) ?? '';
+    this._uuidManager.update(module, inlineUUID);
+  }
+
+  private _removeWatchFile(path: string) {
+    const bundleId = this._getBundleId(path);
+    if (!bundleId) {
+      return false;
+    }
+    const bundle = this._bundles[bundleId];
+    assert.ok(bundle, `Bundle ${bundleId} not found`);
+    let shouldRebuildBundle = false;
+    if (this._isComponentModule(bundle, path)) {
+      this._uuidManager.delete(path);
+      shouldRebuildBundle ||= bundle.deleteComponentModule(path);
+    } else if (this._isIndexModule(bundle, path)) {
+      shouldRebuildBundle ||= bundle.deleteIndexModule(path);
+    }
+    return shouldRebuildBundle;
+  }
+
+  private _isComponentModule(bundle: Bundle, path: string) {
+    void bundle;
+    return /\.component\.[cm]?[jt]s$/.test(path.toLocaleLowerCase());
+  }
+
+  private _isIndexModule(bundle: Bundle, path: string) {
+    const { dir, name } = parse(path);
+    return dir === bundle.sourceRoot && /index\.[cm]?[jt]s$/.test(name.toLocaleLowerCase());
+  }
+
+  private async _inlineUUIDs() {
+
+  }
 }
+
+type OmsWatcherTask = {
+  type: 'build';
+  exec: () => Promise<void>;
+} | {
+  type: 'rebuild';
+  exec: () => Promise<void>;
+} | {
+  type: 'inlineUUIDs';
+  exec: () => Promise<void>;
+};
 
 interface BuildExtras {
   bundles: Bundle[];
@@ -281,6 +486,10 @@ class Bundle {
     return this._id;
   }
 
+  get sourceRoot() {
+    return this._sourceRoot;
+  }
+
   get entry() {
     if (this._entryDirty) {
       this._entrySource = this._makeEntrySource();
@@ -293,65 +502,47 @@ class Bundle {
     return this._proxyFile;
   }
 
-  /**
-   * @returns True if it cause the bundle's entry changed.
-   */
-  addSourceFile(sourceFile: string): boolean {
-    if (this._sourceFiles.includes(sourceFile)) {
-      logger.warn(`Bundle ${this._id} already includes ${sourceFile}`);
+  addComponentModule(sourceFile: string) {
+    if (this._componentModules.includes(sourceFile)) {
       return false;
     }
-    this._sourceFiles.push(sourceFile);
-    if (this._isComponentModule(sourceFile)) {
-      this._componentModules.push(sourceFile);
-      this._invalidateEntry();
-      return true;
-    } else if (this._isIndexModule(sourceFile)) {
-      this._indexModule = sourceFile;
-      this._invalidateEntry();
-      return true;
-    }
-    return false;
+    this._componentModules.push(sourceFile);
+    this._invalidateEntry();
+    return true;
   }
 
-  /**
-   * @returns True if it cause the bundle's entry changed.
-   */
-  deleteSourceFile(sourceFile: string) {
-    const indexInBundle = this._sourceFiles.indexOf(sourceFile);
-    if (indexInBundle < 0) {
+  deleteComponentModule(sourceFile: string) {
+    const componentModuleIndex = this._componentModules.findIndex((m) => m === sourceFile);
+    if (componentModuleIndex < 0) {
       return false;
     }
-    this._sourceFiles.splice(indexInBundle, 1);
+    this._componentModules.splice(componentModuleIndex, 1);
+    this._invalidateEntry();
+    return true;
+  }
+
+  addIndexModule(sourceFile: string) {
     if (this._indexModule === sourceFile) {
-      this._indexModule = sourceFile;
-      this._invalidateEntry();
-      return true;
-    } else {
-      const componentModuleIndex = this._componentModules.findIndex((m) => m === sourceFile);
-      if (componentModuleIndex >= 0) {
-        this._componentModules.splice(componentModuleIndex, 1);
-        this._invalidateEntry();
-        return true;
-      }
+      return false;
     }
-    return false;
+    this._indexModule = sourceFile;
+    this._invalidateEntry();
+    return true;
   }
 
-  private _sourceFiles: string[] = [];
+  deleteIndexModule(sourceFile: string) {
+    if (this._indexModule !== sourceFile) {
+      return false;
+    }
+    this._indexModule = '';
+    this._invalidateEntry();
+    return true;
+  }
+
   private _indexModule = '';
   private _componentModules: string[] = [];
   private _entryDirty = true;
   private _entrySource = '';
-
-  private _isComponentModule(path: string) {
-    return /\.component\.[cm]?[jt]s$/.test(path.toLocaleLowerCase());
-  }
-
-  private _isIndexModule(path: string) {
-    const { dir, name } = parse(path);
-    return dir === this._sourceRoot && /index\.[cm]?[jt]s$/.test(name.toLocaleLowerCase());
-  }
 
   private _invalidateEntry() {
     this._entryDirty = true;
@@ -376,103 +567,84 @@ class Bundle {
 
 interface InternalBuildOptions {
   entries: Record<string, string>;
+  uuidProvider: UUIDProvider | undefined;
 }
 
 interface BuildResult {
   inferredFiles: string[];
 }
 
-class BuildRecord<TBuildExtras> extends EventEmitter<{
-  'build-start': [];
-  'build-end': [BuildResult, TBuildExtras];
-  'build-failed': [{
-    message: string;
-    stack?: string;
-  }];
-}> {
+class BuildRecord<TBuildExtras> {
   constructor(options: {
     outDir: string;
-    shadowDir: string;
     sourceRoot: string;
   }) {
-    super();
     this._outDir = options.outDir;
-    this._shadowDir = options.shadowDir;
     this._sourceRoot = options.sourceRoot;
   }
 
-  get busy() {
-    return this._isBuilding;
-  }
-
-  async abort() {
-    this._nBuildRequests = 0;
-    this._cache = undefined;
-  }
-
-  rebuild(options: InternalBuildOptions, extras: TBuildExtras) {
+  async rebuild(options: InternalBuildOptions, extras: TBuildExtras) {
     Object.assign(this._buildOptions, options);
     this._extras = extras;
-    this.requestBuild();
+    return await this.build();
   }
 
-  requestBuild() {
-    ++this._nBuildRequests;
-    if (!this._isBuilding) {
-      this._loopBuild();
+  async build(): Promise<{
+    ok: true;
+    buildResult: BuildResult;
+    extras: TBuildExtras;
+  } | {
+    ok: false;
+    message?: string;
+    stack?: string;
+  }> {
+    try {
+      const {
+        entries,
+        ...passthroughBuildOptions
+      } = this._buildOptions;
+      const extras = this._extras;
+      const buildResult = await this._doBuild({
+        entries: { ...entries },
+        ...passthroughBuildOptions,
+      });
+      return {
+        ok: true,
+        buildResult,
+        extras: extras as TBuildExtras,
+      };
+    } catch (error) {
+      logger.debug('Build failed: %o', error);
+      let message = '';
+      let stack: string | undefined;
+      if (error instanceof Error) {
+        if (error instanceof Error && error.name === 'RollupError') {
+          const rollupError = error as rollup.RollupError;
+          message = rollupError.message;
+        } else {
+          message = error.message;
+        }
+        stack = error.stack;
+      } else {
+        message = String(error);
+      }
+      return {
+        ok: false,
+        message,
+        stack,
+      };
     }
   }
 
-  private _nBuildRequests = 0;
-  private _isBuilding: boolean = false;
   private _cache: rollup.RollupCache | undefined;
   private _sourceRoot: string;
   private _outDir: string;
-  private _shadowDir: string;
   private _buildOptions: InternalBuildOptions = {
     entries: {},
+    uuidProvider: undefined,
   };
 
   private _extras: TBuildExtras | undefined = undefined;
-
-  private _loopBuild() {
-    this._nBuildRequests = 0;
-    this._isBuilding = true;
-    (async () => {
-      try {
-        const {
-          entries,
-          ...passthroughBuildOptions
-        } = this._buildOptions;
-        const extras = this._extras;
-        const buildResult = await this._doBuild({
-          entries: { ...entries },
-          ...passthroughBuildOptions,
-        });
-        this.emit('build-end', buildResult, extras!);
-      } catch (error) {
-        if (error instanceof Error) {
-          this.emit('build-failed', {
-            message: error.message,
-            stack: error.stack,
-          });
-        } else {
-          this.emit('build-failed', {
-            message: String(error),
-          });
-        }
-        logger.debug('Build failed: %o', error);
-      }
-    })().then(() => {
-    }).catch((err) => {
-      logger.error(err);
-    }).finally(() => {
-      this._isBuilding = false;
-      if (this._nBuildRequests > 0) {
-        this._loopBuild();
-      }
-    });
-  }
 
   private async _doBuild(options: InternalBuildOptions): Promise<BuildResult> {
     const entries = options.entries;
@@ -494,8 +666,6 @@ class BuildRecord<TBuildExtras> extends EventEmitter<{
     const {
       entries,
     } = options;
-
-    const uuidMap: Record<string, string> = {};
 
     const ENTRY_MODULE_PREFIX = 'oms-entry\0';
 
@@ -550,31 +720,9 @@ class BuildRecord<TBuildExtras> extends EventEmitter<{
       }),
 
       this._makeRollupBabelPlugin({
-        uuidMap,
+        uuidProvider: options.uuidProvider,
         decorators: true,
       }),
-
-      {
-        name: 'oms-builder-input',
-        buildEnd: async (error) => {
-          if (error) {
-            let errorMessage = '';
-            if (error instanceof Error && error.name === 'RollupError') {
-              const rollupError = error as rollup.RollupError;
-              errorMessage = rollupError.message;
-            } else {
-              errorMessage = error.message;
-            }
-            logger.debug('rollup build failed: %s', errorMessage);
-            this.emit('build-failed', {
-              message: errorMessage,
-              stack: error.stack,
-            });
-          } else {
-            logger.debug('Build succeeded');
-          }
-        },
-      },
     ];
 
     const rollupBuild = await rollup.rollup({
@@ -665,28 +813,6 @@ class BuildRecord<TBuildExtras> extends EventEmitter<{
       this._makeRollupBabelPlugin({
         decorators: false,
       }),
-
-      {
-        name: 'oms-builder-input',
-        buildEnd: async (error) => {
-          if (error) {
-            let errorMessage = '';
-            if (error instanceof Error && error.name === 'RollupError') {
-              const rollupError = error as rollup.RollupError;
-              errorMessage = rollupError.message;
-            } else {
-              errorMessage = error.message;
-            }
-            logger.debug('rollup build failed: %s', errorMessage);
-            this.emit('build-failed', {
-              message: errorMessage,
-              stack: error.stack,
-            });
-          } else {
-            logger.debug('Build wrapper part succeeded');
-          }
-        },
-      },
     ];
 
     const rollupBuild = await rollup.rollup({
@@ -716,11 +842,11 @@ class BuildRecord<TBuildExtras> extends EventEmitter<{
   }
 
   private _makeRollupBabelPlugin({
-    uuidMap,
     decorators,
+    uuidProvider,
   }: {
-    uuidMap?: Record<string, string>;
     decorators?: boolean;
+    uuidProvider?: UUIDProvider;
   }) {
     return rollupPluginBabel({
       extensions: [
@@ -735,9 +861,9 @@ class BuildRecord<TBuildExtras> extends EventEmitter<{
       babelrc: false,
       skipPreflightCheck: true,
       plugins: [
-        uuidMap
+        uuidProvider
           ? [transformCCComponent({
-            uuidMap,
+            uuidProvider,
           })]
           : undefined,
         decorators

@@ -45,6 +45,17 @@ export class OmsBuilderAgent {
     await this.rebuild();
   }
 
+  async inlineUUIDs() {
+    switch (this._state) {
+    case State.closing:
+      logger.info('builder agent is not opened');
+      return;
+    }
+
+    const serverAgent = await this._setup();
+    await serverAgent.ipc.invoke('inline-uuids', undefined);
+  }
+
   private _state = State.closed;
   private _setupPromise: Promise<ServerAgent> | undefined = undefined;
 
@@ -106,7 +117,7 @@ export class OmsBuilderAgent {
 
     ipc.listen('build-success', async (changes) => {
       for (const file of changes.affectedFiles) {
-        await Editor.Message.request('asset-db', 'reimport-asset', file)
+        await Editor.Message.request('asset-db', 'reimport-asset', file);
       }
     });
 
