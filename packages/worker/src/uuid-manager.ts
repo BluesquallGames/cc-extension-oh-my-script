@@ -139,14 +139,7 @@ export function writeInlineUUID(code: string, uuid: string): string {
     return out;
   } else {
     const lines = info.lines;
-    const insertingLines = [uuidLine];
-    if (info.uuidLine > 0 && lines[info.uuidLine - 1] !== '') {
-      insertingLines.unshift('');
-    }
-    if (info.uuidLine < lines.length - 1 && lines[info.uuidLine + 1] !== '') {
-      insertingLines.push('');
-    }
-    lines.splice(info.uuidLine, 1, ...insertingLines);
+    lines.splice(info.uuidLine, 1, uuidLine);
     return lines.join('\n');
   }
 }

@@ -28,6 +28,7 @@ it('extract and update', () => {
 void describe('write', () => {
   it('new', () => {
     expect(writeInlineUUID('', uuid)).toMatchSnapshot();
+    expect(writeInlineUUID('console;\n', uuid)).toMatchSnapshot();
   });
 
   const line = `/// <meta "uuid"="${uuid}" />`;

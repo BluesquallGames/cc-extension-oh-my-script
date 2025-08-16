@@ -6,7 +6,6 @@ exports[`extract and update 1`] = `
  console.log('dummy')
 
 /// <meta "uuid"="56b55876-83c6-4435-aec6-d0e5398b7514"/>
-
 /// <meta "uuid"="cfd747d9-9b9d-4960-9499-c5de60e8bd64" />
   
 "
@@ -17,6 +16,13 @@ exports[`new 1`] = `
 "
 `;
 
+exports[`new 2`] = `
+"/// <meta "uuid"="5ebe6607-c90f-49dd-8162-b3096e4b72b2"/>
+
+console;
+"
+`;
+
 exports[`update 1`] = `
 "/// <meta "uuid"="5ebe6607-c90f-49dd-8162-b3096e4b72b2"/>
 "
@@ -24,14 +30,11 @@ exports[`update 1`] = `
 
 exports[`update 2`] = `
 "console;
-
 /// <meta "uuid"="5ebe6607-c90f-49dd-8162-b3096e4b72b2"/>"
 `;
 
 exports[`update 3`] = `
 "console;
-
 /// <meta "uuid"="5ebe6607-c90f-49dd-8162-b3096e4b72b2"/>
-
 console;"
 `;
