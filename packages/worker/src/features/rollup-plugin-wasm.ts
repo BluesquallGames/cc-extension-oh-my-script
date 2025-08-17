@@ -1,6 +1,7 @@
 import { parse, resolve } from 'node:path';
 import type { Plugin } from 'rollup';
 import { makeFileSystemAbsoluteImportSpecifier } from '../utils/import-specifier.js';
+import { format } from 'node:util';
 
 const wasmBinaryPostfix = '?wasm-binary';
 const resolvedWasmBinaryPrefix = '\0oms-wasm-binary-resolved:';
@@ -43,15 +44,38 @@ export function rollupPluginWasm(opts: {
       if (id.endsWith('.wasm')) {
         const helper = resolve(import.meta.dirname, '../../injections/wasm-helper.ts');
         const parsedPath = parse(id);
+        const wasmBinary = await this.fs.readFile(id);
+        let wasmModule: WebAssembly.Module;
+        try {
+          wasmModule = await WebAssembly.compile(wasmBinary);
+        } catch (err) {
+          return this.error(format(`Failed to compile WebAssembly module ${id}: %o`, err));
+        }
+        const imports = WebAssembly.Module.imports(wasmModule);
+        const importModules = new Set<string>();
+        for (const imp of imports) {
+          importModules.add(imp.module);
+        }
         const ref = this.emitFile({
           type: 'asset',
           name: `${parsedPath.name}.wasm`,
-          source: await this.fs.readFile(id),
+          source: wasmBinary,
         });
+        const importModuleSpecifiers = [...importModules];
         return [
           `// WebAssembly binary ${id}`,
           `import { importWasmInstance } from '${makeFileSystemAbsoluteImportSpecifier(helper)}';`,
-          `export default (await importWasmInstance(import.meta.ROLLUP_FILE_URL_${ref}))`,
+          ...importModuleSpecifiers.map((m, i) => {
+            return `import * as imp_${i} from '${m}';\n`;
+          }),
+          '',
+          `const imports = {`,
+          ...importModuleSpecifiers.map((m, i) => {
+            return `  '${m}': imp_${i},`;
+          }),
+          `};`,
+          '',
+          `export default (await importWasmInstance(import.meta.ROLLUP_FILE_URL_${ref}, imports))`,
         ].join('\n') + '\n';
       }
     },

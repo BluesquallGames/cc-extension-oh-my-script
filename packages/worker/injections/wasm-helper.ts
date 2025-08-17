@@ -1,7 +1,25 @@
+import { EDITOR, HTML5 } from 'cc/env';
+
 export async function importWasmBinary(input: string) {
 
 }
 
-export async function importWasmInstance(input: string) {
-  console.log(input);
+export async function importWasmInstance(input: string, imports?: WebAssembly.Imports) {
+  if (EDITOR) {
+    const r = require;
+    const ps = r('path');
+    const fs = r('fs/promises');
+    const { fileURLToPath } = r('url');
+    const binary = await fs.readFile(fileURLToPath(input));
+    const module = await WebAssembly.compile(binary);
+    return await WebAssembly.instantiate(module, imports);
+  } else if (HTML5) {
+    const response = await fetch(input);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch wasm file: ${input}`);
+    }
+    return (await WebAssembly.instantiateStreaming(response, imports)).instance;
+  } else {
+    throw new Error(`Unknown platform to import wasm instance: ${input}`);
+  }
 }
