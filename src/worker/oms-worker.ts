@@ -1,6 +1,7 @@
 import EventEmitter from 'node:events';
 import { resolve } from 'node:path';
 import { logger } from '../logger.js';
+import { workerMessageDescriptions } from './worker-message-descriptions.js';
 
 export class OmsWorker {
   constructor(private _nodeWorker: CreatorWorker) {
@@ -14,7 +15,7 @@ export class OmsWorker {
     this._nodeWorker.debug(true);
   }
 
-  async request(method: string, ...args: unknown[]) {
+  async request<TMethod extends keyof typeof workerMessageDescriptions>(method: TMethod, ...args: unknown[]) {
     logger.debug(`Request to worker "${method}", with arguments: [${args.join(', ')}]`);
     const result = await this._nodeWorker.send(method, ...args);
     console.debug(`Response from worker "${method}": ${result}`);

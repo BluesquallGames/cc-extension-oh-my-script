@@ -19,6 +19,7 @@ export async function startWorker() {
     preload: requireFile,
   });
   globalOmsWorker = new OmsWorker(worker);
+  await globalOmsWorker.request('rebuild');
 }
 
 export async function openOmsDevtools() {
@@ -31,7 +32,7 @@ export const workerMethods = Object.fromEntries(Object.keys(workerMessageDescrip
     workerMessageName,
     async (...args: unknown[]) => {
       const omsWorker = ensureOmsWorker();
-      return await omsWorker.request(workerMessageName, ...args);
+      return await omsWorker.request(workerMessageName as keyof typeof workerMessageDescriptions, ...args);
     },
   ];
 })) as {
