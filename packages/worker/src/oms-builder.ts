@@ -132,7 +132,7 @@ class OmsWatcher {
         logger.debug('Watcher event: %s, Path: %s', event, path);
       })
       .on('add', (path) => {
-        if (this._currentWatchedInferredFiles.has(path)) {
+        if (this._passiveWatchedFiles.has(path)) {
           return;
         }
         this._fileQueue[path] = 'add';
@@ -182,7 +182,7 @@ class OmsWatcher {
   private _buildRecord: BuildRecord<BuildExtras>;
   private _fileWatcher: chokidar.FSWatcher;
   private _fileWatcherReady = false;
-  private _currentWatchedInferredFiles = new Set<string>();
+  private _passiveWatchedFiles = new Set<string>();
   private _nBuildEnds = 0;
   private _bundles: Record<string, Bundle> = {};
   private _taskQueue: OmsWatcherTask[] = [];
@@ -284,6 +284,7 @@ class OmsWatcher {
     const bundleEntries: Record<string, string> = {};
     const buildExtras: BuildExtras = {
       bundles: [],
+      entryFiles: new Set(),
     };
     for (const [bundleId, bundle] of Object.entries(this._bundles)) {
       if (bundle.empty) {
@@ -291,6 +292,9 @@ class OmsWatcher {
       }
       bundleEntries[this._makeBundleEntryFilenameNoExtension(bundleId)] = bundle.entry;
       buildExtras.bundles.push(bundle);
+      for (const file of bundle.entryFiles()) {
+        buildExtras.entryFiles.add(file);
+      }
     }
 
     return this._buildRecord.rebuild({
@@ -317,23 +321,24 @@ class OmsWatcher {
     });
 
     logger.debug(`[Build x ${this._nBuildEnds}] Build end, inferred files: %s`, buildResult.inferredFiles);
-    const currentWatchedInferredFiles = this._currentWatchedInferredFiles;
+    const passiveWatchedFiles = this._passiveWatchedFiles;
     const watcher = this._fileWatcher;
-    for (const file of currentWatchedInferredFiles) {
+    for (const file of passiveWatchedFiles) {
       if (!buildResult.inferredFiles.includes(file)) {
         logger.debug('Unwatch file: %s', file);
         watcher.unwatch(file);
       }
     }
     for (const file of buildResult.inferredFiles) {
-      if (!currentWatchedInferredFiles.has(file)) {
-        logger.debug('Watch file: %s', file);
-        watcher.add(file);
+      if (passiveWatchedFiles.has(file)) {
+        continue;
       }
-    }
-    currentWatchedInferredFiles.clear();
-    for (const file of buildResult.inferredFiles) {
-      currentWatchedInferredFiles.add(file);
+      if (extras.entryFiles.has(file)) {
+        continue;
+      }
+      logger.debug('Passive watch file: %s', file);
+      watcher.add(file);
+      passiveWatchedFiles.add(file);
     }
 
     await this._saveCentralizedUUIDs();
@@ -430,8 +435,10 @@ class OmsWatcher {
   }
 
   private _isIndexModule(bundle: Bundle, path: string) {
-    const { dir, name } = parse(path);
-    return dir === bundle.sourceRoot && /index\.[cm]?[jt]s$/.test(name.toLocaleLowerCase());
+    const { dir, name, ext } = parse(path);
+    return dir === bundle.sourceRoot
+      && /^\.[cm]?[jt]s$/.test(ext.toLowerCase())
+      && name.toLocaleLowerCase() === 'index';
   }
 
   private async _execInlineUUIDs() {
@@ -469,6 +476,7 @@ type OmsWatcherTask = {
 
 interface BuildExtras {
   bundles: Bundle[];
+  entryFiles: Set<string>;
 }
 
 function* readDirRecurse(root: string, current: string = ''): Generator<string> {
@@ -521,6 +529,15 @@ class Bundle {
 
   get proxyFile() {
     return this._proxyFile;
+  }
+
+  entryFiles() {
+    const files: string[] = [];
+    if (this._indexModule) {
+      files.push(this._indexModule);
+    }
+    files.push(...this._componentModules);
+    return files;
   }
 
   addComponentModule(sourceFile: string) {
