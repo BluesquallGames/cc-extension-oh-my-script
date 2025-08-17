@@ -34,10 +34,17 @@ export function rollupPluginWasm(opts: {
       if (id.startsWith(resolvedWasmBinaryPrefix)) {
         const resolved = id.slice(resolvedWasmBinaryPrefix.length);
         const helper = resolve(import.meta.dirname, '../../injections/wasm-helper.ts');
+        const parsedPath = parse(resolved);
+        const wasmBinary = await this.fs.readFile(resolved);
+        const ref = this.emitFile({
+          type: 'asset',
+          name: `${parsedPath.name}.wasm`,
+          source: wasmBinary,
+        });
         return [
           `// WebAssembly binary ${resolved}`,
           `import { importWasmBinary } from '${makeFileSystemAbsoluteImportSpecifier(helper)}';`,
-          `export default (await importWasmBinary())`,
+          `export default (await importWasmBinary(import.meta.ROLLUP_FILE_URL_${ref}))`,
         ].join('\n') + '\n';
       }
 
