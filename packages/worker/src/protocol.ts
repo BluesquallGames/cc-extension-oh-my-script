@@ -20,7 +20,10 @@ export interface ServerInvocationMap {
     affectedFiles: string[];
   }) => void;
 
-  'build-failed': (error: {}) => void;
+  'build-failed': (error: {
+    message: string;
+    stack?: string;
+  }) => void;
 }
 
 export type ServerInvocationMethodId = keyof ServerInvocationMap;

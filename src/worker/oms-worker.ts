@@ -8,7 +8,23 @@ export class OmsWorker {
     _nodeWorker.win.webContents.on('did-finish-load', () => {
       _nodeWorker.require(resolve(__dirname, 'worker/worker-entry-prelude.cjs'));
       _nodeWorker.require(resolve(__dirname, 'worker/worker-entry.cjs'));
+      this._ready = true;
+      const readyPromiseWithResolvers = this._readyPromiseWithResolvers;
+      this._readyPromiseWithResolvers = undefined;
+      if (readyPromiseWithResolvers) {
+        readyPromiseWithResolvers.resolve();
+      }
     });
+  }
+
+  async ready() {
+    if (this._ready) {
+      return;
+    }
+    if (!this._readyPromiseWithResolvers) {
+      this._readyPromiseWithResolvers = promiseWithResolvers();
+    }
+    return this._readyPromiseWithResolvers.promise;
   }
 
   openDevtools() {
@@ -21,6 +37,9 @@ export class OmsWorker {
     console.debug(`Response from worker "${method}": ${result}`);
     return result;
   }
+
+  private _readyPromiseWithResolvers: PromiseWithResolvers<void> | undefined;
+  private _ready = false;
 }
 
 interface CreatorWorker {
@@ -33,4 +52,24 @@ interface CreatorWorker {
   require(module: string): void;
 
   send(method: string, ...args: unknown[]): Promise<unknown>;
+}
+
+interface PromiseWithResolvers<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+}
+
+function promiseWithResolvers<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolve_, reject_) => {
+    resolve = resolve_;
+    reject = reject_;
+  });
+  return {
+    promise,
+    resolve,
+    reject,
+  };
 }

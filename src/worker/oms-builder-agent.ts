@@ -111,8 +111,12 @@ export class OmsBuilderAgent {
       ipc.dispatch(message as InvocationMessage);
     });
 
-    ipc.listen('build-failed', async (changes) => {
-      // ...
+    ipc.listen('build-failed', async (err) => {
+      let m = err.message;
+      if (err.stack) {
+        m += `\n${err.stack}`;
+      }
+      logger.error(m);
     });
 
     ipc.listen('build-success', async (changes) => {

@@ -19,6 +19,7 @@ export async function startWorker() {
     preload: requireFile,
   });
   globalOmsWorker = new OmsWorker(worker);
+  await globalOmsWorker.ready();
   await globalOmsWorker.request('rebuild');
 }
 

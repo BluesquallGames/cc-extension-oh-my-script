@@ -17,6 +17,9 @@ import { transformCCComponent, type UUIDProvider } from './features/babel-plugin
 import assert from 'node:assert';
 import dedent from 'dedent';
 import { extractInlineUUID, UUIDManager, writeInlineUUID } from './uuid-manager.js';
+import { format } from 'node:util';
+import { rollupPluginWasm } from './features/rollup-plugin-wasm.js';
+import { makeFileSystemAbsoluteImportSpecifier, makeFileSystemRelativeImportSpecifier } from './utils/import-specifier.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -267,11 +270,15 @@ class OmsWatcher {
       if (buildResult.ok) {
         await this._onBuildEnd(buildResult.buildResult, buildResult.extras);
       } else {
-        await this._ctx.ipc.invoke('build-failed', {});
+        await this._ctx.ipc.invoke('build-failed', {
+          message: buildResult.message,
+          stack: buildResult.stack,
+        });
       }
     } catch (err) {
-      void err;
-      await this._ctx.ipc.invoke('build-failed', {});
+      await this._ctx.ipc.invoke('build-failed', {
+        message: format('%o', err),
+      });
     }
   }
 
@@ -355,7 +362,7 @@ class OmsWatcher {
         + `/// It serves as entry of bundle ${bundleId}.\n`
         + `/// Neither don't edit it, nor add it into version control system(eg. Git).\n`
         + `\n`;
-    source += `import '${makeRelativeImportSpecifier(dirname(proxyFilePath), bundleEntryPath)}';\n`;
+    source += `import '${makeFileSystemRelativeImportSpecifier(dirname(proxyFilePath), bundleEntryPath)}';\n`;
     return source;
   }
 
@@ -491,18 +498,6 @@ function* readDirRecurse(root: string, current: string = ''): Generator<string> 
   }
 }
 
-function makeRelativeImportSpecifier(from: string, to: string) {
-  let path = relative(from, to).replace(/\\/g, '/');
-  if (path.startsWith('./')) {
-    path = './' + path;
-  }
-  return path;
-}
-
-function makeAbsoluteImportSpecifier(file: string) {
-  return file.replace(/\\/g, '/');
-}
-
 class Bundle {
   constructor(private _id: string, private _sourceRoot: string, private _proxyFile: string) {
   }
@@ -592,10 +587,10 @@ class Bundle {
     if (this._indexModule) {
       source
         += `/// The index module.\n`
-          + `import '${makeAbsoluteImportSpecifier(this._indexModule)}';\n`;
+          + `import '${makeFileSystemAbsoluteImportSpecifier(this._indexModule)}';\n`;
     }
     for (const componentModule of this._componentModules) {
-      source += `import '${makeAbsoluteImportSpecifier(componentModule)}';\n`;
+      source += `import '${makeFileSystemAbsoluteImportSpecifier(componentModule)}';\n`;
     }
     // Explicitly mark this as a module.
     source += `export {};\n`;
@@ -633,7 +628,7 @@ class BuildRecord<TBuildExtras> {
     extras: TBuildExtras;
   } | {
     ok: false;
-    message?: string;
+    message: string;
     stack?: string;
   }> {
     try {
@@ -737,6 +732,8 @@ class BuildRecord<TBuildExtras> {
         },
       },
 
+      rollupPluginWasm({}),
+
       rollupPluginCommonJS({
         extensions: [
           '.js',
@@ -783,8 +780,9 @@ class BuildRecord<TBuildExtras> {
     const outputOptions: rollup.OutputOptions = {
       dir: join(this._outDir, 'shadow'),
       format: 'systemjs',
-      chunkFileNames: '_chunks/[name]-[hash].js',
       entryFileNames: '[name].js',
+      chunkFileNames: '_chunks/[name]-[hash].js',
+      assetFileNames: '_assets/[name]-[hash][extname]',
       sourcemap: true,
       plugins: outputPlugins,
       manualChunks(id) {
@@ -930,7 +928,7 @@ class BuildRecord<TBuildExtras> {
     const loaderModule = resolve(import.meta.dirname, '../injections/loader.ts');
     let source = '';
     source += dedent`
-    import { load } from '${makeAbsoluteImportSpecifier(loaderModule)}';;
+    import { load } from '${makeFileSystemAbsoluteImportSpecifier(loaderModule)}';;
     await load('shadow/${opts.entryModule}');\n
     export {};\n
     `;
