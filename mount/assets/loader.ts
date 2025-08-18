@@ -74,6 +74,30 @@ if (EDITOR) {
     }
     return vendorInstantiate.call(this, id, parentURL, ...args);
   };
+} else {
+  const systemJSPrototype = System.constructor.prototype;
+
+  let omsHostBaseURLPrefix = '';
+  if (HTML5) {
+    omsHostBaseURLPrefix = new URL('./oms/', window.location.href).href;
+  } else {
+    omsHostBaseURLPrefix = `project:/oms/`;
+  }
+
+  const vendorResolve = systemJSPrototype.resolve;
+  systemJSPrototype.resolve = function (id: string, ...args: unknown[]) {
+    if (id.startsWith(omsURLPrefix)) {
+      const subpath = id.slice(omsURLPrefix.length);
+      return `${omsHostBaseURLPrefix}${subpath}`;
+    }
+    return vendorResolve.call(this, id, ...args);
+  };
+
+  // const vendorInstantiate = systemJSPrototype.instantiate;
+  // systemJSPrototype.instantiate = function (id: string, parentURL: string | undefined, ...args: unknown[]) {
+  //   if (id.startsWith(omsHostBaseURLPrefix)) {
+  //   }
+  // };
 }
 
 async function prepareInEditor(id: string, parent: string) {
@@ -100,9 +124,5 @@ export async function load(id: string, parent: string) {
 }
 
 export async function loadBundleEntry(bundleId: string, parent: string) {
-  if (BUILD) {
-    return await import(`/assets/${bundleId}/index.js`);
-  } else {
-    return await import(`${omsURLPrefix}bundle-${bundleId}.js`);
-  }
+  return await import(`${omsURLPrefix}bundle-${bundleId}.js`);
 }
