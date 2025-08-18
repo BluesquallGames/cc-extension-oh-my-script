@@ -1,15 +1,24 @@
-import { HTML5, PREVIEW, EDITOR } from 'cc/env';
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="../../../../temp/declarations/cc.env.d.ts"/>
+
+import { HTML5, PREVIEW, EDITOR, BUILD } from 'cc/env';
 
 let omsBaseDir = '';
+const omsURLPrefix = 'oms:///';
 
 if (EDITOR) {
   const r = require;
   const ps = r('path');
-  const urlModule = r('url');
+  const {
+    URL,
+    pathToFileURL,
+    fileURLToPath,
+  } = r('url');
   omsBaseDir = ps.join(Editor.Project.tmpDir, 'oms/out', ps.sep);
-  const omsBaseURL = urlModule.pathToFileURL(omsBaseDir);
+  const omsBaseURL = pathToFileURL(omsBaseDir);
 
   interface OmsSystemInfo {
+    vendorResolve: (specifier: string, parent?: string) => Promise<void>;
     vendorInstantiate: () => void;
     instantiatedModules: string[];
   }
@@ -24,15 +33,25 @@ if (EDITOR) {
     oldSystemInfo.instantiatedModules.length = 0;
   }
 
+  const vendorResolve = oldSystemInfo?.vendorResolve ?? systemJSPrototype.resolve;
   const vendorInstantiate = oldSystemInfo?.vendorInstantiate ?? systemJSPrototype.instantiate;
   const omsSystemInfo = systemJSPrototype[omsSymbol] = {
-    integrity: import.meta,
     instantiatedModules: [],
     vendorInstantiate,
+    vendorResolve,
   } as OmsSystemInfo;
+
+  systemJSPrototype.resolve = function (id: string, ...args: unknown[]) {
+    if (id.startsWith(omsURLPrefix)) {
+      const subpath = id.slice(omsURLPrefix.length);
+      return new URL('./' + subpath, omsBaseURL).href;
+    }
+    return vendorResolve.call(this, id, ...args);
+  };
+
   systemJSPrototype.instantiate = function (id: string, parentURL: string | undefined, ...args: unknown[]) {
     if (id.startsWith(omsBaseURL)) {
-      const path = urlModule.fileURLToPath(id);
+      const path = fileURLToPath(id);
       const register_vendor = systemJSPrototype.register;
       let register: unknown[] | undefined;
       systemJSPrototype.register = function (dependencies: unknown, declare: unknown) {
@@ -78,4 +97,12 @@ export async function load(id: string, parent: string) {
     specifier = await prepareInWeb(id, parent);
   }
   await import(specifier);
+}
+
+export async function loadBundleEntry(bundleId: string, parent: string) {
+  if (BUILD) {
+    return await import(`/assets/${bundleId}/index.js`);
+  } else {
+    return await import(`${omsURLPrefix}bundle-${bundleId}.js`);
+  }
 }

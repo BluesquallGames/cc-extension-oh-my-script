@@ -33,7 +33,7 @@ export function rollupPluginWasm(opts: {
     async load(id) {
       if (id.startsWith(resolvedWasmBinaryPrefix)) {
         const resolved = id.slice(resolvedWasmBinaryPrefix.length);
-        const helper = resolve(import.meta.dirname, '../../injections/wasm-helper.ts');
+        const helper = resolve(import.meta.dirname, '../../helpers/wasm-helper.ts');
         const parsedPath = parse(resolved);
         const wasmBinary = await this.fs.readFile(resolved);
         const ref = this.emitFile({
@@ -49,7 +49,7 @@ export function rollupPluginWasm(opts: {
       }
 
       if (id.endsWith('.wasm')) {
-        const helper = resolve(import.meta.dirname, '../../injections/wasm-helper.ts');
+        const helper = resolve(import.meta.dirname, '../../helpers/wasm-helper.ts');
         const parsedPath = parse(id);
         const wasmBinary = await this.fs.readFile(id);
         let wasmModule: WebAssembly.Module;

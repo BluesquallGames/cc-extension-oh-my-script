@@ -25,8 +25,13 @@ async function getContributions(): Promise<Contributions> {
   const menuPath = 'Oh My Script!';
 
   return {
-    builder: './dist/contributions/builder/index.cjs',
-    messages: {
+    'asset-db': {
+      mount: {
+        path: './mount/assets',
+      },
+    },
+    'builder': './dist/contributions/builder/index.cjs',
+    'messages': {
       'open-devtools': {
         methods: ['open-devtools'],
       },
@@ -36,7 +41,7 @@ async function getContributions(): Promise<Contributions> {
         methods: x[];
       }
     },
-    menu: [
+    'menu': [
       {
         path: menuPath,
         label: 'Open OMS Devtools',
@@ -69,6 +74,6 @@ async function getContributions(): Promise<Contributions> {
         order: 12,
       },
     ],
-    server: './dist/contributions/server.cjs',
+    'server': './dist/contributions/server.cjs',
   };
 }

@@ -1,11 +1,17 @@
 export interface Contributions {
   'asset-db'?: {
-    'script': string;
-    'asset-handler': Array<{
+    'script'?: string;
+
+    'asset-handler'?: Array<{
       handler: string;
       name: string;
       extnames: string[];
     }>;
+
+    'mount'?: {
+      path: string;
+      readonly?: boolean;
+    };
   };
 
   'builder'?: string;

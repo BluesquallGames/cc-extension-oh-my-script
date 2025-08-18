@@ -1,6 +1,6 @@
 {
   "include": ["src"],
-  "exclude": ["packages"],
+  "exclude": ["packages", "mount"],
   "compilerOptions": {
     "target": "es2020",
     "module": "esnext",
