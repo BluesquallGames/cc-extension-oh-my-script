@@ -1,0 +1,6 @@
+import { selfExtensionName } from '../self-info.js';
+import { WorkerMessageId, WorkerMessageSignature } from '../worker/worker-message-descriptions.js';
+
+export async function requestSelfWorkerMessage<TMessageId extends WorkerMessageId>(messageId: TMessageId, ...args: Parameters<WorkerMessageSignature<TMessageId>>) {
+  return Editor.Message.request(selfExtensionName, messageId, ...args);
+}

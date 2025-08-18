@@ -32,7 +32,7 @@ export class OmsBuilderAgent {
   async rebuild() {
     switch (this._state) {
     case State.closing:
-      logger.info('builder agent is not opened');
+      logger.error('builder agent is not opened');
       return;
     }
 
@@ -48,12 +48,27 @@ export class OmsBuilderAgent {
   async inlineUUIDs() {
     switch (this._state) {
     case State.closing:
-      logger.info('builder agent is not opened');
+      logger.error('builder agent is not opened');
       return;
     }
 
     const serverAgent = await this._setup();
     await serverAgent.ipc.invoke('inline-uuids', undefined);
+  }
+
+  async buildProd(opts: {
+    buildDir: string;
+    debug: boolean;
+    sourceMaps: boolean | 'inline';
+  }) {
+    switch (this._state) {
+    case State.closing:
+      logger.error('builder agent is not opened');
+      return;
+    }
+
+    const serverAgent = await this._setup();
+    await serverAgent.ipc.invoke('build-prod', opts);
   }
 
   private _state = State.closed;

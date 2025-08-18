@@ -20,6 +20,8 @@ import { extractInlineUUID, UUIDManager, writeInlineUUID } from './uuid-manager.
 import { format } from 'node:util';
 import { rollupPluginWasm } from './features/rollup-plugin-wasm.js';
 import { makeFileSystemAbsoluteImportSpecifier, makeFileSystemRelativeImportSpecifier } from './utils/import-specifier.js';
+import type { InvocationParams } from './protocol.js';
+import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -42,6 +44,10 @@ export class OmsBuilder {
 
   async inlineUUIDs() {
     await this._watcher?.inlineUUIDs();
+  }
+
+  async buildProd(opts: InvocationParams<'build-prod'>) {
+    await this._watcher?.buildProd(opts);
   }
 
   private _projectPath: string;
@@ -75,6 +81,10 @@ export class OmsBuilder {
     });
     await this._watcher.start();
   }
+
+  private _makeBundleEntryFilenameNoExtension(bundleId: string) {
+    return `bundle-${bundleId}`;
+  }
 }
 
 class OmsWatcher {
@@ -95,7 +105,6 @@ class OmsWatcher {
     this._ctx = ctx;
 
     const buildRecord = new BuildRecord<BuildExtras>({
-      sourceRoot: this._mainBundleSourceRoot,
       outDir,
     });
     this._buildRecord = buildRecord;
@@ -176,6 +185,47 @@ class OmsWatcher {
     });
   }
 
+  async buildProd(opts: InvocationParams<'build-prod'>) {
+    logger.debug(`Performing production build. Options: %o`, opts);
+
+    const outDir = join(opts.buildDir, 'oms');
+
+    const buildRecord = new BuildRecord<void>({
+      outDir,
+      wrapperPartFormat: 'system',
+      sourceMaps: opts.sourceMaps,
+      debug: opts.debug,
+    });
+
+    await this._queueTask({
+      type: 'build-prod',
+
+      exec: async () => {
+        const bundles = this._bundles;
+
+        const bundleEntries: Record<string, string> = {};
+        for (const [bundleId, bundle] of Object.entries(bundles)) {
+          if (bundle.empty) {
+            continue;
+          }
+          bundleEntries[this._makeBundleEntryFilenameNoExtension(bundleId)] = bundle.entry;
+        }
+
+        await buildRecord.rebuild({
+          entries: bundleEntries,
+          uuidProvider: this._uuidProvider,
+        }, undefined);
+
+        for (const bundle of Object.values(bundles)) {
+          const proxyFile = bundle.proxyFile;
+          const bundleEntryOutFile = resolve(outDir, `${this._makeBundleEntryFilenameNoExtension(bundle.id)}.js`);
+          // const proxyFileContent = this._renderProxyFile(proxyFile, bundleEntryOutFile, bundle.id);
+          // await fs.outputFile(proxyFile, proxyFileContent, 'utf8');
+        }
+      },
+    });
+  }
+
   private _projectPath: string;
   private _outDir: string;
   private _mainBundleSourceRoot: string;
@@ -188,7 +238,10 @@ class OmsWatcher {
   private _passiveWatchedFiles = new Set<string>();
   private _nBuildEnds = 0;
   private _bundles: Record<string, Bundle> = {};
-  private _taskQueue: OmsWatcherTask[] = [];
+  private _taskQueue: (OmsWatcherTask & {
+    execPromiseWithResolvers: PromiseWithResolvers<void>;
+  })[] = [];
+
   private _runningPromise: Promise<void> | undefined;
   private _fileQueue: Record<string, 'add' | 'delete'> = {};
 
@@ -196,16 +249,20 @@ class OmsWatcher {
     for (const pendingTask of this._taskQueue) {
       if (pendingTask.type === task.type) {
         logger.debug(`Task [${task.type}] was pending, merged.`);
-        return;
+        return pendingTask.execPromiseWithResolvers.promise;
       }
     }
     logger.debug(`Queue task: [${task.type}]`);
-    this._taskQueue.push(task);
-    if (this._runningPromise) {
-      return;
+    const execPromiseWithResolvers = promiseWithResolvers<void>();
+    this._taskQueue.push({
+      ...task,
+      execPromiseWithResolvers: execPromiseWithResolvers,
+    });
+    if (!this._runningPromise) {
+      logger.debug(`Start execute task queue`);
+      this._executeTasks();
     }
-    logger.debug(`Start execute task queue`);
-    this._executeTasks();
+    return execPromiseWithResolvers.promise;
   }
 
   private _executeTasks() {
@@ -217,10 +274,12 @@ class OmsWatcher {
         try {
           logger.debug(`Execute task: [${task.type}]`);
           await task.exec();
+          task.execPromiseWithResolvers.resolve();
           logger.debug(`Task [${task.type}] done`);
         } catch (err) {
           logger.debug(`Task [${task.type}] failed`);
           logger.error(err);
+          task.execPromiseWithResolvers.reject(err);
         }
       }
     })()
@@ -239,17 +298,6 @@ class OmsWatcher {
 
   private _getBundleId(path: string): string | undefined {
     return mainBundleId;
-  }
-
-  private *_listEntries(sourceRoot: string) {
-    if (!fs.existsSync(sourceRoot)) {
-      return;
-    }
-    for (const entry of readDirRecurse(sourceRoot)) {
-      if (/\.[cm]?[jt]s$/.test(entry)) {
-        yield join(sourceRoot, entry);
-      }
-    }
   }
 
   private _queueBuild() {
@@ -470,6 +518,17 @@ class OmsWatcher {
   }
 }
 
+function* listEntries(sourceRoot: string) {
+  if (!fs.existsSync(sourceRoot)) {
+    return;
+  }
+  for (const entry of readDirRecurse(sourceRoot)) {
+    if (/\.[cm]?[jt]s$/.test(entry)) {
+      yield join(sourceRoot, entry);
+    }
+  }
+}
+
 type OmsWatcherTask = {
   type: 'build';
   exec: () => Promise<void>;
@@ -478,6 +537,9 @@ type OmsWatcherTask = {
   exec: () => Promise<void>;
 } | {
   type: 'inlineUUIDs';
+  exec: () => Promise<void>;
+} | {
+  type: 'build-prod';
   exec: () => Promise<void>;
 };
 
@@ -610,10 +672,14 @@ interface BuildResult {
 class BuildRecord<TBuildExtras> {
   constructor(options: {
     outDir: string;
-    sourceRoot: string;
+    wrapperPartFormat?: BuildRecord<TBuildExtras>['_wrapperPartFormat'];
+    sourceMaps?: boolean | 'inline';
+    debug?: boolean;
   }) {
     this._outDir = options.outDir;
-    this._sourceRoot = options.sourceRoot;
+    this._wrapperPartFormat = options.wrapperPartFormat ?? 'es';
+    this._sourceMaps = options.sourceMaps ?? true;
+    this._debug = options.debug ?? true;
   }
 
   async rebuild(options: InternalBuildOptions, extras: TBuildExtras) {
@@ -670,8 +736,10 @@ class BuildRecord<TBuildExtras> {
   }
 
   private _cache: rollup.RollupCache | undefined;
-  private _sourceRoot: string;
   private _outDir: string;
+  private _wrapperPartFormat: 'es' | 'system';
+  private _sourceMaps: boolean | 'inline';
+  private _debug: boolean;
   private _buildOptions: InternalBuildOptions = {
     entries: {},
     uuidProvider: undefined,
@@ -783,7 +851,7 @@ class BuildRecord<TBuildExtras> {
       entryFileNames: '[name].js',
       chunkFileNames: '_chunks/[name]-[hash].js',
       assetFileNames: '_assets/[name]-[hash][extname]',
-      sourcemap: true,
+      sourcemap: this._sourceMaps,
       plugins: outputPlugins,
       manualChunks(id) {
         if (id.includes('node_modules')) {
@@ -867,10 +935,10 @@ class BuildRecord<TBuildExtras> {
 
     const outputOptions: rollup.OutputOptions = {
       dir: this._outDir,
-      format: 'es',
+      format: this._wrapperPartFormat,
       chunkFileNames: '_proxy-chunks/[name]-[hash].js',
       entryFileNames: '[name].js',
-      sourcemap: true,
+      sourcemap: this._sourceMaps,
       plugins: outputPlugins,
     };
 

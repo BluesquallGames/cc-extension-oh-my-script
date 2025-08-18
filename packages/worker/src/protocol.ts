@@ -9,6 +9,12 @@ export interface ClientInvocationMap {
   'rebuild': () => void;
 
   'inline-uuids': () => void;
+
+  'build-prod': (opts: {
+    buildDir: string;
+    debug: boolean;
+    sourceMaps: boolean | 'inline';
+  }) => void;
 }
 
 export type ClientInvocationMethodId = keyof ClientInvocationMap;

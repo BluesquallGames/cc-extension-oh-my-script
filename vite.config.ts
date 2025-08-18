@@ -53,7 +53,7 @@ const entries = defineEntries([
   'contributions/scene/index.ts',
   'contributions/server.ts',
   'contributions/builder/index.ts',
-  'contributions/builder/hooks/index.ts',
+  'contributions/builder/default-hooks.ts',
   // ...(await readDirEntries('./src', 'contributions/inspector/exports')),
 ]);
 

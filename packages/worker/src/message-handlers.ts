@@ -19,6 +19,10 @@ export function registerMessageHandlers(ctx: ServerContext) {
     await (ensureOmsBuilder()).inlineUUIDs();
   });
 
+  ctx.ipc.listen('build-prod', async (opts) => {
+    await (ensureOmsBuilder()).buildProd(opts);
+  });
+
   function ensureOmsBuilder() {
     assert(globalOmsBuilder, 'omsBuilder not setup');
     return globalOmsBuilder;

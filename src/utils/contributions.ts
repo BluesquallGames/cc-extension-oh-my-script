@@ -8,6 +8,8 @@ export interface Contributions {
     }>;
   };
 
+  'builder'?: string;
+
   'inspector'?: {
     section?: {
       asset?: Record<string, string>;
