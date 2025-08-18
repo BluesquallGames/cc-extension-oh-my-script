@@ -2,6 +2,7 @@ import { parse, resolve } from 'node:path';
 import type { Plugin } from 'rollup';
 import { makeFileSystemAbsoluteImportSpecifier } from '../utils/import-specifier.js';
 import { format } from 'node:util';
+import { helpersDir } from '../helpers-dir.js';
 
 const wasmBinaryPostfix = '?wasm-binary';
 const resolvedWasmBinaryPrefix = '\0oms-wasm-binary-resolved:';
@@ -33,7 +34,7 @@ export function rollupPluginWasm(opts: {
     async load(id) {
       if (id.startsWith(resolvedWasmBinaryPrefix)) {
         const resolved = id.slice(resolvedWasmBinaryPrefix.length);
-        const helper = resolve(import.meta.dirname, '../../helpers/wasm-helper.ts');
+        const helper = resolve(helpersDir, 'wasm-helper.ts');
         const parsedPath = parse(resolved);
         const wasmBinary = await this.fs.readFile(resolved);
         const ref = this.emitFile({
@@ -49,9 +50,9 @@ export function rollupPluginWasm(opts: {
       }
 
       if (id.endsWith('.wasm')) {
-        const helper = resolve(import.meta.dirname, '../../helpers/wasm-helper.ts');
+        const helper = resolve(helpersDir, 'wasm-helper.ts');
         const parsedPath = parse(id);
-        const wasmBinary = await this.fs.readFile(id);
+        const wasmBinary = await this.fs.readFile(id) as Uint8Array<ArrayBuffer>;
         let wasmModule: WebAssembly.Module;
         try {
           wasmModule = await WebAssembly.compile(wasmBinary);

@@ -21,6 +21,7 @@ import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.
 import type { InvocationParams } from './protocol.js';
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
+import { helpersDir } from './helpers-dir.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -99,7 +100,7 @@ class OmsWatcher {
     this._mainBundleSourceRoot = join(projectPath, 'src');
     this._ctx = ctx;
 
-    const buildRecord = new BuildRecord<BuildExtras>({
+    const buildRecord = new BuildRecord({
       outDir,
     });
     this._buildRecord = buildRecord;
@@ -172,7 +173,7 @@ class OmsWatcher {
   }
 
   async inlineUUIDs() {
-    this._queueTask({
+    await this._queueTask({
       type: 'inlineUUIDs',
       exec: async () => {
         await this._execInlineUUIDs();
@@ -185,9 +186,8 @@ class OmsWatcher {
 
     const outDir = join(opts.buildDir, 'oms');
 
-    const buildRecord = new BuildRecord<void>({
+    const buildRecord = new BuildRecord({
       outDir,
-      wrapperPartFormat: 'system',
       sourceMaps: opts.sourceMaps,
       debug: opts.debug,
     });
@@ -209,7 +209,7 @@ class OmsWatcher {
         await buildRecord.rebuild({
           entries: bundleEntries,
           uuidProvider: this._uuidProvider,
-        }, undefined);
+        });
       },
     });
   }
@@ -220,7 +220,7 @@ class OmsWatcher {
   private _ctx: ServerContext;
   private _uuidManager: UUIDManager;
   private _uuidProvider: UUIDProvider;
-  private _buildRecord: BuildRecord<BuildExtras>;
+  private _buildRecord: BuildRecord;
   private _fileWatcher: chokidar.FSWatcher;
   private _fileWatcherReady = false;
   private _passiveWatchedFiles = new Set<string>();
@@ -232,6 +232,7 @@ class OmsWatcher {
 
   private _runningPromise: Promise<void> | undefined;
   private _fileQueue: Record<string, 'add' | 'delete'> = {};
+  private _lastBuildExtras: BuildExtras | undefined;
 
   private _queueTask<TTask extends OmsWatcherTask>(task: TTask) {
     for (const pendingTask of this._taskQueue) {
@@ -297,14 +298,16 @@ class OmsWatcher {
       exec: async () => {
         await this._execBuild();
       },
+    }).catch((err) => {
+      logger.error(err);
     });
   }
 
   private async _execBuild() {
     try {
-      const buildResult = await this._doExecBuild();
+      const [buildResult, buildExtras] = await this._doExecBuild();
       if (buildResult.ok) {
-        await this._onBuildEnd(buildResult.buildResult, buildResult.extras);
+        await this._onBuildEnd(buildResult.buildResult, buildExtras);
       } else {
         await this._ctx.ipc.invoke('build-failed', {
           message: buildResult.message,
@@ -320,9 +323,14 @@ class OmsWatcher {
 
   private async _doExecBuild() {
     const entryChanged = await this._executeFileQueue();
-    if (!entryChanged) {
-      return this._buildRecord.build();
+
+    if (this._lastBuildExtras) {
+      if (!entryChanged) {
+        return [await this._buildRecord.build(), this._lastBuildExtras] as const;
+      }
     }
+
+    this._lastBuildExtras = undefined;
 
     const bundleEntries: Record<string, string> = {};
     const buildExtras: BuildExtras = {
@@ -340,10 +348,14 @@ class OmsWatcher {
       }
     }
 
-    return this._buildRecord.rebuild({
-      entries: bundleEntries,
-      uuidProvider: this._uuidProvider,
-    }, buildExtras);
+    this._lastBuildExtras = buildExtras;
+    return [
+      await this._buildRecord.rebuild({
+        entries: bundleEntries,
+        uuidProvider: this._uuidProvider,
+      }),
+      buildExtras,
+    ] as const;
   }
 
   private async _onBuildEnd(buildResult: BuildResult, extras: BuildExtras) {
@@ -392,7 +404,7 @@ class OmsWatcher {
   }
 
   private async _renderProxyFile(proxyFilePath: string, bundleEntryPath: string, bundleId: string) {
-    const template = await fs.readFile(join(import.meta.dirname, '../helpers/proxy.ts.ejs'), 'utf8');
+    const template = await fs.readFile(join(helpersDir, 'proxy.ts.ejs'), 'utf8');
     const source = Ejs.render(template, {
       bundleId,
     });
@@ -654,29 +666,25 @@ interface BuildResult {
   inferredFiles: string[];
 }
 
-class BuildRecord<TBuildExtras> {
+class BuildRecord {
   constructor(options: {
     outDir: string;
-    wrapperPartFormat?: BuildRecord<TBuildExtras>['_wrapperPartFormat'];
     sourceMaps?: boolean | 'inline';
     debug?: boolean;
   }) {
     this._outDir = options.outDir;
-    this._wrapperPartFormat = options.wrapperPartFormat ?? 'es';
     this._sourceMaps = options.sourceMaps ?? true;
     this._debug = options.debug ?? true;
   }
 
-  async rebuild(options: InternalBuildOptions, extras: TBuildExtras) {
+  async rebuild(options: InternalBuildOptions) {
     Object.assign(this._buildOptions, options);
-    this._extras = extras;
     return await this.build();
   }
 
   async build(): Promise<{
     ok: true;
     buildResult: BuildResult;
-    extras: TBuildExtras;
   } | {
     ok: false;
     message: string;
@@ -687,7 +695,6 @@ class BuildRecord<TBuildExtras> {
         entries,
         ...passthroughBuildOptions
       } = this._buildOptions;
-      const extras = this._extras;
       const buildResult = await this._doBuild({
         entries: { ...entries },
         ...passthroughBuildOptions,
@@ -695,7 +702,6 @@ class BuildRecord<TBuildExtras> {
       return {
         ok: true,
         buildResult,
-        extras: extras as TBuildExtras,
       };
     } catch (error) {
       logger.debug('Build failed: %o', error);
@@ -722,15 +728,12 @@ class BuildRecord<TBuildExtras> {
 
   private _cache: rollup.RollupCache | undefined;
   private _outDir: string;
-  private _wrapperPartFormat: 'es' | 'system';
   private _sourceMaps: boolean | 'inline';
   private _debug: boolean;
   private _buildOptions: InternalBuildOptions = {
     entries: {},
     uuidProvider: undefined,
   };
-
-  private _extras: TBuildExtras | undefined = undefined;
 
   private async _doBuild(options: InternalBuildOptions): Promise<BuildResult> {
     const entries = options.entries;
@@ -888,6 +891,9 @@ class BuildRecord<TBuildExtras> {
           targets: {
             node: '14',
           },
+          include: [
+            decorators ? '@babel/plugin-transform-class-properties' : undefined,
+          ].filter((p): p is string => !!p),
         } satisfies babelPresetEnv.Options],
         [babelPresetTypescript, {
 

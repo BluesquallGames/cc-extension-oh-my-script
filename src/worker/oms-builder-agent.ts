@@ -1,6 +1,6 @@
 import cp from 'node:child_process';
 import { logger } from '../logger.js';
-import { Ipc, InvocationMessage, ClientInvocationMethodId, ServerInvocationMethodId } from '@oms/worker/protocol';
+import { Ipc, InvocationMessage, ClientInvocationMethodId, ServerInvocationMethodId } from '@oms/build-core/protocol';
 
 export class OmsBuilderAgent {
   constructor() {
@@ -89,7 +89,7 @@ export class OmsBuilderAgent {
   }
 
   private async _doSetup(): Promise<ServerAgent> {
-    const main = require.resolve('@oms/worker/main');
+    const main = require.resolve('@oms/build-core/main');
     const childProcess = cp.spawn('node', ['--watch', '--inspect', main], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     });

@@ -8,6 +8,7 @@ export default defineConfig([
     '**/node_modules/**/*.*',
     '**/lib/*',
     '**/dist/*',
+    '**/.deploy/*',
   ]),
   {
     settings: {
@@ -29,7 +30,8 @@ export default defineConfig([
         projectService: {
           allowDefaultProject: [
             'eslint.config.mjs',
-            'vite.config.mts',
+            'vite.config.ts',
+            'packages/*/vite.config.ts',
           ],
         },
       },

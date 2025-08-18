@@ -57,46 +57,51 @@ const entries = defineEntries([
   // ...(await readDirEntries('./src', 'contributions/inspector/exports')),
 ]);
 
-export default defineConfig({
-  build: {
-    outDir: './dist',
-    emptyOutDir: true,
-    minify: false,
-    sourcemap: 'inline',
-    lib: {
-      entry: entries,
-      formats: ['cjs'],
+export default defineConfig(({ mode }) => {
+  return {
+    esbuild: {
+      minifyWhitespace: false,
     },
-    rollupOptions: {
-      external: [
-        ...builtinModules,
-        /^node:.*/,
-        'fs-extra',
-        'winston',
-        'yaml',
-        'vue',
-        'rollup',
-        /^@rollup\/.*/,
-      ],
+    build: {
+      outDir: './dist',
+      emptyOutDir: true,
+      minify: mode === 'production',
+      sourcemap: mode === 'production' ? false : 'inline',
+      lib: {
+        entry: entries,
+        formats: ['cjs'],
+      },
+      rollupOptions: {
+        external: [
+          ...builtinModules,
+          /^node:.*/,
+          'fs-extra',
+          'winston',
+          'winston-transport',
+          'yaml',
+          'vue',
+          'primevue',
+        ],
+      },
     },
-  },
-  plugins: [
-    vue({
-      template: {
-        compilerOptions: {
-          isCustomElement: (tag) => {
-            if (tag.startsWith('ui-')) {
-              return true;
-            } else {
-              return false;
-            }
+    plugins: [
+      vue({
+        template: {
+          compilerOptions: {
+            isCustomElement: (tag) => {
+              if (tag.startsWith('ui-')) {
+                return true;
+              } else {
+                return false;
+              }
+            },
           },
         },
-      },
-    }),
-    useEditorModules(),
-    styleLocation(),
-  ],
+      }),
+      useEditorModules(),
+      styleLocation(),
+    ],
+  };
 });
 
 function useEditorModules(): Plugin {
