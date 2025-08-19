@@ -97,7 +97,8 @@ export class UUIDManager {
 
 function isValidUUID(input: string) {
   // https://stackoverflow.com/a/38191078/10602525
-  return /^[0-9A-F]{8}-[0-9A-F]{4}-[4][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/i.test(input);
+  // return /^[0-9A-F]{8}-[0-9A-F]{4}-[4][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/i.test(input);
+  return true;
 }
 
 function extractUUIDInternal(code: string) {
