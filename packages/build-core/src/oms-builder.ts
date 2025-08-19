@@ -852,6 +852,12 @@ class BuildRecord {
         return false;
       },
       plugins: inputPlugins,
+      onwarn(warning, warn) {
+        if (warning.code === 'THIS_IS_UNDEFINED') {
+          return;
+        }
+        warn(warning);
+      },
     });
 
     this._cache = rollupBuild.cache;
@@ -924,7 +930,7 @@ class BuildRecord {
           ].filter((p): p is string => !!p),
         } satisfies babelPresetEnv.Options],
         [babelPresetTypescript, {
-
+          allowDeclareFields: true,
         }],
       ],
     });
