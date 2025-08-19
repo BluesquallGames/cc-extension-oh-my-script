@@ -1,0 +1,1231 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`debug: false 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`debug: true 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = true;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`mode: build 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = true;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`mode: editor-not-in-preview 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = true;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`mode: preview 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = true;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`mode: test 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = true;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: alipay 1`] = `
+"export const ALIPAY = true;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: android 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = true;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: bytedance 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = true;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: cocos-runtime 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = true;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: editor 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = true;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: honor 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = true;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: huawei 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = true;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: ios 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = true;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: linux 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = true;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: mac 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = true;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: migu 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = true;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: non-existing 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: ohos 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = true;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: ohos 2`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = true;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: open-harmony 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: openharmony 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = true;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: oppo 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = true;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: taobao 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = true;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: taobao-minigame 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = true;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: vivo 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = true;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: wechat 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = true;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: wechat-mini-program 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = true;
+export const WINDOWS = false;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: windows 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = true;
+export const XIAOMI = false;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;
+
+exports[`platform: xiaomi 1`] = `
+"export const ALIPAY = false;
+export const ANDROID = false;
+export const BYTEDANCE = false;
+export const COCOS_RUNTIME = false;
+export const EDITOR = false;
+export const HONOR = false;
+export const HTML5 = false;
+export const HUAWEI = false;
+export const IOS = false;
+export const LINUX = false;
+export const MAC = false;
+export const MIGU = false;
+export const OHOS = false;
+export const OPEN_HARMONY = false;
+export const OPPO = false;
+export const TAOBAO = false;
+export const TAOBAO_MINIGAME = false;
+export const VIVO = false;
+export const WECHAT = false;
+export const WECHAT_MINI_PROGRAM = false;
+export const WINDOWS = false;
+export const XIAOMI = true;
+
+export const EDITOR_NOT_IN_PREVIEW = false;
+export const PREVIEW = false;
+export const BUILD = false;
+export const TEST = false;
+
+export const DEBUG = false;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;
+"
+`;

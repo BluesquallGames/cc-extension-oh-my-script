@@ -1,0 +1,37 @@
+export const ALIPAY = <%- params.platform === 'alipay' -%>;
+export const ANDROID = <%- params.platform === 'android' -%>;
+export const BYTEDANCE = <%- params.platform === 'bytedance' -%>;
+export const COCOS_RUNTIME = <%- params.platform === 'cocos-runtime' -%>;
+export const EDITOR = <%- params.platform === 'editor' -%>;
+export const HONOR = <%- params.platform === 'honor' -%>;
+export const HTML5 = <%- params.platform === 'html5' -%>;
+export const HUAWEI = <%- params.platform === 'huawei' -%>;
+export const IOS = <%- params.platform === 'ios' -%>;
+export const LINUX = <%- params.platform === 'linux' -%>;
+export const MAC = <%- params.platform === 'mac' -%>;
+export const MIGU = <%- params.platform === 'migu' -%>;
+export const OHOS = <%- params.platform === 'ohos' -%>;
+export const OPEN_HARMONY = <%- params.platform === 'openharmony' -%>;
+export const OPPO = <%- params.platform === 'oppo' -%>;
+export const TAOBAO = <%- params.platform === 'taobao' -%>;
+export const TAOBAO_MINIGAME = <%- params.platform === 'taobao-minigame' -%>;
+export const VIVO = <%- params.platform === 'vivo' -%>;
+export const WECHAT = <%- params.platform === 'wechat' -%>;
+export const WECHAT_MINI_PROGRAM = <%- params.platform === 'wechat-mini-program' -%>;
+export const WINDOWS = <%- params.platform === 'windows' -%>;
+export const XIAOMI = <%- params.platform === 'xiaomi' -%>;
+
+export const EDITOR_NOT_IN_PREVIEW = <%- params.mode === 'editor-not-in-preview' -%>;
+export const PREVIEW = <%- params.mode === 'preview' -%>;
+export const BUILD = <%- params.mode === 'build' -%>;
+export const TEST = <%- params.mode === 'test' -%>;
+
+export const DEBUG = <%- params.debug === true -%>;
+
+export const NATIVE = ANDROID || IOS || MAC || WINDOWS || LINUX || OHOS || OPEN_HARMONY;
+export const DEV = EDITOR || PREVIEW || TEST;
+export const MINIGAME = WECHAT || WECHAT_MINI_PROGRAM || XIAOMI || ALIPAY || TAOBAO || TAOBAO_MINIGAME || BYTEDANCE;
+export const RUNTIME_BASED = OPPO || VIVO || HUAWEI || MIGU || HONOR || COCOS_RUNTIME;
+export const SUPPORT_JIT = !(PREVIEW && !NATIVE) || MINIGAME || RUNTIME_BASED || OPEN_HARMONY;
+export const JSB = NATIVE;
+export const NET_MODE = 0;

@@ -12,7 +12,7 @@ console.log('oops?');"
 
 exports[`well formed 1`] = `
 "import { cclegacy as _ccLegacy2 } from 'cc';
-_ccLegacy2._RF.push("123");
+_ccLegacy2._RF.push({}, "123", "_transform", undefined);
 import { cclegacy as _ccLegacy } from 'cc';
 console.log('oops?');
 _ccLegacy2._RF.pop();"

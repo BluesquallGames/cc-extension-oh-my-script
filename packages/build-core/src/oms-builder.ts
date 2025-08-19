@@ -22,6 +22,8 @@ import type { InvocationParams } from './protocol.js';
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
+import { rollupPluginMemoryModules } from './features/rollup-plugin-memory-modules.js';
+import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate-cc-env.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -190,6 +192,11 @@ class OmsWatcher {
       outDir,
       sourceMaps: opts.sourceMaps,
       debug: opts.debug,
+      ccEnvParams: {
+        platform: opts.platform,
+        mode: 'BUILD',
+        debug: opts.debug,
+      },
     });
 
     await this._queueTask({
@@ -671,10 +678,12 @@ class BuildRecord {
     outDir: string;
     sourceMaps?: boolean | 'inline';
     debug?: boolean;
+    ccEnvParams?: CCEnvParams;
   }) {
     this._outDir = options.outDir;
     this._sourceMaps = options.sourceMaps ?? true;
     this._debug = options.debug ?? true;
+    this._ccEnvParams = options.ccEnvParams;
   }
 
   async rebuild(options: InternalBuildOptions) {
@@ -730,6 +739,7 @@ class BuildRecord {
   private _outDir: string;
   private _sourceMaps: boolean | 'inline';
   private _debug: boolean;
+  private _ccEnvParams: CCEnvParams | undefined;
   private _buildOptions: InternalBuildOptions = {
     entries: {},
     uuidProvider: undefined,
@@ -761,6 +771,19 @@ class BuildRecord {
       rollupEntries[key] = ENTRY_MODULE_PREFIX + key;
     }
 
+    const memoryModules: Record<string, string> = {};
+    const externals: string[] = [
+      'cc',
+    ];
+
+    if (this._ccEnvParams) {
+      memoryModules['cc/env'] = generateCCEnvModuleSource({
+        params: this._ccEnvParams,
+      });
+    } else {
+      externals.push('cc/env');
+    }
+
     const inputPlugins: rollup.Plugin[] = [
       {
         name: 'oms:load-entry-modules',
@@ -785,6 +808,10 @@ class BuildRecord {
           return undefined;
         },
       },
+
+      rollupPluginMemoryModules({
+        modules: memoryModules,
+      }),
 
       rollupPluginWasm({}),
 
@@ -818,7 +845,7 @@ class BuildRecord {
       cache: this._cache,
       input: rollupEntries,
       external(source, importer, isResolved) {
-        if (['cc', 'cc/env'].includes(source)) {
+        if (externals.includes(source)) {
           return true;
         }
         return false;

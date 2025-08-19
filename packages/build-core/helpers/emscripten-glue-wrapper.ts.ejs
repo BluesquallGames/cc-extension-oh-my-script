@@ -1,0 +1,14 @@
+// Wrapper for Emscripten glue module <%= glueModule %>
+
+import factory from '<%= glueModule %>';
+import { importWasmInstance } from '<%= wasmHelperModule %>';
+import wasmBinaryPath from '<%= wasmBinaryPathModule %>';
+
+export default function createEmscriptenInstance(opts, ...args) {
+  return factory({
+    ...opts,
+    instantiateWasm: (imports, callback) => {
+      return importWasmInstance(wasmBinaryPath, imports).then(callback);
+    },
+  }, ...args);
+}

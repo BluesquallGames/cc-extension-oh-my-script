@@ -14,6 +14,7 @@ export interface ClientInvocationMap {
     buildDir: string;
     debug: boolean;
     sourceMaps: boolean | 'inline';
+    platform: string;
   }) => void;
 }
 

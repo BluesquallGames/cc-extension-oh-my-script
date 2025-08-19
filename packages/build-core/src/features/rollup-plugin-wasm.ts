@@ -1,19 +1,28 @@
-import { parse, resolve } from 'node:path';
+import { join, parse, resolve } from 'node:path';
 import type { Plugin } from 'rollup';
 import { makeFileSystemAbsoluteImportSpecifier } from '../utils/import-specifier.js';
 import { format } from 'node:util';
 import { helpersDir } from '../helpers-dir.js';
+import Ejs from 'ejs';
 
 const wasmBinaryPostfix = '?wasm-binary';
 const resolvedWasmBinaryPrefix = '\0oms-wasm-binary-resolved:';
+const resolvedEmscriptenGlueWrapper = '\0oms-emscripten-glue:';
+const wasmBinaryPathPrefix = '\0oms-wasm-binary-path:';
+
+const pluginName = 'oms:wasm';
 
 export function rollupPluginWasm(opts: {
 
 }): Plugin {
   return {
-    name: 'oms:wasm',
+    name: pluginName,
 
     async resolveId(source, importer, options) {
+      if (source.startsWith(wasmBinaryPathPrefix)) {
+        return source;
+      }
+
       if (source.endsWith(wasmBinaryPostfix)) {
         const pre = source.slice(0, source.length - wasmBinaryPostfix.length);
         const resolved = await this.resolve(pre, importer, {
@@ -29,29 +38,49 @@ export function rollupPluginWasm(opts: {
           id: `${resolvedWasmBinaryPrefix}${resolved.id}`,
         };
       }
+
+      if (options.attributes.type === 'oms:emscripten-glue') {
+        const resolved = await this.resolve(source, importer, {
+          skipSelf: true,
+        });
+        if (!resolved) {
+          throw new Error(`Unable to resolve Emscripten glue ${source} from ${importer}`);
+        }
+        if (resolved.external) {
+          throw new Error(`Emscripten glue ${source} from ${importer} can not named an external module`);
+        }
+        return {
+          id: `${resolvedEmscriptenGlueWrapper}${resolved.id}`,
+        };
+      }
     },
 
     async load(id) {
-      if (id.startsWith(resolvedWasmBinaryPrefix)) {
-        const resolved = id.slice(resolvedWasmBinaryPrefix.length);
-        const helper = resolve(helpersDir, 'wasm-helper.ts');
-        const parsedPath = parse(resolved);
-        const wasmBinary = await this.fs.readFile(resolved);
+      if (id.startsWith(wasmBinaryPathPrefix)) {
+        const wasmBinaryPath = id.slice(wasmBinaryPathPrefix.length);
+        const wasmBinary = await this.fs.readFile(wasmBinaryPath);
+        const wasmBinaryParsedPath = parse(wasmBinaryPath);
         const ref = this.emitFile({
           type: 'asset',
-          name: `${parsedPath.name}.wasm`,
+          name: `${wasmBinaryParsedPath.name}.wasm`,
           source: wasmBinary,
         });
+        return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
+      }
+
+      if (id.startsWith(resolvedWasmBinaryPrefix)) {
+        const wasmBinaryPath = id.slice(resolvedWasmBinaryPrefix.length);
+        const helper = resolve(helpersDir, 'wasm-helper.ts');
         return [
-          `// WebAssembly binary ${resolved}`,
+          `// WebAssembly binary ${wasmBinaryPath}`,
           `import { importWasmBinary } from '${makeFileSystemAbsoluteImportSpecifier(helper)}';`,
-          `export default (await importWasmBinary(import.meta.ROLLUP_FILE_URL_${ref}))`,
+          `import wasmBinaryPath from '${wasmBinaryPathPrefix + makeFileSystemAbsoluteImportSpecifier(wasmBinaryPath)}';`,
+          `export default (await importWasmBinary(wasmBinaryPath))`,
         ].join('\n') + '\n';
       }
 
       if (id.endsWith('.wasm')) {
         const helper = resolve(helpersDir, 'wasm-helper.ts');
-        const parsedPath = parse(id);
         const wasmBinary = await this.fs.readFile(id) as Uint8Array<ArrayBuffer>;
         let wasmModule: WebAssembly.Module;
         try {
@@ -64,15 +93,11 @@ export function rollupPluginWasm(opts: {
         for (const imp of imports) {
           importModules.add(imp.module);
         }
-        const ref = this.emitFile({
-          type: 'asset',
-          name: `${parsedPath.name}.wasm`,
-          source: wasmBinary,
-        });
         const importModuleSpecifiers = [...importModules];
         return [
           `// WebAssembly binary ${id}`,
           `import { importWasmInstance } from '${makeFileSystemAbsoluteImportSpecifier(helper)}';`,
+          `import wasmBinaryPath from '${wasmBinaryPathPrefix + makeFileSystemAbsoluteImportSpecifier(id)}';`,
           ...importModuleSpecifiers.map((m, i) => {
             return `import * as imp_${i} from '${m}';\n`;
           }),
@@ -83,8 +108,20 @@ export function rollupPluginWasm(opts: {
           }),
           `};`,
           '',
-          `export default (await importWasmInstance(import.meta.ROLLUP_FILE_URL_${ref}, imports))`,
+          `export default (await importWasmInstance(wasmBinaryPath, imports))`,
         ].join('\n') + '\n';
+      }
+
+      if (id.startsWith(resolvedEmscriptenGlueWrapper)) {
+        const resolved = id.slice(resolvedEmscriptenGlueWrapper.length);
+        const template = await this.fs.readFile(join(helpersDir, 'emscripten-glue-wrapper.ts.ejs'), { encoding: 'utf8' });
+        const parsedGluePath = parse(resolved);
+        const source = Ejs.render(template, {
+          glueModule: makeFileSystemAbsoluteImportSpecifier(resolved),
+          wasmHelperModule: makeFileSystemAbsoluteImportSpecifier(resolve(helpersDir, 'wasm-helper.ts')),
+          wasmBinaryPathModule: makeFileSystemAbsoluteImportSpecifier(wasmBinaryPathPrefix + `${join(parsedGluePath.dir, parsedGluePath.name)}.wasm`),
+        });
+        return source;
       }
     },
   };
