@@ -79,7 +79,7 @@ if (EDITOR) {
 
   let omsHostBaseURLPrefix = '';
   if (HTML5) {
-    omsHostBaseURLPrefix = new URL('./oms/', window.location.href).href;
+    omsHostBaseURLPrefix = new globalThis.URL('./oms/', window.location.href).href;
   } else {
     omsHostBaseURLPrefix = `project:/oms/`;
   }
