@@ -31,5 +31,6 @@ export const onAfterBuild: BuildHook.onAfterBuild = async (options, result) => {
     buildDir: resolve(result.dest),
     debug: options.debug,
     sourceMaps: options.sourceMaps,
+    platform: options.platform,
   });
 };

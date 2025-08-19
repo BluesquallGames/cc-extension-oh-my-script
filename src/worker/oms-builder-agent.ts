@@ -60,6 +60,7 @@ export class OmsBuilderAgent {
     buildDir: string;
     debug: boolean;
     sourceMaps: boolean | 'inline';
+    platform: string;
   }) {
     switch (this._state) {
     case State.closing:

@@ -4,7 +4,7 @@ export const BYTEDANCE = <%- params.platform === 'bytedance' -%>;
 export const COCOS_RUNTIME = <%- params.platform === 'cocos-runtime' -%>;
 export const EDITOR = <%- params.platform === 'editor' -%>;
 export const HONOR = <%- params.platform === 'honor' -%>;
-export const HTML5 = <%- params.platform === 'html5' -%>;
+export const HTML5 = <%- params.platform === 'web-desktop' || params.platform === 'web-mobile' -%>;
 export const HUAWEI = <%- params.platform === 'huawei' -%>;
 export const IOS = <%- params.platform === 'ios' -%>;
 export const LINUX = <%- params.platform === 'linux' -%>;

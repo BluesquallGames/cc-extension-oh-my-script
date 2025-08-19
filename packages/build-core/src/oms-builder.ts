@@ -777,9 +777,10 @@ class BuildRecord {
     ];
 
     if (this._ccEnvParams) {
-      memoryModules['cc/env'] = generateCCEnvModuleSource({
+      const ccEnvMouseSource = memoryModules['cc/env'] = generateCCEnvModuleSource({
         params: this._ccEnvParams,
       });
+      logger.debug('"cc/env" source: %s', ccEnvMouseSource);
     } else {
       externals.push('cc/env');
     }
