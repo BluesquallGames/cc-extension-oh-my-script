@@ -1,5 +1,6 @@
 import babel from '@babel/core';
 import { basename } from 'node:path';
+import { compressUuid } from '../utils/compress-uuid.js';
 
 const templateImport = babel.template.smart(`
 import { cclegacy as %%ccLegacy%% } from 'cc';
@@ -36,7 +37,7 @@ export function transformCCComponent(options: {
           const ccLegacyId = path.scope.generateUidIdentifier('_ccLegacy');
           path.unshiftContainer('body', templatePush({
             ccLegacy: ccLegacyId,
-            uuid: babel.types.stringLiteral(uuid),
+            uuid: babel.types.stringLiteral(compressUuid(uuid, false)),
             filename: babel.types.stringLiteral(basename(filename)),
           }));
           path.unshiftContainer('body', templateImport({
