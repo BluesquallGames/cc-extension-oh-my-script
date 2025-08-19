@@ -9,11 +9,12 @@ const wasmBinaryPostfix = '?wasm-binary';
 const resolvedWasmBinaryPrefix = '\0oms-wasm-binary-resolved:';
 const resolvedEmscriptenGlueWrapper = '\0oms-emscripten-glue:';
 const wasmBinaryPathPrefix = '\0oms-wasm-binary-path:';
+const glueImportModuleId = '\0oms-wasm-glue-imported-module';
+const gluePrefix = '\0oms-wasm-glue:';
 
 const pluginName = 'oms:wasm';
 
 export function rollupPluginWasm(opts: {
-
 }): Plugin {
   return {
     name: pluginName,
@@ -52,6 +53,15 @@ export function rollupPluginWasm(opts: {
         return {
           id: `${resolvedEmscriptenGlueWrapper}${resolved.id}`,
         };
+      }
+
+      if (source.startsWith(gluePrefix)) {
+        return source;
+      }
+
+      // Emscripten glue has `import('module')`
+      if (importer && source === 'module' && (importer.startsWith(gluePrefix) || true)) {
+        return glueImportModuleId;
       }
     },
 
@@ -117,11 +127,22 @@ export function rollupPluginWasm(opts: {
         const template = await this.fs.readFile(join(helpersDir, 'emscripten-glue-wrapper.ts.ejs'), { encoding: 'utf8' });
         const parsedGluePath = parse(resolved);
         const source = Ejs.render(template, {
-          glueModule: makeFileSystemAbsoluteImportSpecifier(resolved),
+          glueModule: makeFileSystemAbsoluteImportSpecifier(gluePrefix + resolved),
           wasmHelperModule: makeFileSystemAbsoluteImportSpecifier(resolve(helpersDir, 'wasm-helper.ts')),
           wasmBinaryPathModule: makeFileSystemAbsoluteImportSpecifier(wasmBinaryPathPrefix + `${join(parsedGluePath.dir, parsedGluePath.name)}.wasm`),
         });
         return source;
+      }
+
+      if (id.startsWith(gluePrefix)) {
+        const glueModule = id.slice(gluePrefix.length);
+        const glueModulePath = resolve(glueModule);
+        const source = await this.fs.readFile(glueModulePath, { encoding: 'utf8' });
+        return `var process = undefined; var window = globalThis; ${source}`;
+      }
+
+      if (id === glueImportModuleId) {
+        return `throw new Error('Can not import ${'module'}');`;
       }
     },
   };
