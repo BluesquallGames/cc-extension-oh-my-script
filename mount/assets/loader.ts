@@ -67,24 +67,26 @@ if (EDITOR) {
       console.debug(`${logTag}Instantiate ${id}`);
       omsSystemInfo.instantiatedModules.push(id);
       const path = fileURLToPath(id);
-      const register_vendor = systemJSPrototype.register;
       let register: unknown[] | undefined;
-      systemJSPrototype.register = function (dependencies: unknown, declare: unknown) {
-        if (register) {
-          throw new Error(`${path} unexpectedly provided multiple System registers.`);
-        }
-        register = [dependencies, declare];
-      };
       try {
         await retryByInterval(() => {
-          r(path);
+          const register_vendor = systemJSPrototype.register;
+          systemJSPrototype.register = function (dependencies: unknown, declare: unknown) {
+            if (register) {
+              throw new Error(`${path} unexpectedly provided multiple System registers.`);
+            }
+            register = [dependencies, declare];
+          };
+          try {
+            r(path);
+          } finally {
+            systemJSPrototype.register = register_vendor;
+            delete r.cache[path];
+          }
         }, 100, 1000, `Instantiate ${id}`);
       } catch (err) {
         console.error(`${logTag}Failed to instantiate ${id}: %o`, err);
         throw err;
-      } finally {
-        systemJSPrototype.register = register_vendor;
-        delete r.cache[path];
       }
       if (!register) {
         throw new Error(`${path} does not provide a SystemJS register.`);
