@@ -95,7 +95,7 @@ export class OmsBuilderAgent {
 
   private async _doSetup(): Promise<ServerAgent> {
     const main = require.resolve('@oms/build-core/main');
-    const childProcess = cp.spawn('node', ['--watch', '--inspect', main], {
+    const childProcess = cp.spawn('node', ['--inspect', main], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     });
     childProcess.stdout?.on('data', (data) => {
