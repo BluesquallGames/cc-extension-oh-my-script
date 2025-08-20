@@ -7,7 +7,7 @@ import { selfExtensionName, selfPackageJson } from './self-info.js';
 const printf = (withEntry: boolean) => winston.format.printf(({ level, message, timestamp }) => {
   let output = '';
   if (timestamp) {
-    output += `${timestamp} `;
+    output += `${timestamp}[${timestamp instanceof Date ? timestamp.valueOf() : ''}] `;
   }
   if (withEntry) {
     output += `[@<where?>] `;

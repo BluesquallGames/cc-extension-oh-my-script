@@ -1,6 +1,8 @@
 import { type Serializable } from 'node:child_process';
 import { logger } from './logger.js';
 
+export { setLogger } from './logger.js';
+
 export interface ClientInvocationMap {
   'setup': (options: {
     project: string;

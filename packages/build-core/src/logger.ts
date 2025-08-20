@@ -9,7 +9,7 @@ const printf = () => winston.format.printf(({ level, message, timestamp }) => {
   return output;
 });
 
-export const logger = winston.createLogger({
+export let logger = winston.createLogger({
   format: winston.format.combine(
     winston.format.splat(),
   ),
@@ -22,3 +22,7 @@ export const logger = winston.createLogger({
     }),
   ],
 });
+
+export function setLogger(newLogger: winston.Logger) {
+  logger = newLogger;
+}

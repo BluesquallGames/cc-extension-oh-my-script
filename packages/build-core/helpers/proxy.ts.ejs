@@ -2,23 +2,13 @@
 /// It serves as entry of bundle main.
 /// Neither don't edit it, nor add it into version control system(eg. Git).
 
-import { loadBundleEntry } from 'db://oh-my-script/loader';
+import { loadBundleEntry, saveRequiringFrames } from 'db://oh-my-script/loader';
 import { cclegacy} from 'cc';
 
-const rf = cclegacy._RF.peek();
-if (rf) {
-  cclegacy._RF.pop();
-}
+const restoreRequiringFrames = saveRequiringFrames();
 try {
   // @ts-expect-error
   await loadBundleEntry('<%= bundleId %>', import.meta.url);
 } finally {
-  if (rf) {
-    cclegacy._RF.push(
-      rf.module,
-      rf.uuid,
-      rf.script,
-      rf.importMeta
-    );
-  }
+  restoreRequiringFrames();
 }

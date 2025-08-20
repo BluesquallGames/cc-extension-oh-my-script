@@ -1,10 +1,23 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="../../../../temp/declarations/cc.d.ts"/>
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="../../../../temp/declarations/cc.env.d.ts"/>
 
+declare interface SystemJS {
+  register: (dependencies: unknown, declare: unknown) => void;
+  resolve: (id: string, parent?: string) => string;
+  instantiate: (id: string, parentURL: string | undefined) => void;
+  delete: (id: string) => void;
+}
+
+declare const System: SystemJS;
+
 import { HTML5, PREVIEW, EDITOR, BUILD } from 'cc/env';
+import { cclegacy } from 'cc';
 
 let omsBaseDir = '';
 const omsURLPrefix = 'oms:///';
+const logTag = '[OMS] ';
 
 if (EDITOR) {
   const r = require;
@@ -49,8 +62,10 @@ if (EDITOR) {
     return vendorResolve.call(this, id, ...args);
   };
 
-  systemJSPrototype.instantiate = function (id: string, parentURL: string | undefined, ...args: unknown[]) {
+  systemJSPrototype.instantiate = async function (id: string, parentURL: string | undefined, ...args: unknown[]) {
     if (id.startsWith(omsBaseURL)) {
+      console.debug(`${logTag}Instantiate ${id}`);
+      omsSystemInfo.instantiatedModules.push(id);
       const path = fileURLToPath(id);
       const register_vendor = systemJSPrototype.register;
       let register: unknown[] | undefined;
@@ -61,7 +76,12 @@ if (EDITOR) {
         register = [dependencies, declare];
       };
       try {
-        r(path);
+        await retryByInterval(() => {
+          r(path);
+        }, 100, 1000, `Instantiate ${id}`);
+      } catch (err) {
+        console.error(`${logTag}Failed to instantiate ${id}: %o`, err);
+        throw err;
       } finally {
         systemJSPrototype.register = register_vendor;
         delete r.cache[path];
@@ -69,11 +89,31 @@ if (EDITOR) {
       if (!register) {
         throw new Error(`${path} does not provide a SystemJS register.`);
       }
-      omsSystemInfo.instantiatedModules.push(id);
       return register;
     }
     return vendorInstantiate.call(this, id, parentURL, ...args);
   };
+
+  async function retryByInterval<T>(execute: () => Promise<T> | T, interval: number, timeout: number, title: string) {
+    const t0 = Date.now();
+    for (let iTry = 0; ; ++iTry) {
+      try {
+        const result = await execute();
+        if (iTry > 0) {
+          console.info(`${logTag}Note: ${title} eventually succeeded after ${iTry} tries. This is not an error.`);
+        }
+        return result;
+      } catch (err) {
+        const t1 = Date.now();
+        const dt = t1 - t0;
+        if (dt >= timeout) {
+          throw err;
+        }
+        console.debug(`${logTag}[${iTry + 1}]-th retry ${title} failed, retry after ${interval}ms`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
 } else {
   const systemJSPrototype = System.constructor.prototype;
 
@@ -124,5 +164,41 @@ export async function load(id: string, parent: string) {
 }
 
 export async function loadBundleEntry(bundleId: string, parent: string) {
-  return await import(`${omsURLPrefix}bundle-${bundleId}.js`);
+  try {
+    return await import(`${omsURLPrefix}bundle-${bundleId}.js`);
+  } catch (err) {
+    console.error(`Failed to load bundle entry: ${bundleId}, did you installed OMS extension?`);
+    throw err;
+  }
+}
+
+export function saveRequiringFrames() {
+  const frames: {
+    module: unknown;
+    uuid: string;
+    script: unknown;
+    importMeta: unknown;
+  }[] = [];
+  const RF = cclegacy._RF;
+  for (; ;) {
+    const frame = RF.peek();
+    if (!frame) {
+      break;
+    }
+    frames.push(frame);
+    RF.pop();
+  }
+  return () => {
+    const nFrames = frames.length;
+    for (let i = nFrames - 1; i >= 0; --i) {
+      const frame = frames[i];
+      RF.push(
+        frame.module,
+        frame.uuid,
+        frame.script,
+        frame.importMeta,
+      );
+    }
+    frames.length = 0;
+  };
 }

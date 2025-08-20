@@ -739,6 +739,10 @@ class BuildRecord {
   private _outDir: string;
   private _sourceMaps: boolean | 'inline';
   private _debug: boolean;
+  private _suppressRollupWarningCodes = [
+    'CIRCULAR_DEPENDENCY',
+    'THIS_IS_UNDEFINED',
+  ];
   private _ccEnvParams: CCEnvParams | undefined;
   private _buildOptions: InternalBuildOptions = {
     entries: {},
@@ -852,8 +856,8 @@ class BuildRecord {
         return false;
       },
       plugins: inputPlugins,
-      onwarn(warning, warn) {
-        if (warning.code === 'THIS_IS_UNDEFINED') {
+      onwarn: (warning, warn) => {
+        if (warning.code && this._suppressRollupWarningCodes.includes(warning.code)) {
           return;
         }
         warn(warning);

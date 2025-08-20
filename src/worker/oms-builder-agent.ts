@@ -1,6 +1,10 @@
 import cp from 'node:child_process';
 import { logger } from '../logger.js';
-import { Ipc, InvocationMessage, ClientInvocationMethodId, ServerInvocationMethodId } from '@oms/build-core/protocol';
+import { Ipc, InvocationMessage, ClientInvocationMethodId, ServerInvocationMethodId, setLogger } from '@oms/build-core/protocol';
+
+setLogger(logger);
+
+const logTag = '[BuilderAgent] ';
 
 export class OmsBuilderAgent {
   constructor() {
@@ -22,7 +26,7 @@ export class OmsBuilderAgent {
         const serverAgent = await setupPromise;
         serverAgent.childProcess.kill();
       } catch (err) {
-        logger.error(`close builder agent failed: ${err}`);
+        logger.error(`${logTag}close builder agent failed: ${err}`);
       } finally {
         this._state = State.closed;
       }
@@ -32,7 +36,7 @@ export class OmsBuilderAgent {
   async rebuild() {
     switch (this._state) {
     case State.closing:
-      logger.error('builder agent is not opened');
+      logger.error(`${logTag} is not opened`);
       return;
     }
 
@@ -48,7 +52,7 @@ export class OmsBuilderAgent {
   async inlineUUIDs() {
     switch (this._state) {
     case State.closing:
-      logger.error('builder agent is not opened');
+      logger.error(`${logTag} is not opened`);
       return;
     }
 
@@ -64,7 +68,7 @@ export class OmsBuilderAgent {
   }) {
     switch (this._state) {
     case State.closing:
-      logger.error('builder agent is not opened');
+      logger.error(`${logTag} is not opened`);
       return;
     }
 
@@ -95,19 +99,19 @@ export class OmsBuilderAgent {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     });
     childProcess.stdout?.on('data', (data) => {
-      logger.info(data);
+      logger.info('[worker] ' + data.toString());
     });
     childProcess.stderr?.on('data', (data) => {
-      logger.error(data);
+      logger.error('[worker] ' + data.toString());
     });
     childProcess.on('close', (code, signal) => {
-      logger.info(`child process closed with code ${code} and signal ${signal}`);
+      logger.info(`${logTag}child process closed with code ${code} and signal ${signal}`);
     });
     childProcess.on('exit', (code, signal) => {
-      logger.info(`child process exited with code ${code} and signal ${signal}`);
+      logger.info(`${logTag}child process exited with code ${code} and signal ${signal}`);
     });
     childProcess.on('error', (err) => {
-      logger.error(`child process error: ${err}`);
+      logger.error(`${logTag}child process error: ${err}`);
     });
     await new Promise<cp.ChildProcess>((resolve, reject) => {
       childProcess.on('spawn', () => {
@@ -126,6 +130,15 @@ export class OmsBuilderAgent {
     childProcess.on('message', (message) => {
       ipc.dispatch(message as InvocationMessage);
     });
+    const listen_vendor = ipc.listen;
+    ipc.listen = function (...args) {
+      const [methodId, callback, ...remainArgs] = args;
+      logger.debug(`${logTag}Listening to ${methodId}`);
+      return listen_vendor.call(this, methodId, async (...args) => {
+        logger.debug(`${logTag}Received ${methodId} with args: %o`, args);
+        await callback(...args);
+      }, ...remainArgs);
+    };
 
     ipc.listen('build-failed', async (err) => {
       let m = err.message;
@@ -137,6 +150,7 @@ export class OmsBuilderAgent {
 
     ipc.listen('build-success', async (changes) => {
       for (const file of changes.affectedFiles) {
+        logger.debug(`${logTag}Reimport asset: %s`, file);
         await Editor.Message.request('asset-db', 'reimport-asset', file);
       }
     });
@@ -149,6 +163,8 @@ export class OmsBuilderAgent {
         resolve();
       });
     });
+
+    logger.debug(`${logTag}Builder has setup`);
 
     return {
       ipc,

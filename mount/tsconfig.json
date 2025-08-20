@@ -1,6 +1,8 @@
 {
   "include": ["assets"],
   "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
     "rootDir": "assets",
     "noEmit": true,
   },
