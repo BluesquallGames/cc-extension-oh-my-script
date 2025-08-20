@@ -765,6 +765,7 @@ class BuildRecord {
   private _suppressRollupWarningCodes = [
     'CIRCULAR_DEPENDENCY',
     'THIS_IS_UNDEFINED',
+    'UNUSED_EXTERNAL_IMPORT',
   ];
   private _ccEnvParams: CCEnvParams | undefined;
   private _buildOptions: InternalBuildOptions = {
