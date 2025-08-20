@@ -19,6 +19,7 @@ export let logger = winston.createLogger({
       format: winston.format.combine(
         printf(),
       ),
+      stderrLevels: ['error', 'warn'],
     }),
   ],
 });

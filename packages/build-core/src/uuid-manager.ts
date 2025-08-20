@@ -75,14 +75,30 @@ export class UUIDManager {
       this._map[module] = record;
     }
     if (!inlineUUID) {
-      record.centralized = true;
-      if (!record.uuid) {
+      if (record.centralized) {
+        if (!record.uuid) {
+          record.uuid = this._generateUUID();
+        }
+      } else {
+        record.centralized = true;
         record.uuid = this._generateUUID();
       }
     } else {
       record.centralized = false;
       record.uuid = inlineUUID;
     }
+  }
+
+  getDuplications() {
+    const map: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(this._map)) {
+      const uuid = v.uuid;
+      (map[uuid] ??= []).push(k);
+    }
+    return Object.entries(map)
+      .filter(([_, v]) => {
+        return v.length > 1;
+      });
   }
 
   private _map: Record<string, {

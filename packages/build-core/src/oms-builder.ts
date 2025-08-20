@@ -149,6 +149,12 @@ class OmsWatcher {
         this._queueBuild();
       })
       .on('change', (path) => {
+        switch (this._fileQueue[path]) {
+        case 'add':
+        case 'delete':
+          return;
+        }
+        this._fileQueue[path] = 'change';
         this._queueBuild();
       })
       .on('unlink', (path) => {
@@ -238,7 +244,7 @@ class OmsWatcher {
   })[] = [];
 
   private _runningPromise: Promise<void> | undefined;
-  private _fileQueue: Record<string, 'add' | 'delete'> = {};
+  private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
   private _lastBuildExtras: BuildExtras | undefined;
 
   private _queueTask<TTask extends OmsWatcherTask>(task: TTask) {
@@ -420,10 +426,18 @@ class OmsWatcher {
 
   private async _loadCentralizedUUIDs() {
     await this._uuidManager.loadCentralized(this._getCentralizedUUIDMappingPath());
+    this._reportUUIDDuplications();
   }
 
   private async _saveCentralizedUUIDs() {
     await this._uuidManager.saveCentralized(this._getCentralizedUUIDMappingPath());
+  }
+
+  private _reportUUIDDuplications() {
+    const duplications = this._uuidManager.getDuplications();
+    for (const [uuid, modules] of duplications) {
+      logger.error(`UUID ${uuid} is duplicated in modules: ${modules.join(', ')}`);
+    }
   }
 
   private _getCentralizedUUIDMappingPath() {
@@ -437,10 +451,19 @@ class OmsWatcher {
     for (const [file, operation] of Object.entries(fileQueue)) {
       if (operation === 'add') {
         entryChanged = (await this._addWatchFile(file)) || entryChanged;
-      } else {
+      } else if (operation === 'delete') {
         entryChanged = (await this._removeWatchFile(file)) || entryChanged;
+      } else if (operation === 'change') {
+        const bundleId = this._getBundleId(file);
+        if (bundleId) {
+          const bundle = this._bundles[bundleId];
+          if (bundle && this._isComponentModule(bundle, file)) {
+            await this._ensureUUID(file);
+          }
+        }
       }
     }
+    this._reportUUIDDuplications();
     return entryChanged;
   }
 
