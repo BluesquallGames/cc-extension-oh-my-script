@@ -34,6 +34,7 @@
     "vitest": "catalog:"
   },
   "dependencies": {
+    "@feb/cc-extension-utils": "^0.0.3",
     "@oms/build-core": "workspace:*",
     "fs-extra": "^11.3.0",
     "primevue": "^4.3.1",

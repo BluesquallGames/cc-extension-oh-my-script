@@ -1,4 +1,4 @@
-import { requireEditorModule2 } from '../utils/require-editor-module.js';
+import { requireEditorModule2 } from '@feb/cc-extension-utils/require-editor-module';
 import { OmsWorker } from './oms-worker.js';
 import assert from 'node:assert';
 import { logger } from '../logger.js';

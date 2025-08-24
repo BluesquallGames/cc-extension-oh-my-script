@@ -2,9 +2,9 @@ import { defineConfig, Plugin } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { builtinModules } from 'node:module';
 import { basename, dirname, extname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import useEditorModules from '@feb/cc-extension-utils/vite/plugin-use-editor-modules';
 
 const readDirEntries = (() => {
   async function* r(root: string, currentDir: string = ''): AsyncGenerator<string> {
@@ -103,28 +103,6 @@ export default defineConfig(({ mode }) => {
     ],
   };
 });
-
-function useEditorModules(): Plugin {
-  return {
-    name: useEditorModules.name,
-
-    resolveId(id, parent) {
-      if (id.startsWith('@editor/') || id === 'cc') {
-        return id;
-      }
-    },
-
-    load(id, parent) {
-      if (id.startsWith('@editor/') || id === 'cc') {
-        const m = resolve(fileURLToPath(import.meta.url), '../src/utils/require-editor-module.ts').replace(/\\/g, '/');
-        return {
-          syntheticNamedExports: true,
-          code: `import {requireEditorModule} from '${m}'; export default requireEditorModule('${id}');`,
-        };
-      }
-    },
-  };
-}
 
 function styleLocation(): Plugin {
   const styleModuleId = '@/style-location';

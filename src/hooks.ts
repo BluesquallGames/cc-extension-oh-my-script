@@ -1,19 +1,18 @@
 import { logger } from './logger.js';
-import { objectAssignDeep } from './utils/object-assign-deep.js';
-import type { Contributions } from './utils/contributions.js';
 import { workerMessageDescriptions } from './worker/worker-message-descriptions.js';
+import { ExtensionContributions, mergeContributions } from '@feb/cc-extension-utils/extension';
 
 export async function register(info: {
-  contributions: Contributions;
+  contributions: ExtensionContributions;
 }) {
   const contributions = await getContributions();
-  objectAssignDeep(info.contributions ??= {}, contributions);
+  mergeContributions(info.contributions ??= {}, contributions);
   logger.debug(`registered contributions: ${JSON.stringify(contributions, undefined, 2)}`);
 }
 
 type Methods = keyof typeof import('./main.js')['methods'];
 
-async function getContributions(): Promise<Contributions> {
+async function getContributions(): Promise<ExtensionContributions> {
   const workerMessagesContribution = Object.fromEntries(
     Object.keys(workerMessageDescriptions).map((messageName) => [messageName, { methods: [messageName] }]),
   ) as {
