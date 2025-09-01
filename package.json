@@ -4,7 +4,7 @@
   "version": "0.0.1-alpha.1",
   "type": "module",
   "package_version": 2,
-  "editor": ">=3.8.6",
+  "editor": ">=3.8.5",
   "author": "Bluesquall Team",
   "files": [
     "dist/**/*",
