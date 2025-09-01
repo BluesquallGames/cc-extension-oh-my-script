@@ -5,3 +5,10 @@ catalog:
   'typescript': '^5.8.3'
 packages:
   - 'packages/*'
+supportedArchitectures:
+  os:
+  - win32
+  - darwin
+  cpu:
+  - x64
+  - arm64
