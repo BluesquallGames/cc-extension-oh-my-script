@@ -28,7 +28,7 @@ export const onAfterBuild: BuildHook.onAfterBuild = async (options, result) => {
     return;
   }
   await requestSelfWorkerMessage('build-prod', {
-    buildDir: resolve(result.dest),
+    buildDir: resolve(result.paths.dir),
     debug: options.debug,
     sourceMaps: options.sourceMaps,
     platform: options.platform,

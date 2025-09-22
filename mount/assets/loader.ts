@@ -12,7 +12,7 @@ declare interface SystemJS {
 
 declare const System: SystemJS;
 
-import { HTML5, PREVIEW, EDITOR, BUILD } from 'cc/env';
+import { HTML5, PREVIEW, EDITOR, BUILD, NATIVE } from 'cc/env';
 import { cclegacy } from 'cc';
 
 let omsBaseDir = '';
@@ -122,6 +122,8 @@ if (EDITOR) {
   let omsHostBaseURLPrefix = '';
   if (HTML5) {
     omsHostBaseURLPrefix = new globalThis.URL('./oms/', window.location.href).href;
+  } else if (NATIVE) {
+    omsHostBaseURLPrefix = `no-schema:/oms/`;
   } else {
     omsHostBaseURLPrefix = `project:/oms/`;
   }
