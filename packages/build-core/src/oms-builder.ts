@@ -6,6 +6,7 @@ import * as rollup from 'rollup';
 import rollupPluginCommonJS_ from '@rollup/plugin-commonjs';
 import rollupPluginNodeResolve_ from '@rollup/plugin-node-resolve';
 import rollupPluginBabel_ from '@rollup/plugin-babel';
+import rollupPluginJson_ from '@rollup/plugin-json';
 // @ts-expect-error
 import babelPluginProposalDecorators from '@babel/plugin-proposal-decorators';
 import babelPresetEnv from '@babel/preset-env';
@@ -28,6 +29,7 @@ import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
 const rollupPluginBabel = rollupPluginBabel_ as unknown as typeof rollupPluginBabel_.default;
+const rollupPluginJson = rollupPluginJson_ as unknown as typeof rollupPluginJson_.default;
 
 const mainBundleId = 'main';
 
@@ -843,6 +845,10 @@ class BuildRecord {
       }),
 
       rollupPluginWasm({}),
+
+      rollupPluginJson({
+        namedExports: false,
+      }),
 
       rollupPluginCommonJS({
         extensions: [
