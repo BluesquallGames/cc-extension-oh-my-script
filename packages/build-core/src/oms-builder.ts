@@ -121,7 +121,10 @@ class OmsWatcher {
     const watcher = chokidar.watch(this._mainBundleSourceRoot, {
       ignored: (path, stats) => {
         if (stats?.isFile()) {
-          if (/\.[mc]?[jt]s$/.test(path.toLocaleLowerCase())) {
+          if (/\.[mc]?[jt]sx?$/.test(path.toLocaleLowerCase())) {
+            return false;
+          }
+          if (/.jsonc?$/.test(path.toLocaleLowerCase())) {
             return false;
           }
           return true;
