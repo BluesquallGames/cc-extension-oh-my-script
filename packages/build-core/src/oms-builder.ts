@@ -19,7 +19,7 @@ import { extractInlineUUID, UUIDManager, writeInlineUUID } from './uuid-manager.
 import { format } from 'node:util';
 import { rollupPluginWasm } from './features/rollup-plugin-wasm.js';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
-import type { InvocationParams } from './protocol.js';
+import type { BuildOptions, InvocationParams } from './protocol.js';
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
@@ -46,6 +46,13 @@ export class OmsBuilder {
     await this._rebuild();
   }
 
+  async updateBuildOptions(opts: BuildOptions) {
+    this._buildOptions = opts;
+    if (this._watcher) {
+      await this._watcher.updateBuildOptions(opts);
+    }
+  }
+
   async inlineUUIDs() {
     await this._watcher?.inlineUUIDs();
   }
@@ -56,6 +63,9 @@ export class OmsBuilder {
 
   private _projectPath: string;
   private _watcher: OmsWatcher | undefined;
+  private _buildOptions: BuildOptions = {
+    extensionBuildOptions: [],
+  };
 
   private async _clean() {
     const watcher = this._watcher;
@@ -82,6 +92,7 @@ export class OmsBuilder {
       projectPath: this._projectPath,
       outDir,
       ctx: this._ctx,
+      buildOptions: this._buildOptions,
     });
     await this._watcher.start();
   }
@@ -92,16 +103,19 @@ class OmsWatcher {
     projectPath: string;
     outDir: string;
     ctx: ServerContext;
+    buildOptions: BuildOptions;
   }) {
     const {
       projectPath,
       outDir,
       ctx,
+      buildOptions,
     } = options;
 
     this._projectPath = projectPath;
+    this._buildOptions = buildOptions;
     this._outDir = outDir;
-    this._mainBundleSourceRoot = join(projectPath, 'src');
+    this._mainBundleProjectSourceRoot = join(projectPath, 'src');
     this._ctx = ctx;
 
     const buildRecord = new BuildRecord({
@@ -109,16 +123,13 @@ class OmsWatcher {
     });
     this._buildRecord = buildRecord;
 
-    const mainBundle = new Bundle(mainBundleId, this._mainBundleSourceRoot, resolve(projectPath, 'assets/oms-index.ts'));
-    this._bundles[mainBundle.id] = mainBundle;
-
     const uuidManager = new UUIDManager(this._projectPath);
     this._uuidManager = uuidManager;
 
     const uuidProvider = uuidManager.get.bind(uuidManager);
     this._uuidProvider = uuidProvider;
 
-    const watcher = chokidar.watch(this._mainBundleSourceRoot, {
+    const watcher = chokidar.watch(this._mainBundleProjectSourceRoot, {
       ignored: (path, stats) => {
         if (stats?.isFile()) {
           if (/\.[mc]?[jt]sx?$/.test(path.toLocaleLowerCase())) {
@@ -173,6 +184,8 @@ class OmsWatcher {
         void 0;
       })
     ;
+
+    this._updateBundles();
   }
 
   async start() {
@@ -183,6 +196,17 @@ class OmsWatcher {
     await this._fileWatcher.close();
     this._taskQueue.length = 0;
     await this._runningPromise;
+  }
+
+  async updateBuildOptions(options: BuildOptions) {
+    await this._queueTask({
+      type: 'update-build-options',
+      exec: async () => {
+        this._buildOptions = options;
+        this._updateBundles();
+      },
+    });
+    this._queueBuild();
   }
 
   async inlineUUIDs() {
@@ -233,8 +257,10 @@ class OmsWatcher {
   }
 
   private _projectPath: string;
+  private _buildOptions: Readonly<BuildOptions>;
+
   private _outDir: string;
-  private _mainBundleSourceRoot: string;
+  private _mainBundleProjectSourceRoot: string;
   private _ctx: ServerContext;
   private _uuidManager: UUIDManager;
   private _uuidProvider: UUIDProvider;
@@ -244,6 +270,10 @@ class OmsWatcher {
   private _passiveWatchedFiles = new Set<string>();
   private _nBuildEnds = 0;
   private _bundles: Record<string, Bundle> = {};
+  private _bundleSourceRootMap: Array<{
+    bundleId: string;
+    sourceRoot: string;
+  }> = [];
   private _taskQueue: (OmsWatcherTask & {
     execPromiseWithResolvers: PromiseWithResolvers<void>;
   })[] = [];
@@ -251,6 +281,26 @@ class OmsWatcher {
   private _runningPromise: Promise<void> | undefined;
   private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
   private _lastBuildExtras: BuildExtras | undefined;
+
+  private _updateBundles() {
+    const bundles = this._bundles = {} as typeof this._bundles;
+    const mainBundleSourceRoots: string[] = [
+      this._mainBundleProjectSourceRoot,
+    ];
+    for (const extensionBuildOptions of this._buildOptions.extensionBuildOptions) {
+      const mainSourceRoot = join(extensionBuildOptions.path, 'oms', 'src');
+      mainBundleSourceRoots.push(mainSourceRoot);
+    }
+    bundles[mainBundleId] = new Bundle(mainBundleId, mainBundleSourceRoots, resolve(this._projectPath, 'assets/oms-index.ts'));
+    this._bundleSourceRootMap.length = 0;
+    for (const sourceRoot of mainBundleSourceRoots) {
+      this._bundleSourceRootMap.push({
+        bundleId: mainBundleId,
+        sourceRoot,
+      });
+    }
+    this._fileWatcher.add(mainBundleSourceRoots);
+  }
 
   private _queueTask<TTask extends OmsWatcherTask>(task: TTask) {
     for (const pendingTask of this._taskQueue) {
@@ -304,7 +354,12 @@ class OmsWatcher {
   }
 
   private _getBundleId(path: string): string | undefined {
-    return mainBundleId;
+    for (const { bundleId, sourceRoot } of this._bundleSourceRootMap) {
+      if (path.startsWith(sourceRoot)) {
+        return bundleId;
+      }
+    }
+    return undefined;
   }
 
   private _queueBuild() {
@@ -487,7 +542,7 @@ class OmsWatcher {
         logger.error(`Failed to assign UUID for ${path}: %o`, err);
       }
       shouldRebuildBundle = bundle.addComponentModule(path) || shouldRebuildBundle;
-    } else if (this._isIndexModule(bundle, path)) {
+    } else if (bundle.isIndexFile(path)) {
       shouldRebuildBundle = bundle.addIndexModule(path) || shouldRebuildBundle;
     }
     return shouldRebuildBundle;
@@ -496,7 +551,7 @@ class OmsWatcher {
   private async _ensureUUID(module: string) {
     const code = await fs.readFile(module, 'utf8');
     const inlineUUID = extractInlineUUID(code) ?? '';
-    this._uuidManager.update(module, inlineUUID);
+    await this._uuidManager.update(module, inlineUUID);
   }
 
   private _removeWatchFile(path: string) {
@@ -510,7 +565,7 @@ class OmsWatcher {
     if (this._isComponentModule(bundle, path)) {
       this._uuidManager.delete(path);
       shouldRebuildBundle = bundle.deleteComponentModule(path) || shouldRebuildBundle;
-    } else if (this._isIndexModule(bundle, path)) {
+    } else if (bundle.isIndexFile(path)) {
       shouldRebuildBundle = bundle.deleteIndexModule(path) || shouldRebuildBundle;
     }
     return shouldRebuildBundle;
@@ -519,13 +574,6 @@ class OmsWatcher {
   private _isComponentModule(bundle: Bundle, path: string) {
     void bundle;
     return /\.component\.[cm]?[jt]s$/.test(path.toLocaleLowerCase());
-  }
-
-  private _isIndexModule(bundle: Bundle, path: string) {
-    const { dir, name, ext } = parse(path);
-    return dir === bundle.sourceRoot
-      && /^\.[cm]?[jt]s$/.test(ext.toLowerCase())
-      && name.toLocaleLowerCase() === 'index';
   }
 
   private async _execInlineUUIDs() {
@@ -573,6 +621,9 @@ type OmsWatcherTask = {
 } | {
   type: 'build-prod';
   exec: () => Promise<void>;
+} | {
+  type: 'update-build-options';
+  exec: () => Promise<void>;
 };
 
 interface BuildExtras {
@@ -593,7 +644,7 @@ function* readDirRecurse(root: string, current: string = ''): Generator<string> 
 }
 
 class Bundle {
-  constructor(private _id: string, private _sourceRoot: string, private _proxyFile: string) {
+  constructor(private _id: string, private _sourceRoots: string[], private _proxyFile: string) {
   }
 
   get empty() {
@@ -602,10 +653,6 @@ class Bundle {
 
   get id() {
     return this._id;
-  }
-
-  get sourceRoot() {
-    return this._sourceRoot;
   }
 
   get entry() {
@@ -618,6 +665,13 @@ class Bundle {
 
   get proxyFile() {
     return this._proxyFile;
+  }
+
+  isIndexFile(path: string) {
+    const { dir, name, ext } = parse(path);
+    return this._sourceRoots.some((sourceRoot) => dir === sourceRoot)
+      && /^\.[cm]?[jt]s$/.test(ext.toLowerCase())
+      && name.toLocaleLowerCase() === 'index';
   }
 
   entryFiles() {

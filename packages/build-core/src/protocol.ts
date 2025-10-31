@@ -18,6 +18,17 @@ export interface ClientInvocationMap {
     sourceMaps: boolean | 'inline';
     platform: string;
   }) => void;
+
+  'update-build-options': (options: BuildOptions) => void;
+}
+
+export interface BuildOptions {
+  extensionBuildOptions: ExtensionBuildOptions[];
+}
+
+export interface ExtensionBuildOptions {
+  name: string;
+  path: string;
 }
 
 export type ClientInvocationMethodId = keyof ClientInvocationMap;

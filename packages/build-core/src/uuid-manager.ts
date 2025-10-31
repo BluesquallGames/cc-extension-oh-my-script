@@ -11,14 +11,16 @@ export class UUIDManager {
   async loadCentralized(path: string) {
     let centralized: Record<string, string> = {};
     try {
-      centralized = await fs.readJSON(path);
+      const content = await fs.readFile(path, 'utf8');
+      centralized = JSON.parse(content);
     } catch (err) {
       logger.debug(`Failed to load centralized uuids from ${path}: %o`, err);
       return;
     }
     for (const [k, v] of Object.entries(centralized)) {
       const path = resolve(this._projectPath, k);
-      this._map[path] = {
+      const key = await this._getPathKey(path);
+      this._map[key] = {
         uuid: v,
         centralized: true,
       };
@@ -65,14 +67,15 @@ export class UUIDManager {
     return delete this._map[module];
   }
 
-  update(module: string, inlineUUID: string) {
-    let record = this._map[module];
+  async update(module: string, inlineUUID: string) {
+    const pathKey = await this._getPathKey(module);
+    let record = this._map[pathKey];
     if (!record) {
       record = {
         uuid: '',
         centralized: true,
       };
-      this._map[module] = record;
+      this._map[pathKey] = record;
     }
     if (!inlineUUID) {
       if (record.centralized) {
@@ -108,6 +111,16 @@ export class UUIDManager {
 
   private _generateUUID() {
     return randomUUID();
+  }
+
+  private async _getPathKey(path: string) {
+    let real = path;
+    try {
+      real = await fs.realpath(path);
+    } catch (err) {
+      logger.debug(`Failed to resolve real path of ${path}: %o, may be a broken symlink?`, err);
+    }
+    return real;
   }
 }
 

@@ -1,6 +1,8 @@
 import cp from 'node:child_process';
 import { logger } from '../logger.js';
-import { Ipc, InvocationMessage, ClientInvocationMethodId, ServerInvocationMethodId, setLogger } from '@oms/build-core/protocol';
+import { Ipc, InvocationMessage, ClientInvocationMethodId, ServerInvocationMethodId, setLogger, BuildOptions, ExtensionBuildOptions } from '@oms/build-core/protocol';
+import { addEditorBroadcastListener } from '../utils/editor/common.js';
+import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
 
 setLogger(logger);
 
@@ -8,7 +10,25 @@ const logTag = '[BuilderAgent] ';
 
 export class OmsBuilderAgent {
   constructor() {
+    addEditorBroadcastListener('asset-db:ready', () => {
+      logger.debug(`Asset DB ready`);
+    });
 
+    addListenerOnPackageEnabled(async (pkg: Editor.Interface.PackageInfo) => {
+      logger.debug(`Package enabled: ${pkg.name}`);
+      if (!this._filterPackage(pkg)) {
+        return;
+      }
+      await this._updateBuildOptions();
+    });
+
+    addListenerOnPackageDisabled(async (pkg: Editor.Interface.PackageInfo) => {
+      logger.debug(`Package disabled: ${pkg.name}`);
+      if (!this._filterPackage(pkg)) {
+        return;
+      }
+      await this._updateBuildOptions();
+    });
   }
 
   async close() {
@@ -41,6 +61,7 @@ export class OmsBuilderAgent {
     }
 
     const serverAgent = await this._setup();
+    await this._updateBuildOptions();
     await serverAgent.ipc.invoke('rebuild', undefined);
   }
 
@@ -169,6 +190,47 @@ export class OmsBuilderAgent {
     return {
       ipc,
       childProcess,
+    };
+  }
+
+  private _filterPackage(pkg: Editor.Interface.PackageInfo) {
+    if (pkg.invalid) {
+      return false;
+    }
+    if (!pkg.enable) {
+      return false;
+    }
+    if (!pkg.path.startsWith(Editor.Project.path)) {
+      return false;
+    }
+    return true;
+  }
+
+  private async _updateBuildOptions() {
+    const buildOptions = await this._makeBuildOptions();
+    const serverAgent = await this._setupPromise;
+    if (!serverAgent) {
+      return;
+    }
+    await serverAgent.ipc.invoke('update-build-options', buildOptions);
+  }
+
+  private async _makeBuildOptions(): Promise<BuildOptions> {
+    const pkgs = Editor.Package.getPackages({
+      enable: true,
+      invalid: false,
+    });
+    const extensionBuildOptions: ExtensionBuildOptions[] = [];
+    for (const pkg of pkgs) {
+      if (pkg.path.startsWith(Editor.Project.path)) {
+        extensionBuildOptions.push({
+          name: pkg.name,
+          path: pkg.path,
+        });
+      }
+    }
+    return {
+      extensionBuildOptions,
     };
   }
 }

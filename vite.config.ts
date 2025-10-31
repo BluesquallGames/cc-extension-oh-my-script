@@ -49,7 +49,7 @@ const entries = defineEntries([
   'main.ts',
   'worker/worker-entry.ts',
   'worker/worker-entry-prelude.ts',
-  'contributions/asset-db/register.ts',
+  'contributions/asset-db/index.ts',
   'contributions/scene/index.ts',
   'contributions/server.ts',
   'contributions/builder/index.ts',

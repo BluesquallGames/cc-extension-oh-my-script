@@ -25,11 +25,15 @@ async function getContributions(): Promise<ExtensionContributions> {
 
   return {
     'asset-db': {
+      script: './dist/contributions/asset-db/index.cjs',
+
       mount: {
         path: './mount/assets',
       },
     },
+
     'builder': './dist/contributions/builder/index.cjs',
+
     'messages': {
       'open-devtools': {
         methods: ['open-devtools'],
@@ -40,6 +44,7 @@ async function getContributions(): Promise<ExtensionContributions> {
         methods: x[];
       }
     },
+
     'menu': [
       {
         path: menuPath,
@@ -73,6 +78,11 @@ async function getContributions(): Promise<ExtensionContributions> {
         order: 12,
       },
     ],
+
+    'scene': {
+      script: './dist/contributions/scene/index.cjs',
+    },
+
     'server': './dist/contributions/server.cjs',
   };
 }

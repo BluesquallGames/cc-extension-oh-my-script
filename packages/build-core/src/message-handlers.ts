@@ -23,6 +23,10 @@ export function registerMessageHandlers(ctx: ServerContext) {
     await (ensureOmsBuilder()).buildProd(opts);
   });
 
+  ctx.ipc.listen('update-build-options', async (options) => {
+    await (ensureOmsBuilder()).updateBuildOptions(options);
+  });
+
   function ensureOmsBuilder() {
     assert(globalOmsBuilder, 'omsBuilder not setup');
     return globalOmsBuilder;
