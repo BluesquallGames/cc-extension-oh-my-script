@@ -1,4 +1,4 @@
-import { BuildPlugin } from '@cocos/creator-types/editor/packages/builder/@types/protected.js';
+import { type BuildPlugin } from '@cocos/creator-types/editor/packages/builder/@types/protected.js';
 import { logger } from '../../logger.js';
 
 export const load: BuildPlugin.load = async () => {

@@ -10,7 +10,12 @@ function defineWorkerMessage<TSignature extends (...args: any) => any>() {
   } as WorkerMessageDescription<TSignature>;
 }
 
+export interface FirstBuildResult {
+  beginningModules: string[];
+}
+
 export const workerMessageDescriptions = {
+  'wait-first-build': defineWorkerMessage<() => Promise<FirstBuildResult>>(),
   'rebuild': defineWorkerMessage<() => void>(),
   'restart': defineWorkerMessage<() => void>(),
   'inline-uuids': defineWorkerMessage<() => void>(),

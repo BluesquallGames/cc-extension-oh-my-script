@@ -1,5 +1,5 @@
 import { OmsBuilderAgent } from './oms-builder-agent.js';
-import { workerMessageDescriptions, WorkerMessageSignature } from './worker-message-descriptions.js';
+import { workerMessageDescriptions, type WorkerMessageSignature } from './worker-message-descriptions.js';
 
 const omsBuilderAgent = new OmsBuilderAgent();
 
@@ -18,6 +18,10 @@ export const workerMessageHandlers = {
 
   'build-prod': async (opts) => {
     await omsBuilderAgent.buildProd(opts);
+  },
+
+  'wait-first-build': async () => {
+    return await omsBuilderAgent.waitFirstBuild();
   },
 } satisfies {
   [k in keyof typeof workerMessageDescriptions]: WorkerMessageSignature<k>;

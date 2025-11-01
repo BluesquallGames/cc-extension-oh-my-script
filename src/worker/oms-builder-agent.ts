@@ -1,8 +1,10 @@
 import cp from 'node:child_process';
 import { logger } from '../logger.js';
-import { Ipc, InvocationMessage, ClientInvocationMethodId, ServerInvocationMethodId, setLogger, BuildOptions, ExtensionBuildOptions } from '@oms/build-core/protocol';
+import { Ipc, type InvocationMessage, type ClientInvocationMethodId, type ServerInvocationMethodId, setLogger, type BuildOptions, type ExtensionBuildOptions } from '@oms/build-core/protocol';
 import { addEditorBroadcastListener } from '../utils/editor/common.js';
 import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
+import { promiseWithResolvers, type PromiseWithResolvers } from '../utils/promise-with-resolvers.js';
+import type { FirstBuildResult } from './worker-message-descriptions.js';
 
 setLogger(logger);
 
@@ -29,6 +31,8 @@ export class OmsBuilderAgent {
       }
       await this._updateBuildOptions();
     });
+
+    this._firstBuildPromise = promiseWithResolvers<void>();
   }
 
   async close() {
@@ -97,8 +101,16 @@ export class OmsBuilderAgent {
     await serverAgent.ipc.invoke('build-prod', opts);
   }
 
+  async waitFirstBuild() {
+    if (this._firstBuildPromise instanceof Promise) {
+      return this._firstBuildPromise;
+    }
+    return this._firstBuildPromise.promise;
+  }
+
   private _state = State.closed;
   private _setupPromise: Promise<ServerAgent> | undefined = undefined;
+  private _firstBuildPromise: PromiseWithResolvers<FirstBuildResult> | Promise<FirstBuildResult>;
 
   private async _setup() {
     if (!this._setupPromise) {
@@ -167,12 +179,28 @@ export class OmsBuilderAgent {
         m += `\n${err.stack}`;
       }
       logger.error(m);
+      if (!(this._firstBuildPromise instanceof Promise)) {
+        logger.error(`${logTag}First build failed: %o`, err);
+        const { promise, reject } = this._firstBuildPromise;
+        this._firstBuildPromise = promise;
+        reject(err);
+      }
     });
 
     ipc.listen('build-success', async (changes) => {
       for (const file of changes.affectedFiles) {
         logger.debug(`${logTag}Reimport asset: %s`, file);
         await Editor.Message.request('asset-db', 'reimport-asset', file);
+      }
+      if (changes.affectedFiles.length !== 0) {
+        if (!(this._firstBuildPromise instanceof Promise)) {
+          logger.info(`${logTag}First build success`);
+          const { promise, resolve } = this._firstBuildPromise;
+          this._firstBuildPromise = promise;
+          resolve({
+            beginningModules: changes.affectedFiles,
+          });
+        }
       }
     });
 

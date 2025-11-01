@@ -25,11 +25,16 @@ async function getContributions(): Promise<ExtensionContributions> {
 
   return {
     'asset-db': {
-      script: './dist/contributions/asset-db/index.cjs',
+      'script': './dist/contributions/asset-db/index.cjs',
 
-      mount: {
+      'mount': {
         path: './mount/assets',
       },
+
+      'global-hook': [
+        'beforePreStart',
+        'afterPreStart',
+      ],
     },
 
     'builder': './dist/contributions/builder/index.cjs',

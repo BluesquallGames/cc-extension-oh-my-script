@@ -1,4 +1,4 @@
-import { BuildHook } from '@cocos/creator-types/editor/packages/builder/@types/protected.js';
+import { type BuildHook } from '@cocos/creator-types/editor/packages/builder/@types/protected.js';
 import { logger } from '../../logger.js';
 import { resolve } from 'node:path';
 import { requestSelfWorkerMessage } from '../../utils/request-self.js';
