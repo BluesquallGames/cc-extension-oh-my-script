@@ -15,16 +15,16 @@ import babelPresetTypescript from '@babel/preset-typescript';
 import * as chokidar from 'chokidar';
 import { transformCCComponent, type UUIDProvider } from './features/babel-plugin-cc-component.js';
 import assert from 'node:assert';
-import { extractInlineUUID, UUIDManager, writeInlineUUID } from './uuid-manager.js';
+import { UUIDManager, writeInlineUUID } from './uuid-manager.js';
 import { format } from 'node:util';
 import { rollupPluginWasm } from './features/rollup-plugin-wasm.js';
-import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
 import type { BuildOptions, InvocationParams } from './protocol.js';
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
 import { rollupPluginMemoryModules } from './features/rollup-plugin-memory-modules.js';
 import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate-cc-env.js';
+import { Domain, readDomainExports, type BundleEntrySpec } from './domain.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -32,6 +32,7 @@ const rollupPluginBabel = rollupPluginBabel_ as unknown as typeof rollupPluginBa
 const rollupPluginJson = rollupPluginJson_ as unknown as typeof rollupPluginJson_.default;
 
 const mainBundleId = 'main';
+const mainDomainId = 'main';
 
 export class OmsBuilder {
   constructor(private _ctx: ServerContext, {
@@ -184,11 +185,10 @@ class OmsWatcher {
         void 0;
       })
     ;
-
-    this._updateBundles();
   }
 
   async start() {
+    await this._updateDomains();
     await this._loadCentralizedUUIDs();
   }
 
@@ -203,7 +203,7 @@ class OmsWatcher {
       type: 'update-build-options',
       exec: async () => {
         this._buildOptions = options;
-        this._updateBundles();
+        await this._updateDomains();
       },
     });
     this._queueBuild();
@@ -238,18 +238,9 @@ class OmsWatcher {
       type: 'build-prod',
 
       exec: async () => {
-        const bundles = this._bundles;
-
-        const bundleEntries: Record<string, string> = {};
-        for (const [bundleId, bundle] of Object.entries(bundles)) {
-          if (bundle.empty) {
-            continue;
-          }
-          bundleEntries[this._makeBundleEntryFilenameNoExtension(bundleId)] = bundle.entry;
-        }
-
+        const {entries, autoRunInfos} = this._makeEntries();
         await buildRecord.rebuild({
-          entries: bundleEntries,
+          entries,
           uuidProvider: this._uuidProvider,
         });
       },
@@ -269,9 +260,9 @@ class OmsWatcher {
   private _fileWatcherReady = false;
   private _passiveWatchedFiles = new Set<string>();
   private _nBuildEnds = 0;
-  private _bundles: Record<string, Bundle> = {};
-  private _bundleSourceRootMap: Array<{
-    bundleId: string;
+  private _domains: Record<string, Domain> = {};
+  private _domainSourceRootMap: Array<{
+    domainId: string;
     sourceRoot: string;
   }> = [];
   private _taskQueue: (OmsWatcherTask & {
@@ -282,24 +273,66 @@ class OmsWatcher {
   private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
   private _lastBuildExtras: BuildExtras | undefined;
 
-  private _updateBundles() {
-    const bundles = this._bundles = {} as typeof this._bundles;
-    const mainBundleSourceRoots: string[] = [
-      this._mainBundleProjectSourceRoot,
-    ];
-    for (const extensionBuildOptions of this._buildOptions.extensionBuildOptions) {
-      const mainSourceRoot = join(extensionBuildOptions.path, 'oms', 'src');
-      mainBundleSourceRoots.push(mainSourceRoot);
+  private async _updateDomains() {
+    this._domains = {};
+    this._domainSourceRootMap.length = 0;
+    const domainPromises: Promise<void>[] = [];
+    const mainDomainRoot = join(this._projectPath);
+    domainPromises.push(this._addDomain(
+      mainDomainId, mainDomainRoot, join(mainDomainRoot, 'oms/src'),
+    ));
+    for (const {name: extensionName, path: extensionPath} of this._buildOptions.extensionBuildOptions) {
+      const extensionDomainRoot = join(extensionPath);
+      domainPromises.push(this._addDomain(
+        extensionName, extensionDomainRoot, join(extensionDomainRoot, 'oms/src'),
+      ));
     }
-    bundles[mainBundleId] = new Bundle(mainBundleId, mainBundleSourceRoots, resolve(this._projectPath, 'assets/oms-index.ts'));
-    this._bundleSourceRootMap.length = 0;
-    for (const sourceRoot of mainBundleSourceRoots) {
-      this._bundleSourceRootMap.push({
-        bundleId: mainBundleId,
-        sourceRoot,
-      });
+    await Promise.all(domainPromises);
+  }
+
+  private async _addDomain(domainId: string, domainRoot: string, domainSourceRoot: string) {
+    const domainExports = await readDomainExports(domainRoot, domainSourceRoot);
+    this._domains[domainId] = new Domain(
+      domainId,
+      domainRoot,
+      domainSourceRoot,
+      domainExports,
+      this._uuidManager,
+    );
+    this._domainSourceRootMap.push({
+      domainId,
+      sourceRoot: domainSourceRoot,
+    });
+    this._domainSourceRootMap.sort((a, b) => b.sourceRoot.length - a.sourceRoot.length);
+    this._fileWatcher.add(domainSourceRoot);
+  }
+
+  private _makeEntries() {
+    const entries: Record<string, string> = {};
+    const autoRunInfos: Array<{
+      entryId: string;
+      bundleId: string;
+    }> = [];
+    for (const [domainId, domain] of Object.entries(this._domains)) {
+      const domainEntrySpecs = domain.getEntrySpecs();
+      for (const [domainEntrySpecId, domainEntrySpec] of Object.entries(domainEntrySpecs)) {
+        if (domainEntrySpecId in entries) {
+          logger.warn(`Duplicate entry spec id: ${domainEntrySpecId}`);
+          continue;
+        }
+        entries[domainEntrySpecId] = domainEntrySpec.source;
+        if (domainEntrySpec.autoRun) {
+          autoRunInfos.push({
+            entryId: domainEntrySpecId,
+            bundleId: domainEntrySpec.autoRun.bundleId,
+          });
+        }
+      }
     }
-    this._fileWatcher.add(mainBundleSourceRoots);
+    return {
+      entries,
+      autoRunInfos,
+    };
   }
 
   private _queueTask<TTask extends OmsWatcherTask>(task: TTask) {
@@ -353,10 +386,10 @@ class OmsWatcher {
       });
   }
 
-  private _getBundleId(path: string): string | undefined {
-    for (const { bundleId, sourceRoot } of this._bundleSourceRootMap) {
+  private _getDomainId(path: string): string | undefined {
+    for (const { domainId, sourceRoot } of this._domainSourceRootMap) {
       if (path.startsWith(sourceRoot)) {
-        return bundleId;
+        return domainId;
       }
     }
     return undefined;
@@ -405,26 +438,21 @@ class OmsWatcher {
 
     this._lastBuildExtras = undefined;
 
-    const bundleEntries: Record<string, string> = {};
+    const {entries, autoRunInfos} = this._makeEntries();
     const buildExtras: BuildExtras = {
-      bundles: [],
       entryFiles: new Set(),
+      autoRunInfos,
     };
-    for (const [bundleId, bundle] of Object.entries(this._bundles)) {
-      if (bundle.empty) {
-        continue;
-      }
-      bundleEntries[this._makeBundleEntryFilenameNoExtension(bundleId)] = bundle.entry;
-      buildExtras.bundles.push(bundle);
-      for (const file of bundle.entryFiles()) {
-        buildExtras.entryFiles.add(file);
+    for (const domain of Object.values(this._domains)) {
+      for (const implicitEntry of domain.getImplicitEntries()) {
+        buildExtras.entryFiles.add(implicitEntry);
       }
     }
 
     this._lastBuildExtras = buildExtras;
     return [
       await this._buildRecord.rebuild({
-        entries: bundleEntries,
+        entries: entries,
         uuidProvider: this._uuidProvider,
       }),
       buildExtras,
@@ -435,10 +463,9 @@ class OmsWatcher {
     this._nBuildEnds++;
 
     const affectedFiles: string[] = [];
-    for (const bundle of extras.bundles) {
-      const proxyFile = bundle.proxyFile;
-      const bundleEntryOutFile = resolve(this._outDir, `${this._makeBundleEntryFilenameNoExtension(bundle.id)}.js`);
-      const proxyFileContent = await this._renderProxyFile(proxyFile, bundleEntryOutFile, bundle.id);
+    for (const {entryId, bundleId} of extras.autoRunInfos) {
+      const proxyFile = join(this._projectPath, 'assets/oms', `${bundleId}.ts`);
+      const proxyFileContent = await this._renderProxyFile(bundleId);
       await fs.outputFile(proxyFile, proxyFileContent, 'utf8');
       affectedFiles.push(proxyFile);
     }
@@ -472,11 +499,7 @@ class OmsWatcher {
     await this._saveCentralizedUUIDs();
   }
 
-  private _makeBundleEntryFilenameNoExtension(bundleId: string) {
-    return `bundle-${bundleId}`;
-  }
-
-  private async _renderProxyFile(proxyFilePath: string, bundleEntryPath: string, bundleId: string) {
+  private async _renderProxyFile(bundleId: string) {
     const template = await fs.readFile(join(helpersDir, 'proxy.ts.ejs'), 'utf8');
     const source = Ejs.render(template, {
       bundleId,
@@ -514,13 +537,7 @@ class OmsWatcher {
       } else if (operation === 'delete') {
         entryChanged = (await this._removeWatchFile(file)) || entryChanged;
       } else if (operation === 'change') {
-        const bundleId = this._getBundleId(file);
-        if (bundleId) {
-          const bundle = this._bundles[bundleId];
-          if (bundle && this._isComponentModule(bundle, file)) {
-            await this._ensureUUID(file);
-          }
-        }
+        await this._updateWatchFile(file);
       }
     }
     this._reportUUIDDuplications();
@@ -528,52 +545,36 @@ class OmsWatcher {
   }
 
   private async _addWatchFile(path: string) {
-    const bundleId = this._getBundleId(path);
-    if (!bundleId) {
+    const domainId = this._getDomainId(path);
+    if (!domainId) {
       return false;
     }
-    const bundle = this._bundles[bundleId];
-    assert.ok(bundle, `Bundle ${bundleId} not found`);
-    let shouldRebuildBundle = false;
-    if (this._isComponentModule(bundle, path)) {
-      try {
-        await this._ensureUUID(path);
-      } catch (err) {
-        logger.error(`Failed to assign UUID for ${path}: %o`, err);
-      }
-      shouldRebuildBundle = bundle.addComponentModule(path) || shouldRebuildBundle;
-    } else if (bundle.isIndexFile(path)) {
-      shouldRebuildBundle = bundle.addIndexModule(path) || shouldRebuildBundle;
+    const domain = this._domains[domainId];
+    assert.ok(domain, `Domain ${domainId} not found`);
+    const shouldRebuildBundles = await domain.addSourceFile(path);
+    return shouldRebuildBundles;
+  }
+
+  private async _removeWatchFile(path: string) {
+    const domainId = this._getDomainId(path);
+    if (!domainId) {
+      return false;
     }
+    const domain = this._domains[domainId];
+    assert.ok(domain, `Domain ${domainId} not found`);
+    const shouldRebuildBundle = await domain.removeSourceFile(path);
     return shouldRebuildBundle;
   }
 
-  private async _ensureUUID(module: string) {
-    const code = await fs.readFile(module, 'utf8');
-    const inlineUUID = extractInlineUUID(code) ?? '';
-    await this._uuidManager.update(module, inlineUUID);
-  }
-
-  private _removeWatchFile(path: string) {
-    const bundleId = this._getBundleId(path);
-    if (!bundleId) {
+  private async _updateWatchFile(path: string) {
+    const domainId = this._getDomainId(path);
+    if (!domainId) {
       return false;
     }
-    const bundle = this._bundles[bundleId];
-    assert.ok(bundle, `Bundle ${bundleId} not found`);
-    let shouldRebuildBundle = false;
-    if (this._isComponentModule(bundle, path)) {
-      this._uuidManager.delete(path);
-      shouldRebuildBundle = bundle.deleteComponentModule(path) || shouldRebuildBundle;
-    } else if (bundle.isIndexFile(path)) {
-      shouldRebuildBundle = bundle.deleteIndexModule(path) || shouldRebuildBundle;
+    const domain = this._domains[domainId];
+    if (domain) {
+      await domain.updateSourceFile(path);
     }
-    return shouldRebuildBundle;
-  }
-
-  private _isComponentModule(bundle: Bundle, path: string) {
-    void bundle;
-    return /\.component\.[cm]?[jt]s$/.test(path.toLocaleLowerCase());
   }
 
   private async _execInlineUUIDs() {
@@ -627,7 +628,10 @@ type OmsWatcherTask = {
 };
 
 interface BuildExtras {
-  bundles: Bundle[];
+  autoRunInfos: Array<{
+    entryId: string;
+    bundleId: string;
+  }>;
   entryFiles: Set<string>;
 }
 
@@ -640,109 +644,6 @@ function* readDirRecurse(root: string, current: string = ''): Generator<string> 
     }
   } else {
     yield current;
-  }
-}
-
-class Bundle {
-  constructor(private _id: string, private _sourceRoots: string[], private _proxyFile: string) {
-  }
-
-  get empty() {
-    return !this._indexModule && this._componentModules.length === 0;
-  }
-
-  get id() {
-    return this._id;
-  }
-
-  get entry() {
-    if (this._entryDirty) {
-      this._entrySource = this._makeEntrySource();
-      this._entryDirty = false;
-    }
-    return this._entrySource;
-  }
-
-  get proxyFile() {
-    return this._proxyFile;
-  }
-
-  isIndexFile(path: string) {
-    const { dir, name, ext } = parse(path);
-    return this._sourceRoots.some((sourceRoot) => dir === sourceRoot)
-      && /^\.[cm]?[jt]s$/.test(ext.toLowerCase())
-      && name.toLocaleLowerCase() === 'index';
-  }
-
-  entryFiles() {
-    const files: string[] = [];
-    if (this._indexModule) {
-      files.push(this._indexModule);
-    }
-    files.push(...this._componentModules);
-    return files;
-  }
-
-  addComponentModule(sourceFile: string) {
-    if (this._componentModules.includes(sourceFile)) {
-      return false;
-    }
-    this._componentModules.push(sourceFile);
-    this._invalidateEntry();
-    return true;
-  }
-
-  deleteComponentModule(sourceFile: string) {
-    const componentModuleIndex = this._componentModules.findIndex((m) => m === sourceFile);
-    if (componentModuleIndex < 0) {
-      return false;
-    }
-    this._componentModules.splice(componentModuleIndex, 1);
-    this._invalidateEntry();
-    return true;
-  }
-
-  addIndexModule(sourceFile: string) {
-    if (this._indexModule === sourceFile) {
-      return false;
-    }
-    this._indexModule = sourceFile;
-    this._invalidateEntry();
-    return true;
-  }
-
-  deleteIndexModule(sourceFile: string) {
-    if (this._indexModule !== sourceFile) {
-      return false;
-    }
-    this._indexModule = '';
-    this._invalidateEntry();
-    return true;
-  }
-
-  private _indexModule = '';
-  private _componentModules: string[] = [];
-  private _entryDirty = true;
-  private _entrySource = '';
-
-  private _invalidateEntry() {
-    this._entryDirty = true;
-    this._entrySource = '';
-  }
-
-  private _makeEntrySource() {
-    let source = '';
-    if (this._indexModule) {
-      source
-        += `/// The index module.\n`
-          + `import '${makeFileSystemAbsoluteImportSpecifier(this._indexModule)}';\n`;
-    }
-    for (const componentModule of this._componentModules) {
-      source += `import '${makeFileSystemAbsoluteImportSpecifier(componentModule)}';\n`;
-    }
-    // Explicitly mark this as a module.
-    source += `export {};\n`;
-    return source;
   }
 }
 

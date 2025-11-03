@@ -176,6 +176,22 @@ export async function loadBundleEntry(bundleId: string, parent: string) {
   }
 }
 
+export async function loadOMSExports(id: string, parent: string) {
+  const iSlash = id.indexOf('/');
+  if (iSlash < 0) {
+    throw new Error(`Invalid OMS exports id: ${id}`);
+  }
+  const domainId = id.slice(0, iSlash);
+  const exportsId = id.slice(iSlash + 1);
+  try {
+    const exportSubpath = exportsId === '' ? '' : '/' + exportsId;
+    return await import(`${omsURLPrefix}${domainId}-export${exportSubpath}.js`);
+  } catch (err) {
+    console.error(`Failed to load OMS exports: ${id}, did you installed OMS extension?`);
+    throw err;
+  }
+}
+
 export function saveRequiringFrames() {
   const frames: {
     module: unknown;

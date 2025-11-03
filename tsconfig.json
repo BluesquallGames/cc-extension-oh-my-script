@@ -10,7 +10,6 @@
     "outDir": "./dist",
     "sourceMap": true,
     "strict": true,
-    "verbatimModuleSyntax": true,
     "types": [
       "electron",
       "sharp",
