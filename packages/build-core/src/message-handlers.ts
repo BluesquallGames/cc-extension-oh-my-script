@@ -27,6 +27,10 @@ export function registerMessageHandlers(ctx: ServerContext) {
     await (ensureOmsBuilder()).updateBuildOptions(options);
   });
 
+  ctx.ipc.listen('ping', async () => {
+    ctx.ipc.invoke('pong', undefined);
+  });
+
   function ensureOmsBuilder() {
     assert(globalOmsBuilder, 'omsBuilder not setup');
     return globalOmsBuilder;

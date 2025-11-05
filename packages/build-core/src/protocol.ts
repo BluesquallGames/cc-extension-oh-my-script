@@ -20,6 +20,8 @@ export interface ClientInvocationMap {
   }) => void;
 
   'update-build-options': (options: BuildOptions) => void;
+
+  'ping': () => void;
 }
 
 export interface BuildOptions {
@@ -44,6 +46,8 @@ export interface ServerInvocationMap {
     message: string;
     stack?: string;
   }) => void;
+
+  'pong': () => void;
 }
 
 export type ServerInvocationMethodId = keyof ServerInvocationMap;

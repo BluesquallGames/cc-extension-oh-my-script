@@ -5,6 +5,7 @@ import { addEditorBroadcastListener } from '../utils/editor/common.js';
 import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
 import { promiseWithResolvers, type PromiseWithResolvers } from '../utils/promise-with-resolvers.js';
 import type { FirstBuildResult } from './worker-message-descriptions.js';
+import { setTimeout } from 'node:timers/promises';
 
 setLogger(logger);
 
@@ -32,17 +33,17 @@ export class OmsBuilderAgent {
       await this._updateBuildOptions();
     });
 
-    this._firstBuildPromise = promiseWithResolvers<void>();
+    this._firstBuildPromise = promiseWithResolvers<FirstBuildResult>();
   }
 
   async close() {
-    switch (this._state) {
-    case State.closing:
-    case State.closed:
+    switch (this._state.type) {
+    case StateType.closing:
+    case StateType.closed:
       return;
     }
 
-    this._state = State.closing;
+    this._state = { type: StateType.closing };
     if (this._setupPromise) {
       const setupPromise = this._setupPromise;
       this._setupPromise = undefined;
@@ -52,14 +53,14 @@ export class OmsBuilderAgent {
       } catch (err) {
         logger.error(`${logTag}close builder agent failed: ${err}`);
       } finally {
-        this._state = State.closed;
+        this._state = { type: StateType.closed };
       }
     }
   }
 
   async rebuild() {
-    switch (this._state) {
-    case State.closing:
+    switch (this._state.type) {
+    case StateType.closing:
       logger.error(`${logTag} is not opened`);
       return;
     }
@@ -75,8 +76,8 @@ export class OmsBuilderAgent {
   }
 
   async inlineUUIDs() {
-    switch (this._state) {
-    case State.closing:
+    switch (this._state.type) {
+    case StateType.closing:
       logger.error(`${logTag} is not opened`);
       return;
     }
@@ -91,8 +92,8 @@ export class OmsBuilderAgent {
     sourceMaps: boolean | 'inline';
     platform: string;
   }) {
-    switch (this._state) {
-    case State.closing:
+    switch (this._state.type) {
+    case StateType.closing:
       logger.error(`${logTag} is not opened`);
       return;
     }
@@ -108,18 +109,55 @@ export class OmsBuilderAgent {
     return this._firstBuildPromise.promise;
   }
 
-  private _state = State.closed;
+  private _state: {
+    type: StateType.closed | StateType.opening | StateType.closing;
+  } | {
+    type: StateType.opened;
+    serverAgent: ServerAgent;
+  } = {
+      type: StateType.closed,
+    };
+
   private _setupPromise: Promise<ServerAgent> | undefined = undefined;
   private _firstBuildPromise: PromiseWithResolvers<FirstBuildResult> | Promise<FirstBuildResult>;
+  private _pingPongDuration = 5;
+  private _pongReceived = false;
+
+  private _startPingPong(serverAgent: ServerAgent) {
+    serverAgent.ipc.invoke('ping', undefined).catch((err) => {
+      logger.error(`${logTag}OMS builder ping failed: %o`, err);
+    });
+    void setTimeout(this._pingPongDuration * 1000).then(() => this._onPingFrame());
+  }
+
+  private async _onPingFrame() {
+    switch (this._state.type) {
+    case StateType.closing:
+    case StateType.closed:
+    case StateType.opening:
+      return;
+    }
+    /// asserts(this._state === State.opened);
+    const pongReceived = this._pongReceived;
+    this._pongReceived = false;
+    if (pongReceived) {
+      this._startPingPong(this._state.serverAgent);
+      return;
+    }
+    logger.error(`${logTag}OMS builder no response after ${this._pingPongDuration}s, will restart.`);
+    await this.close();
+    await this.restart();
+  }
 
   private async _setup() {
     if (!this._setupPromise) {
-      this._state = State.opening;
+      this._state = { type: StateType.opening };
       this._setupPromise = this._doSetup().then((serverAgent) => {
-        this._state = State.opened;
+        this._state = { type: StateType.opened, serverAgent };
+        this._startPingPong(serverAgent);
         return serverAgent;
       }).catch((err) => {
-        this._state = State.closed;
+        this._state = { type: StateType.closed };
         throw err;
       });
     }
@@ -172,6 +210,10 @@ export class OmsBuilderAgent {
         await callback(...args);
       }, ...remainArgs);
     };
+
+    ipc.listen('pong', async () => {
+      this._pongReceived = true;
+    });
 
     ipc.listen('build-failed', async (err) => {
       let m = err.message;
@@ -268,7 +310,7 @@ interface ServerAgent {
   childProcess: cp.ChildProcess;
 }
 
-enum State {
+enum StateType {
   opening,
   opened,
   closing,
