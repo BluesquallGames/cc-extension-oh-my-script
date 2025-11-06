@@ -279,7 +279,7 @@ class OmsWatcher {
     const domainPromises: Promise<void>[] = [];
     const mainDomainRoot = join(this._projectPath);
     domainPromises.push(this._addDomain(
-      mainDomainId, mainDomainRoot, join(mainDomainRoot, 'oms/src'),
+      mainDomainId, mainDomainRoot, join(mainDomainRoot, 'src'),
     ));
     for (const {name: extensionName, path: extensionPath} of this._buildOptions.extensionBuildOptions) {
       const extensionDomainRoot = join(extensionPath);

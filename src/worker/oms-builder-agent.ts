@@ -124,6 +124,7 @@ export class OmsBuilderAgent {
   private _pongReceived = false;
 
   private _startPingPong(serverAgent: ServerAgent) {
+    return;
     serverAgent.ipc.invoke('ping', undefined).catch((err) => {
       logger.error(`${logTag}OMS builder ping failed: %o`, err);
     });
@@ -206,7 +207,7 @@ export class OmsBuilderAgent {
       const [methodId, callback, ...remainArgs] = args;
       logger.debug(`${logTag}Listening to ${methodId}`);
       return listen_vendor.call(this, methodId, async (...args) => {
-        logger.debug(`${logTag}Received ${methodId} with args: %o`, args);
+        // logger.debug(`${logTag}Received ${methodId} with args: %o`, args);
         await callback(...args);
       }, ...remainArgs);
     };

@@ -128,7 +128,7 @@ export class Ipc<
       method: methodId,
       args,
     };
-    logger.debug(`Sending message: ${JSON.stringify(message)}`);
+    // logger.debug(`Sending message: ${JSON.stringify(message)}`);
     this._transport.send(message);
     return new Promise<InvocationReturnValue<T>>((resolve, reject) => {
       this._invocations.set(invocationId, (response: InvocationResultMessage<TOutgoingMessageId>) => {
