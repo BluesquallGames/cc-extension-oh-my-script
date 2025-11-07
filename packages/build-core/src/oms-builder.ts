@@ -25,6 +25,7 @@ import { helpersDir } from './helpers-dir.js';
 import { rollupPluginMemoryModules } from './features/rollup-plugin-memory-modules.js';
 import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate-cc-env.js';
 import { Domain, readDomainExports, type BundleEntrySpec } from './domain.js';
+import { rollupPluginDomain } from './features/rollup-plugin-domain.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -116,7 +117,6 @@ class OmsWatcher {
     this._projectPath = projectPath;
     this._buildOptions = buildOptions;
     this._outDir = outDir;
-    this._mainBundleProjectSourceRoot = join(projectPath, 'src');
     this._ctx = ctx;
 
     const buildRecord = new BuildRecord({
@@ -130,7 +130,7 @@ class OmsWatcher {
     const uuidProvider = uuidManager.get.bind(uuidManager);
     this._uuidProvider = uuidProvider;
 
-    const watcher = chokidar.watch(this._mainBundleProjectSourceRoot, {
+    const watcher = chokidar.watch([], {
       ignored: (path, stats) => {
         if (stats?.isFile()) {
           if (/\.[mc]?[jt]sx?$/.test(path.toLocaleLowerCase())) {
@@ -242,6 +242,7 @@ class OmsWatcher {
         await buildRecord.rebuild({
           entries,
           uuidProvider: this._uuidProvider,
+          domains: this._domains,
         });
       },
     });
@@ -251,7 +252,6 @@ class OmsWatcher {
   private _buildOptions: Readonly<BuildOptions>;
 
   private _outDir: string;
-  private _mainBundleProjectSourceRoot: string;
   private _ctx: ServerContext;
   private _uuidManager: UUIDManager;
   private _uuidProvider: UUIDProvider;
@@ -454,6 +454,7 @@ class OmsWatcher {
       await this._buildRecord.rebuild({
         entries: entries,
         uuidProvider: this._uuidProvider,
+        domains: this._domains,
       }),
       buildExtras,
     ] as const;
@@ -649,6 +650,7 @@ function* readDirRecurse(root: string, current: string = ''): Generator<string> 
 
 interface InternalBuildOptions {
   entries: Record<string, string>;
+  domains: Record<string, Domain>;
   uuidProvider: UUIDProvider | undefined;
 }
 
@@ -682,6 +684,7 @@ class BuildRecord {
     message: string;
     stack?: string;
   }> {
+    logger.debug(`Build with options: %o`, this._buildOptions);
     try {
       const {
         entries,
@@ -731,6 +734,7 @@ class BuildRecord {
   private _buildOptions: InternalBuildOptions = {
     entries: {},
     uuidProvider: undefined,
+    domains: {},
   };
 
   private async _doBuild(options: InternalBuildOptions): Promise<BuildResult> {
@@ -773,7 +777,26 @@ class BuildRecord {
       externals.push('cc/env');
     }
 
+    const uuidProvider = options.uuidProvider;
     const inputPlugins: rollup.Plugin[] = [
+      {
+        name: 'oms:uuid',
+
+        shouldTransformCachedModule(options) {
+          if (!uuidProvider) {
+            return undefined;
+          }
+          const uuid = uuidProvider(options.id);
+          const previousUUID = options.meta[ROLLUP_MODULE_CACHE_KEY_UUID];
+          if (uuid !== previousUUID) {
+            logger.debug(`UUID of ${options.id} changed from ${previousUUID} to ${uuid}, invalidate its cache`);
+            options.meta[ROLLUP_MODULE_CACHE_KEY_UUID] = uuid;
+            return true;
+          }
+          return undefined;
+        },
+      },
+
       {
         name: 'oms:load-entry-modules',
 
@@ -800,6 +823,10 @@ class BuildRecord {
 
       rollupPluginMemoryModules({
         modules: memoryModules,
+      }),
+
+      rollupPluginDomain({
+        domains: options.domains,
       }),
 
       rollupPluginWasm({}),
@@ -928,3 +955,5 @@ class BuildRecord {
     });
   }
 }
+
+const ROLLUP_MODULE_CACHE_KEY_UUID = '__oms_uuid__';

@@ -23,6 +23,10 @@ export class Domain {
     }
   }
 
+  getExports() {
+    return this._exports;
+  }
+
   getEntrySpecs(): Record<string, BundleEntrySpec> {
     const entrySpecs: Record<string, BundleEntrySpec> = {};
 
@@ -39,15 +43,15 @@ export class Domain {
     }
 
     for (const [key, value] of Object.entries(this._exports)) {
+      let entryName = '';
       if (key === '.') {
-        entrySpecs[`${this._id}-export`] = {
-          source: join(this._sourceRoot, value),
-        };
+        entryName = `${this._id}-export`;
       } else {
-        entrySpecs[`${this._id}-export/${key.startsWith('./') ? key.slice(2) : key}`] = {
-          source: `export * from ${JSON.stringify(join(this._sourceRoot, value))}`,
-        };
+        entryName = `${this._id}-export/${key.startsWith('./') ? key.slice(2) : key}`;
       }
+      entrySpecs[entryName] = {
+        source: `export * from ${JSON.stringify(join(this._sourceRoot, value))}`,
+      };
     }
 
     logger.verbose(`Entry specs for domain ${this._id}: ${JSON.stringify(entrySpecs, undefined, 2)}`);
@@ -79,6 +83,14 @@ export class Domain {
   async updateSourceFile(path: string) {
     const bundle = this._getBundle(path);
     return bundle.updateSourceFile(path);
+  }
+
+  resolveExport(exportSubpath: string): string | undefined {
+    const subpath = this._exports[exportSubpath];
+    if (!subpath) {
+      return undefined;
+    }
+    return join(this._sourceRoot, subpath);
   }
   
   private _mainBundle: Bundle;
