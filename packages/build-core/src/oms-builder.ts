@@ -89,10 +89,15 @@ export class OmsBuilder {
       spaces: 2,
     });
 
+    const typingOutDir = resolve(this._projectPath, 'temp', 'oms', 'typing');
+    await fs.ensureDir(typingOutDir);
+    await fs.emptyDir(typingOutDir);
+
     assert(!this._watcher);
     this._watcher = new OmsWatcher({
       projectPath: this._projectPath,
       outDir,
+      typingOutDir,
       ctx: this._ctx,
       buildOptions: this._buildOptions,
     });
@@ -104,12 +109,14 @@ class OmsWatcher {
   constructor(options: {
     projectPath: string;
     outDir: string;
+    typingOutDir: string,
     ctx: ServerContext;
     buildOptions: BuildOptions;
   }) {
     const {
       projectPath,
       outDir,
+      typingOutDir,
       ctx,
       buildOptions,
     } = options;
@@ -117,6 +124,7 @@ class OmsWatcher {
     this._projectPath = projectPath;
     this._buildOptions = buildOptions;
     this._outDir = outDir;
+    this._typingOutDir = typingOutDir;
     this._ctx = ctx;
 
     const buildRecord = new BuildRecord({
@@ -252,6 +260,7 @@ class OmsWatcher {
   private _buildOptions: Readonly<BuildOptions>;
 
   private _outDir: string;
+  private _typingOutDir: string;
   private _ctx: ServerContext;
   private _uuidManager: UUIDManager;
   private _uuidProvider: UUIDProvider;
@@ -288,6 +297,18 @@ class OmsWatcher {
       ));
     }
     await Promise.all(domainPromises);
+    const pathMappings: Record<string, string[]> = {};
+    for (const [domainId, domain] of Object.entries(this._domains)) {
+      const domainPathMappings = domain.generatePathMappings();
+      Object.assign(pathMappings, domainPathMappings);
+    }
+    await fs.outputJson(join(this._typingOutDir, 'tsconfig.json'), {
+      compilerOptions: {
+        paths: pathMappings,
+      },
+    }, {
+      spaces: 2,
+    });
   }
 
   private async _addDomain(domainId: string, domainRoot: string, domainSourceRoot: string) {

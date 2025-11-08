@@ -23,10 +23,6 @@ export class Domain {
     }
   }
 
-  getExports() {
-    return this._exports;
-  }
-
   getEntrySpecs(): Record<string, BundleEntrySpec> {
     const entrySpecs: Record<string, BundleEntrySpec> = {};
 
@@ -91,6 +87,16 @@ export class Domain {
       return undefined;
     }
     return join(this._sourceRoot, subpath);
+  }
+
+  generatePathMappings() {
+    return Object.fromEntries(Object.entries(this._exports).map(([exportId, exportValue]) => {
+        const path = exportId === '.' ? '' : `/${exportId.replace(/^\.\//, '')}`;
+        return [
+          `domain://${this._id}${path}`,
+          [join(this._sourceRoot, exportValue)],
+        ];
+    }));
   }
   
   private _mainBundle: Bundle;
