@@ -5,6 +5,7 @@ import fs from 'fs-extra';
 import { join, normalize, relative } from 'node:path';
 import { logger } from './logger.js';
 import { glob } from 'node:fs/promises';
+import { domainURLProtocol } from './constants.js';
 
 export class Domain {
   constructor(
@@ -93,7 +94,7 @@ export class Domain {
     return Object.fromEntries(Object.entries(this._exports).map(([exportId, exportValue]) => {
         const path = exportId === '.' ? '' : `/${exportId.replace(/^\.\//, '')}`;
         return [
-          `domain://${this._id}${path}`,
+          `${domainURLProtocol}://${this._id}${path}`,
           [join(this._sourceRoot, exportValue)],
         ];
     }));
