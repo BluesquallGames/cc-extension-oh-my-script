@@ -233,7 +233,7 @@ export class OmsBuilderAgent {
     ipc.listen('build-success', async (changes) => {
       for (const file of changes.affectedFiles) {
         logger.debug(`${logTag}Reimport asset: %s`, file);
-        await Editor.Message.request('asset-db', 'reimport-asset', file);
+        await Editor.Message.request('asset-db', 'refresh-asset', file);
       }
       if (changes.affectedFiles.length !== 0) {
         if (!(this._firstBuildPromise instanceof Promise)) {
