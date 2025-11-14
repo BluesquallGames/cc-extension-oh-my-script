@@ -84,7 +84,7 @@ export class OmsBuilder {
     await fs.ensureDir(outDir);
     await fs.emptyDir(outDir);
     await fs.outputJSON(join(outDir, 'package.json'), {
-      type: 'module',
+      type: 'commonjs',
     }, {
       spaces: 2,
     });
