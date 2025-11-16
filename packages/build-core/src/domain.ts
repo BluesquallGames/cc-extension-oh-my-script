@@ -83,7 +83,7 @@ export class Domain {
   }
 
   resolveExport(exportSubpath: string): string | undefined {
-    const subpath = this._exports[exportSubpath];
+    const subpath = this._exports[exportSubpath === '.' ? '.' : `./${exportSubpath}`];
     if (!subpath) {
       return undefined;
     }
