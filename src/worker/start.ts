@@ -20,7 +20,6 @@ export async function startWorker() {
   });
   globalOmsWorker = new OmsWorker(worker);
   await globalOmsWorker.ready();
-  await globalOmsWorker.request('rebuild');
 }
 
 export async function openOmsDevtools() {

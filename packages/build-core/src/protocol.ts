@@ -3,12 +3,16 @@ import { logger } from './logger.js';
 
 export { setLogger } from './logger.js';
 
+export interface BuildResult {
+  affectedFiles: string[];
+}
+
 export interface ClientInvocationMap {
   'setup': (options: {
     project: string;
   }) => void;
 
-  'rebuild': () => void;
+  'rebuild': (opts: BuildOptions) => BuildResult;
 
   'inline-uuids': () => void;
 
@@ -38,15 +42,6 @@ export type ClientInvocationMethodId = keyof ClientInvocationMap;
 export interface ServerInvocationMap {
   'bootstrapped': () => void;
 
-  'build-success': (changes: {
-    affectedFiles: string[];
-  }) => void;
-
-  'build-failed': (error: {
-    message: string;
-    stack?: string;
-  }) => void;
-
   'pong': () => void;
 }
 
@@ -58,7 +53,7 @@ export type InvocationMethodId = keyof InvocationMap;
 
 export type InvocationParams<T extends InvocationMethodId> = Parameters<InvocationMap[T]>[0];
 
-export type InvocationReturnValue<T extends InvocationMethodId> = InvocationMap[T] extends () => Promise<infer R> ? R : void;
+export type InvocationReturnValue<T extends InvocationMethodId> = InvocationMap[T] extends (...args: any[]) => infer R ? (R extends Promise<infer U> ? U : R) : never;
 
 export enum InvocationDirection {
   call = 'call',

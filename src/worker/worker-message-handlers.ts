@@ -5,7 +5,7 @@ const omsBuilderAgent = new OmsBuilderAgent();
 
 export const workerMessageHandlers = {
   'rebuild': async () => {
-    await omsBuilderAgent.rebuild();
+    return await omsBuilderAgent.rebuild();
   },
 
   'restart': async () => {
@@ -18,10 +18,6 @@ export const workerMessageHandlers = {
 
   'build-prod': async (opts) => {
     await omsBuilderAgent.buildProd(opts);
-  },
-
-  'wait-first-build': async () => {
-    return await omsBuilderAgent.waitFirstBuild();
   },
 } satisfies {
   [k in keyof typeof workerMessageDescriptions]: WorkerMessageSignature<k>;

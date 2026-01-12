@@ -18,14 +18,16 @@ import assert from 'node:assert';
 import { UUIDManager, writeInlineUUID } from './uuid-manager.js';
 import { format } from 'node:util';
 import { rollupPluginWasm } from './features/rollup-plugin-wasm.js';
-import type { BuildOptions, InvocationParams } from './protocol.js';
+import type { BuildOptions, BuildResult, InvocationParams } from './protocol.js';
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
 import { rollupPluginMemoryModules } from './features/rollup-plugin-memory-modules.js';
 import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate-cc-env.js';
-import { Domain, readDomainExports, type BundleEntrySpec } from './domain.js';
+import { Domain, readDomainExports, readDomainPackageJson, type BundleEntrySpec } from './domain.js';
 import { rollupPluginDomain } from './features/rollup-plugin-domain.js';
+import { TaskQueue, type TaskExecuteContext } from './task-queue.js';
+import { setTimeout } from 'node:timers/promises';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -44,8 +46,9 @@ export class OmsBuilder {
     this._projectPath = project;
   }
 
-  async rebuild() {
-    await this._rebuild();
+  async rebuild(opts: BuildOptions): Promise<BuildResult> {
+    this._buildOptions = opts;
+    return await this._rebuild();
   }
 
   async updateBuildOptions(opts: BuildOptions) {
@@ -102,6 +105,7 @@ export class OmsBuilder {
       buildOptions: this._buildOptions,
     });
     await this._watcher.start();
+    return await this._watcher.build();
   }
 }
 
@@ -157,8 +161,8 @@ class OmsWatcher {
     watcher
       .on('ready', () => {
         logger.debug('Watcher ready');
-        this._fileWatcherReady = true;
-        this._queueBuild();
+        this._fileWatcherReadyPromise?.resolve();
+        this._fileWatcherReadyPromise = undefined;
       })
       .on('error', (error) => {
         logger.error('Watcher error: %s', error);
@@ -171,7 +175,7 @@ class OmsWatcher {
           return;
         }
         this._fileQueue[path] = 'add';
-        this._queueBuild();
+        this._queueBuild('file added');
       })
       .on('change', (path) => {
         switch (this._fileQueue[path]) {
@@ -180,11 +184,11 @@ class OmsWatcher {
           return;
         }
         this._fileQueue[path] = 'change';
-        this._queueBuild();
+        this._queueBuild('file changed');
       })
       .on('unlink', (path) => {
         this._fileQueue[path] = 'delete';
-        this._queueBuild();
+        this._queueBuild('file deleted');
       })
       .on('addDir', (path) => {
         void 0;
@@ -202,28 +206,31 @@ class OmsWatcher {
 
   async close() {
     await this._fileWatcher.close();
-    this._taskQueue.length = 0;
-    await this._runningPromise;
+    await this._taskQueue.abort();
   }
 
   async updateBuildOptions(options: BuildOptions) {
-    await this._queueTask({
+    await this._taskQueue.queueTask({
       type: 'update-build-options',
       exec: async () => {
         this._buildOptions = options;
         await this._updateDomains();
       },
     });
-    this._queueBuild();
+    this._queueBuild('build options updated');
   }
 
   async inlineUUIDs() {
-    await this._queueTask({
+    await this._taskQueue.queueTask({
       type: 'inlineUUIDs',
       exec: async () => {
         await this._execInlineUUIDs();
       },
     });
+  }
+
+  async build() {
+    return await this._queueBuild('build');
   }
 
   async buildProd(opts: InvocationParams<'build-prod'>) {
@@ -242,7 +249,7 @@ class OmsWatcher {
       },
     });
 
-    await this._queueTask({
+    await this._taskQueue.queueTask({
       type: 'build-prod',
 
       exec: async () => {
@@ -266,7 +273,7 @@ class OmsWatcher {
   private _uuidProvider: UUIDProvider;
   private _buildRecord: BuildRecord;
   private _fileWatcher: chokidar.FSWatcher;
-  private _fileWatcherReady = false;
+  private _fileWatcherReadyPromise: PromiseWithResolvers<void> | undefined = promiseWithResolvers();
   private _passiveWatchedFiles = new Set<string>();
   private _nBuildEnds = 0;
   private _domains: Record<string, Domain> = {};
@@ -274,13 +281,15 @@ class OmsWatcher {
     domainId: string;
     sourceRoot: string;
   }> = [];
-  private _taskQueue: (OmsWatcherTask & {
-    execPromiseWithResolvers: PromiseWithResolvers<void>;
-  })[] = [];
-
-  private _runningPromise: Promise<void> | undefined;
   private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
   private _lastBuildExtras: BuildExtras | undefined;
+  private _taskQueue: TaskQueue<{
+    'build': { exec: (ctx: TaskExecuteContext) => Promise<BuildResult> },
+    'rebuild': { exec: () => Promise<void> },
+    'inlineUUIDs': { exec: () => Promise<void> },
+    'build-prod': { exec: () => Promise<void> },
+    'update-build-options': { exec: () => Promise<void> },
+  }> = new TaskQueue();
 
   private async _updateDomains() {
     this._domains = {};
@@ -288,12 +297,12 @@ class OmsWatcher {
     const domainPromises: Promise<void>[] = [];
     const mainDomainRoot = join(this._projectPath);
     domainPromises.push(this._addDomain(
-      mainDomainId, mainDomainRoot, join(mainDomainRoot, 'src'),
+      mainDomainId, mainDomainRoot, 'src',
     ));
     for (const {name: extensionName, path: extensionPath} of this._buildOptions.extensionBuildOptions) {
       const extensionDomainRoot = join(extensionPath);
       domainPromises.push(this._addDomain(
-        extensionName, extensionDomainRoot, join(extensionDomainRoot, 'oms/src'),
+        extensionName, extensionDomainRoot, 'oms/src',
       ));
     }
     await Promise.all(domainPromises);
@@ -311,21 +320,30 @@ class OmsWatcher {
     });
   }
 
-  private async _addDomain(domainId: string, domainRoot: string, domainSourceRoot: string) {
-    const domainExports = await readDomainExports(domainRoot, domainSourceRoot);
-    this._domains[domainId] = new Domain(
+  private async _addDomain(domainId: string, domainRoot: string, preferredDomainSourceRoot: string) {
+    const domainPackageJson = await readDomainPackageJson(domainRoot);
+    const partitions = domainPackageJson?.oms?.partitions ?? [
+      {rootDir: preferredDomainSourceRoot},
+    ];
+    const domainExports = await readDomainExports(domainRoot, partitions, domainPackageJson);
+    const domain = this._domains[domainId] = new Domain(
       domainId,
       domainRoot,
-      domainSourceRoot,
+      partitions,
       domainExports,
       this._uuidManager,
     );
-    this._domainSourceRootMap.push({
-      domainId,
-      sourceRoot: domainSourceRoot,
-    });
+    const sourceRoots = domain.sourceRoots;
+    for (const sourceRoot of sourceRoots) {
+      this._domainSourceRootMap.push({
+        domainId,
+        sourceRoot,
+      });
+    }
     this._domainSourceRootMap.sort((a, b) => b.sourceRoot.length - a.sourceRoot.length);
-    this._fileWatcher.add(domainSourceRoot);
+    for (const sourceRoot of sourceRoots) {
+      this._fileWatcher.add(sourceRoot);
+    }
   }
 
   private _makeEntries() {
@@ -356,57 +374,6 @@ class OmsWatcher {
     };
   }
 
-  private _queueTask<TTask extends OmsWatcherTask>(task: TTask) {
-    for (const pendingTask of this._taskQueue) {
-      if (pendingTask.type === task.type) {
-        logger.debug(`Task [${task.type}] was pending, merged.`);
-        return pendingTask.execPromiseWithResolvers.promise;
-      }
-    }
-    logger.debug(`Queue task: [${task.type}]`);
-    const execPromiseWithResolvers = promiseWithResolvers<void>();
-    this._taskQueue.push({
-      ...task,
-      execPromiseWithResolvers: execPromiseWithResolvers,
-    });
-    if (!this._runningPromise) {
-      logger.debug(`Start execute task queue`);
-      this._executeTasks();
-    }
-    return execPromiseWithResolvers.promise;
-  }
-
-  private _executeTasks() {
-    assert.ok(!this._runningPromise);
-    const tasks = this._taskQueue.slice();
-    this._taskQueue.length = 0;
-    this._runningPromise = (async () => {
-      for (const task of tasks) {
-        try {
-          logger.debug(`Execute task: [${task.type}]`);
-          await task.exec();
-          task.execPromiseWithResolvers.resolve();
-          logger.debug(`Task [${task.type}] done`);
-        } catch (err) {
-          logger.debug(`Task [${task.type}] failed`);
-          logger.error(err);
-          task.execPromiseWithResolvers.reject(err);
-        }
-      }
-    })()
-      .catch((err) => {
-        logger.error(err);
-      })
-      .finally(() => {
-        this._runningPromise = undefined;
-        if (this._taskQueue.length !== 0) {
-          this._executeTasks();
-        } else {
-          logger.debug('Task queue empty, idling.');
-        }
-      });
-  }
-
   private _getDomainId(path: string): string | undefined {
     for (const { domainId, sourceRoot } of this._domainSourceRootMap) {
       if (path.startsWith(sourceRoot)) {
@@ -416,35 +383,72 @@ class OmsWatcher {
     return undefined;
   }
 
-  private _queueBuild() {
-    if (!this._fileWatcherReady) {
-      return;
-    }
-    this._queueTask({
+  private _queueBuild(reason: string) {
+    logger.verbose(`Will queue build. Reason: ${reason}`);
+    return this._taskQueue.queueTask({
       type: 'build',
-      exec: async () => {
-        await this._execBuild();
+      exec: async (ctx) => {
+        ctx.acceptMerge = true;
+
+        let interruptedByAbort = false;
+        for (; ;) {
+          const timerInterruptController = new AbortController();
+          let interruptedByMerge = false;
+          const onMerge = () => {
+            interruptedByMerge = true;
+            timerInterruptController.abort();
+          };
+          ctx.once('merge', onMerge);
+          const onAbort = () => {
+            interruptedByAbort = true;
+            timerInterruptController.abort();
+          };
+          ctx.once('abort', onAbort);
+          try {
+            logger.verbose(`Waiting for further merge signal...`);
+            await setTimeout(100, undefined, {
+              signal: timerInterruptController.signal,
+            });
+          } catch (err) {
+            if (typeof err === 'object' && err !== null && 'name' in err && err.name === 'AbortError') {
+              if (interruptedByMerge) {
+                logger.verbose(`Build merged.`);
+                continue;
+              }
+            }
+          } finally {
+            ctx.off('merge', onMerge);
+            ctx.off('abort', onAbort);
+          }
+          break;
+        }
+
+        if (interruptedByAbort) {
+          throw new Error('Build aborted by user');
+        }
+
+        logger.verbose(`Build started.`);
+        ctx.acceptMerge = false;
+        
+        await this._fileWatcherReadyPromise?.promise;
+        return await this._execBuild();
       },
     }).catch((err) => {
       logger.error(err);
     });
   }
 
-  private async _execBuild() {
+  private async _execBuild(): Promise<BuildResult> {
     try {
       const [buildResult, buildExtras] = await this._doExecBuild();
       if (buildResult.ok) {
-        await this._onBuildEnd(buildResult.buildResult, buildExtras);
+        return await this._onBuildEnd(buildResult.buildResult, buildExtras);
       } else {
-        await this._ctx.ipc.invoke('build-failed', {
-          message: buildResult.message,
-          stack: buildResult.stack,
-        });
+        // @ts-expect-error
+        throw new Error(`Build failed`, {cause: buildResult});
       }
     } catch (err) {
-      await this._ctx.ipc.invoke('build-failed', {
-        message: format('%o', err),
-      });
+      throw err;
     }
   }
 
@@ -481,7 +485,7 @@ class OmsWatcher {
     ] as const;
   }
 
-  private async _onBuildEnd(buildResult: BuildResult, extras: BuildExtras) {
+  private async _onBuildEnd(buildResult: InternalBuildResult, extras: BuildExtras): Promise<BuildResult> {
     this._nBuildEnds++;
 
     const affectedFiles: string[] = [];
@@ -491,11 +495,6 @@ class OmsWatcher {
       await fs.outputFile(proxyFile, proxyFileContent, 'utf8');
       affectedFiles.push(proxyFile);
     }
-    this._ctx.ipc.invoke('build-success', {
-      affectedFiles: [...affectedFiles],
-    }).catch((err) => {
-      logger.error(err);
-    });
 
     logger.debug(`[Build x ${this._nBuildEnds}] Build end, inferred files: %s`, buildResult.inferredFiles);
     const passiveWatchedFiles = this._passiveWatchedFiles;
@@ -519,6 +518,8 @@ class OmsWatcher {
     }
 
     await this._saveCentralizedUUIDs();
+
+    return {affectedFiles};
   }
 
   private async _renderProxyFile(bundleId: string) {
@@ -632,23 +633,6 @@ function* listEntries(sourceRoot: string) {
   }
 }
 
-type OmsWatcherTask = {
-  type: 'build';
-  exec: () => Promise<void>;
-} | {
-  type: 'rebuild';
-  exec: () => Promise<void>;
-} | {
-  type: 'inlineUUIDs';
-  exec: () => Promise<void>;
-} | {
-  type: 'build-prod';
-  exec: () => Promise<void>;
-} | {
-  type: 'update-build-options';
-  exec: () => Promise<void>;
-};
-
 interface BuildExtras {
   autoRunInfos: Array<{
     entryId: string;
@@ -675,7 +659,7 @@ interface InternalBuildOptions {
   uuidProvider: UUIDProvider | undefined;
 }
 
-interface BuildResult {
+interface InternalBuildResult {
   inferredFiles: string[];
 }
 
@@ -699,7 +683,7 @@ class BuildRecord {
 
   async build(): Promise<{
     ok: true;
-    buildResult: BuildResult;
+    buildResult: InternalBuildResult;
   } | {
     ok: false;
     message: string;
@@ -758,7 +742,7 @@ class BuildRecord {
     domains: {},
   };
 
-  private async _doBuild(options: InternalBuildOptions): Promise<BuildResult> {
+  private async _doBuild(options: InternalBuildOptions): Promise<InternalBuildResult> {
     const entries = options.entries;
     if (Object.keys(entries).length === 0) {
       logger.debug('No entry found, skip build');
@@ -772,7 +756,7 @@ class BuildRecord {
     return mainPart;
   }
 
-  private async _doBuildUnchecked(options: InternalBuildOptions): Promise<BuildResult> {
+  private async _doBuildUnchecked(options: InternalBuildOptions): Promise<InternalBuildResult> {
     const {
       entries,
     } = options;

@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { Bundle } from './bundle.js';
 import type { UUIDManager } from './uuid-manager.js';
 import fs from 'fs-extra';
-import { join, normalize, relative } from 'node:path';
+import { dirname, join, normalize, relative } from 'node:path';
 import { logger } from './logger.js';
 import { glob } from 'node:fs/promises';
 import { domainURLProtocol } from './constants.js';
@@ -11,17 +11,22 @@ export class Domain {
   constructor(
     private _id: string,
     private _domainRoot: string,
-    private _sourceRoot: string,
+    private _partitions: PackageOmsPartitionConfig[],
     private _exports: Record<string, string>,
     uuidManager: UUIDManager,
   ) {
     {
       const bundleId = this._id;
-      const sourceRoot = this._sourceRoot;
-      this._mainBundle = new Bundle(bundleId, sourceRoot, uuidManager);
+      this._mainBundle = new Bundle(bundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager);
       this._bundles[bundleId] = this._mainBundle;
-      this._bundleSourceRootMap.push({ sourceRoot, bundleId });
+      for (const partition of _partitions) {
+        this._bundleSourceRootMap.push({ sourceRoot: join(this._domainRoot, partition.rootDir), bundleId });
+      }
     }
+  }
+
+  get sourceRoots() {
+    return this._partitions.map((p) => join(this._domainRoot, p.rootDir));
   }
 
   getEntrySpecs(): Record<string, BundleEntrySpec> {
@@ -47,7 +52,7 @@ export class Domain {
         entryName = `${this._id}-export/${key.startsWith('./') ? key.slice(2) : key}`;
       }
       entrySpecs[entryName] = {
-        source: `export * from ${JSON.stringify(join(this._sourceRoot, value))}`,
+        source: `export * from ${JSON.stringify(join(this._domainRoot, value))}`,
       };
     }
 
@@ -87,7 +92,7 @@ export class Domain {
     if (!subpath) {
       return undefined;
     }
-    return join(this._sourceRoot, subpath);
+    return join(this._domainRoot, subpath);
   }
 
   generatePathMappings() {
@@ -95,7 +100,7 @@ export class Domain {
         const path = exportId === '.' ? '' : `/${exportId.replace(/^\.\//, '')}`;
         return [
           `${domainURLProtocol}://${this._id}${path}`,
-          [join(this._sourceRoot, exportValue)],
+          [join(this._domainRoot, exportValue)],
         ];
     }));
   }
@@ -110,10 +115,10 @@ export class Domain {
   private _getBundle(path: string) {
     const bundleId = this._bundleSourceRootMap.find(({ sourceRoot }) => path.startsWith(sourceRoot))?.bundleId;
     if (!bundleId) {
-      throw new Error(`Bundle for ${path} not found`);
+      throw new Error(`Bundle for ${path} not found in domain ${this._id}, root dirs: ${this._bundleSourceRootMap.map(({sourceRoot}) => sourceRoot).join(', ')}`);
     }
     const bundle = this._bundles[bundleId];
-    assert.ok(bundle, `Bundle for ${path} not found`);
+    assert.ok(bundle, `Bundle for ${path} not found in domain ${this._id}`);
     return bundle;
   }
 }
@@ -125,22 +130,21 @@ export interface BundleEntrySpec {
   };
 }
 
-export async function readDomainExports(domainRoot: string, domainSourceRoot: string): Promise<Record<string, string>> {
-  const packageJson = await readDomainPackageJson(domainRoot);
-  if (!packageJson || !packageJson.exports) {
+export async function readDomainExports(domainRoot: string, partitions: PackageOmsPartitionConfig[], domainPackageJson: DomainPackageJson | undefined): Promise<Record<string, string>> {
+  if (!domainPackageJson || !domainPackageJson.exports) {
     return {};
   }
-  const exports = collectExports(packageJson.exports, ['oms', 'module', 'import']);
+  const domainSourceRoots = partitions.map((p) => join(domainRoot, p.rootDir));
+  const exports = collectExports(domainPackageJson.exports, ['oms', 'module', 'import']);
   const fileExports: Record<string, string> = {};
-  const relativeDomainSourceRoot = relative(domainRoot, domainSourceRoot);
   for (const [key, rawValue] of Object.entries(exports)) {
     if (rawValue === '.') {
       fileExports[key] = rawValue;
       continue;
     }
-    const expectedHead = './' + normalize(`${relativeDomainSourceRoot}/`).replace(/\\/g, '/');
+    const expectedHead = './';
     if (!rawValue.startsWith(expectedHead)) {
-      logger.error(`In ${packageJson._path}, Export { ${key}:${rawValue} } should name a path starting with ${expectedHead}`);
+      logger.error(`In ${domainPackageJson._path}, Export { ${key}:${rawValue} } should name a path starting with ${expectedHead}`);
       continue;
     }
     const value = rawValue.slice(expectedHead.length);
@@ -151,14 +155,14 @@ export async function readDomainExports(domainRoot: string, domainSourceRoot: st
     }
     const iKeyAsterisk = key.indexOf('*');
     if (iKeyAsterisk < 0) {
-      logger.error(`In ${packageJson._path}, Export { ${key}:${rawValue} } does not mismatch`);
+      logger.error(`In ${domainPackageJson._path}, Export { ${key}:${rawValue} } does not mismatch`);
       continue;
     }
     const valuePrefix = value.slice(0, iValueAsterisk);
     const valuePostfix = value.slice(iValueAsterisk + 1);
     const keyPrefix = key.slice(0, iKeyAsterisk);
     const keyPostfix = key.slice(iKeyAsterisk + 1);
-    const expandedValues = searchPotentialExportFiles(domainSourceRoot, valuePrefix, valuePostfix);
+    const expandedValues = searchPotentialExportFiles(domainSourceRoots, valuePrefix, valuePostfix);
     for await (const expandedValue of expandedValues) {
       fileExports[`${keyPrefix}${expandedValue}${keyPostfix}`] = `${valuePrefix}${expandedValue}${valuePostfix}`;
     }
@@ -166,10 +170,12 @@ export async function readDomainExports(domainRoot: string, domainSourceRoot: st
   return fileExports;
 }
 
-async function* searchPotentialExportFiles(root: string, prefix: string, postfix: string): AsyncGenerator<string> {
-  for await (const file of readFilesRecursive(root)) {
-    if (file.startsWith(prefix) && file.endsWith(postfix)) {
-      return file.slice(prefix.length, -postfix.length);
+async function* searchPotentialExportFiles(rootDirs: string[], prefix: string, postfix: string): AsyncGenerator<string> {
+  for (const rootDir of rootDirs) {
+    for await (const file of readFilesRecursive(rootDir)) {
+      if (file.startsWith(prefix) && file.endsWith(postfix)) {
+        yield file.slice(prefix.length, -postfix.length);
+      }
     }
   }
 }
@@ -186,27 +192,40 @@ async function* readFilesRecursive(root: string): AsyncGenerator<string> {
   }
 }
 
-async function readDomainPackageJson(domainRoot: string) {
+export interface DomainPackageJson {
+  _path: string,
+  exports: null | PackageExports;
+  oms: PackageOmsConfig;
+}
+
+export async function readDomainPackageJson(domainRoot: string) {
   const packageJsonPath = join(domainRoot, 'package.json');
   if (!fs.pathExists(packageJsonPath)) {
-    return;
+    return undefined;
   }
   const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
   if (typeof packageJson !== 'object' || !packageJson.exports) {
-    return;
+    return undefined;
   }
-  const normalizedPackageJson: {
-    _path: string,
-    exports: null | PackageExports;
-  } = {
+  const normalizedPackageJson: DomainPackageJson = {
     _path: packageJsonPath,
     exports: null,
+    oms: {},
   };
   const rawExports = packageJson.exports;
   if (validatePackageExports(rawExports)) {
     normalizedPackageJson.exports = rawExports;
   }
+  normalizedPackageJson.oms = parsePackageJsonOms(packageJson.oms, dirname(packageJsonPath)) ?? {};
   return normalizedPackageJson;
+}
+
+interface PackageOmsPartitionConfig {
+  rootDir: string;
+}
+
+interface PackageOmsConfig {
+  partitions?: PackageOmsPartitionConfig[];
 }
 
 type PackageExports = string | string[] | Record<string, string | ConditionalPackageExports>;
@@ -214,6 +233,26 @@ type PackageExports = string | string[] | Record<string, string | ConditionalPac
 type ConditionalPackageExports = {
   [key: string]: null | string | ConditionalPackageExports;
 };
+
+function parsePackageJsonOms(oms: unknown, packageJsonDir: string) {
+  if (typeof oms !== 'object' || !oms) {
+    return undefined;
+  }
+  const omsConfig: PackageOmsConfig = {};
+
+  if ('partitions' in oms && Array.isArray(oms.partitions)) {
+    omsConfig.partitions = oms.partitions.map((partition) => {
+      if (!('rootDir' in partition) || typeof partition.rootDir !== 'string') {
+        return;
+      }
+      return {
+        rootDir: relative(packageJsonDir, join(packageJsonDir, partition.rootDir)),
+      };
+    }).filter((partition): partition is PackageOmsPartitionConfig => partition !== undefined);
+  }
+
+  return omsConfig;
+}
 
 function validatePackageExports(exports: unknown): exports is PackageExports {
   if (typeof exports === 'string') {

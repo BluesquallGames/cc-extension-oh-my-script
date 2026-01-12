@@ -3,8 +3,7 @@ import { logger } from '../logger.js';
 import { Ipc, type InvocationMessage, type ClientInvocationMethodId, type ServerInvocationMethodId, setLogger, type BuildOptions, type ExtensionBuildOptions } from '@oms/build-core/protocol';
 import { addEditorBroadcastListener } from '../utils/editor/common.js';
 import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
-import { promiseWithResolvers, type PromiseWithResolvers } from '../utils/promise-with-resolvers.js';
-import type { FirstBuildResult } from './worker-message-descriptions.js';
+import type { BuildResult } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
 
 setLogger(logger);
@@ -32,8 +31,6 @@ export class OmsBuilderAgent {
       }
       await this._updateBuildOptions();
     });
-
-    this._firstBuildPromise = promiseWithResolvers<FirstBuildResult>();
   }
 
   async close() {
@@ -58,16 +55,27 @@ export class OmsBuilderAgent {
     }
   }
 
-  async rebuild() {
+  async rebuild(): Promise<BuildResult> {
     switch (this._state.type) {
     case StateType.closing:
-      logger.error(`${logTag} is not opened`);
-      return;
+      throw new Error(`${logTag} is closing`);
     }
 
     const serverAgent = await this._setup();
-    await this._updateBuildOptions();
-    await serverAgent.ipc.invoke('rebuild', undefined);
+    try {
+      const buildOptions = await this._makeBuildOptions();
+      const rebuildResult = await serverAgent.ipc.invoke('rebuild', buildOptions);
+      for (const file of rebuildResult.affectedFiles) {
+        logger.debug(`${logTag}Reimport asset: %s`, file);
+        await Editor.Message.request('asset-db', 'refresh-asset', file);
+      }
+      return {
+        beginningModules: rebuildResult.affectedFiles,
+      };
+    } catch (err) {
+      logger.error(`${logTag}rebuild failed: ${err}`);
+      throw err;
+    }
   }
 
   async restart() {
@@ -102,13 +110,6 @@ export class OmsBuilderAgent {
     await serverAgent.ipc.invoke('build-prod', opts);
   }
 
-  async waitFirstBuild() {
-    if (this._firstBuildPromise instanceof Promise) {
-      return this._firstBuildPromise;
-    }
-    return this._firstBuildPromise.promise;
-  }
-
   private _state: {
     type: StateType.closed | StateType.opening | StateType.closing;
   } | {
@@ -119,7 +120,6 @@ export class OmsBuilderAgent {
     };
 
   private _setupPromise: Promise<ServerAgent> | undefined = undefined;
-  private _firstBuildPromise: PromiseWithResolvers<FirstBuildResult> | Promise<FirstBuildResult>;
   private _pingPongDuration = 5;
   private _pongReceived = false;
 
@@ -214,37 +214,6 @@ export class OmsBuilderAgent {
 
     ipc.listen('pong', async () => {
       this._pongReceived = true;
-    });
-
-    ipc.listen('build-failed', async (err) => {
-      let m = err.message;
-      if (err.stack) {
-        m += `\n${err.stack}`;
-      }
-      logger.error(m);
-      if (!(this._firstBuildPromise instanceof Promise)) {
-        logger.error(`${logTag}First build failed: %o`, err);
-        const { promise, reject } = this._firstBuildPromise;
-        this._firstBuildPromise = promise;
-        reject(err);
-      }
-    });
-
-    ipc.listen('build-success', async (changes) => {
-      for (const file of changes.affectedFiles) {
-        logger.debug(`${logTag}Reimport asset: %s`, file);
-        await Editor.Message.request('asset-db', 'refresh-asset', file);
-      }
-      if (changes.affectedFiles.length !== 0) {
-        if (!(this._firstBuildPromise instanceof Promise)) {
-          logger.info(`${logTag}First build success`);
-          const { promise, resolve } = this._firstBuildPromise;
-          this._firstBuildPromise = promise;
-          resolve({
-            beginningModules: changes.affectedFiles,
-          });
-        }
-      }
     });
 
     await new Promise<void>((resolve, reject) => {

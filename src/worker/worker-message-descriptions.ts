@@ -10,13 +10,12 @@ function defineWorkerMessage<TSignature extends (...args: any) => any>() {
   } as WorkerMessageDescription<TSignature>;
 }
 
-export interface FirstBuildResult {
+export interface BuildResult {
   beginningModules: string[];
 }
 
 export const workerMessageDescriptions = {
-  'wait-first-build': defineWorkerMessage<() => Promise<FirstBuildResult>>(),
-  'rebuild': defineWorkerMessage<() => void>(),
+  'rebuild': defineWorkerMessage<() => Promise<BuildResult>>(),
   'restart': defineWorkerMessage<() => void>(),
   'inline-uuids': defineWorkerMessage<() => void>(),
   'build-prod': defineWorkerMessage<(opts: Parameters<OmsBuilderAgent['buildProd']>[0]) => void>(),

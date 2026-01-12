@@ -1,7 +1,8 @@
+import { setTimeout } from 'node:timers/promises';
 import { logger } from '../../logger.js';
 import { selfExtensionName } from '../../self-info.js';
 import { requestSelfWorkerMessage } from '../../utils/request-self.js';
-import { type FirstBuildResult } from '../../worker/worker-message-descriptions.js';
+import { type BuildResult } from '../../worker/worker-message-descriptions.js';
 
 interface AssetDBInfo {
   preImportExtList?: string[];
@@ -11,14 +12,19 @@ export async function load() {
 
 }
 
-let firstBuildResult: FirstBuildResult | undefined = undefined;
+let firstBuildResult: BuildResult | undefined = undefined;
 
 export const methods = {
   async beforePreStart(assetDBInfo: AssetDBInfo) {
     void assetDBInfo;
     logger.debug(`Wait for ${selfExtensionName} first build...`);
     try {
-      firstBuildResult = await requestSelfWorkerMessage('wait-first-build');
+      firstBuildResult = await Promise.race([
+        requestSelfWorkerMessage('rebuild'),
+        setTimeout(1000 * 15).then(() => {
+          throw new Error(`${selfExtensionName} first build timeout after 15s`);
+        }),
+      ]);
       logger.debug(`${selfExtensionName} first build done: %o`, firstBuildResult);
     } catch (err) {
       logger.error(`${selfExtensionName} first build failed: %o`, err);

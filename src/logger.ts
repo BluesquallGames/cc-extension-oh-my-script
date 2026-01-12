@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path';
 import winston from 'winston';
 import Transport from 'winston-transport';
-import { ensureDirSync } from 'fs-extra';
+import { ensureDirSync, outputFileSync } from 'fs-extra';
 import { selfExtensionName, selfPackageJson } from './self-info.js';
 
 const printf = (withEntry: boolean) => winston.format.printf(({ level, message, timestamp }) => {
@@ -18,6 +18,10 @@ const printf = (withEntry: boolean) => winston.format.printf(({ level, message, 
 
 const logFile = join(Editor.Project.tmpDir, 'logs', `${selfExtensionName}-${selfPackageJson.version}.log`);
 ensureDirSync(dirname(logFile));
+
+export function createLogFile() {
+  outputFileSync(logFile, '');
+}
 
 class EditorTransport extends Transport {
   override log(info: any, next: () => void) {

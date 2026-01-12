@@ -10,9 +10,9 @@ export function registerMessageHandlers(ctx: ServerContext) {
     globalOmsBuilder = new OmsBuilder(ctx, args);
   });
 
-  ctx.ipc.listen('rebuild', async () => {
+  ctx.ipc.listen('rebuild', async (opts) => {
     const omsBuilder = ensureOmsBuilder();
-    await omsBuilder.rebuild();
+    return await omsBuilder.rebuild(opts);
   });
 
   ctx.ipc.listen('inline-uuids', async () => {

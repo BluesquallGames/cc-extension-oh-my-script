@@ -5,7 +5,7 @@ import fs from 'fs-extra';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
 
 export class Bundle {
-  constructor(private _id: string, private _sourceRoot: string, private _uuidManager: UUIDManager) {
+  constructor(private _id: string, private _indexModuleDirs: string[], private _uuidManager: UUIDManager) {
   }
 
   get empty() {
@@ -109,7 +109,7 @@ export class Bundle {
 
   private _isIndexModule(sourceFile: string) {
     const { dir, name, ext } = parse(sourceFile);
-    if (this._sourceRoot === dir
+    if (this._indexModuleDirs.includes(dir)
       && /^\.[cm]?[jt]s$/.test(ext.toLowerCase())
       && name.toLocaleLowerCase() === 'index'
     ) {
