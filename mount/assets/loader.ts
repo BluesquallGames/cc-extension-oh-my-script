@@ -27,6 +27,8 @@ if (EDITOR) {
     pathToFileURL,
     fileURLToPath,
   } = r('url');
+  const fs = r('fs');
+  const vm = r('vm') as typeof import('vm');
   omsBaseDir = ps.join(Editor.Project.tmpDir, 'oms/out', ps.sep);
   const omsBaseURL = pathToFileURL(omsBaseDir);
 
@@ -77,8 +79,29 @@ if (EDITOR) {
             }
             register = [dependencies, declare];
           };
+          const exec = (path: string) => {
+            let code = '';
+            try {
+              code = fs.readFileSync(path, 'utf8');
+            } catch (err) {
+              throw new Error(`Failed to read module ${path}: ${err}`);
+            }
+            let fn: Function;
+            try {
+              fn = vm.compileFunction(code + `\n//# sourceURL=${pathToFileURL(path).href}`, ['System'], {
+                filename: path,
+              });
+            } catch (err) {
+              throw new Error(`Failed to read module ${path}: ${err}`);
+            }
+            try {
+              fn(System);
+            } catch (err) {
+              throw new Error(`Failed to execute module ${path}: ${err}`);
+            }
+          };
           try {
-            r(path);
+            exec(path);
           } finally {
             systemJSPrototype.register = register_vendor;
             delete r.cache[path];
