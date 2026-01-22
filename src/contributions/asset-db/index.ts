@@ -34,6 +34,7 @@ export const methods = {
   async afterPreStart(assetDBInfo: AssetDBInfo) {
     void assetDBInfo;
     if (firstBuildResult) {
+      logger.debug(`Import beginning modules: %o`, firstBuildResult.beginningModules);
       for (const beggingModulePath of firstBuildResult.beginningModules) {
         try {
           const dbURL = await Editor.Message.request('asset-db', 'query-url', beggingModulePath);
