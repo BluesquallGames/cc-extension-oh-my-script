@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/triple-slash-reference
-/// <reference path="../../../../temp/declarations/cc.d.ts"/>
+/// <reference types="@cocos/creator-types/engine.d.ts"/>
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="../../../../temp/declarations/cc.env.d.ts"/>
 
@@ -29,6 +28,7 @@ if (EDITOR) {
   } = r('url');
   const fs = r('fs');
   const vm = r('vm') as typeof import('vm');
+  // @ts-expect-error
   omsBaseDir = ps.join(Editor.Project.tmpDir, 'oms/out', ps.sep);
   const omsBaseURL = pathToFileURL(omsBaseDir);
 

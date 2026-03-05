@@ -4,6 +4,8 @@
     "target": "esnext",
     "module": "esnext",
     "rootDir": "assets",
-    "noEmit": true,
+    "emitDeclarationOnly": true,
+    "composite": true,
+    "skipLibCheck": true,
   },
 }
