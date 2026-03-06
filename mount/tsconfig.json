@@ -5,6 +5,8 @@
     "module": "esnext",
     "rootDir": "assets",
     "emitDeclarationOnly": true,
+    "declarationDir": "lib",
+    "declarationMap": true,
     "composite": true,
     "skipLibCheck": true,
   },
