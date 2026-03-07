@@ -5,13 +5,17 @@ import { addEditorBroadcastListener } from '../utils/editor/common.js';
 import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
 import type { BuildResult } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
+import EventEmitter from 'node:events';
 
 setLogger(logger);
 
 const logTag = '[BuilderAgent] ';
 
-export class OmsBuilderAgent {
+export class OmsBuilderAgent extends EventEmitter<{
+  setup: [];
+}> {
   constructor() {
+    super();
     addEditorBroadcastListener('asset-db:ready', () => {
       logger.debug(`Asset DB ready`);
     });
@@ -63,6 +67,7 @@ export class OmsBuilderAgent {
 
     const serverAgent = await this._setup();
     const buildOptions = await this._makeBuildOptions();
+    logger.debug(`${logTag}Rebuild with options: %o`, buildOptions);
     const rebuildResult = await serverAgent.ipc.invoke('rebuild', buildOptions);
     for (const file of rebuildResult.affectedFiles) {
       logger.debug(`${logTag}Reimport asset: %s`, file);
@@ -151,6 +156,7 @@ export class OmsBuilderAgent {
       this._setupPromise = this._doSetup().then((serverAgent) => {
         this._state = { type: StateType.opened, serverAgent };
         this._startPingPong(serverAgent);
+        this.emit('setup');
         return serverAgent;
       }).catch((err) => {
         this._state = { type: StateType.closed };
@@ -161,6 +167,7 @@ export class OmsBuilderAgent {
   }
 
   private async _doSetup(): Promise<ServerAgent> {
+    logger.debug(`${logTag}Setup OMS builder`);
     const main = require.resolve('@oms/build-core/main');
     const childProcess = cp.spawn('node', ['--inspect', main], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -180,22 +187,10 @@ export class OmsBuilderAgent {
     childProcess.on('error', (err) => {
       logger.error(`${logTag}child process error: ${err}`);
     });
-    await new Promise<cp.ChildProcess>((resolve, reject) => {
-      childProcess.on('spawn', () => {
-        resolve(childProcess);
-      });
-      childProcess.on('error', (err) => {
-        reject(err);
-      });
-    });
-
     const ipc = new Ipc<ClientInvocationMethodId, ServerInvocationMethodId>({
       send: (message) => {
         childProcess.send(message);
       },
-    });
-    childProcess.on('message', (message) => {
-      ipc.dispatch(message as InvocationMessage);
     });
     const listen_vendor = ipc.listen;
     ipc.listen = function (...args) {
@@ -206,20 +201,25 @@ export class OmsBuilderAgent {
         await callback(...args);
       }, ...remainArgs);
     };
+    childProcess.on('message', (message) => {
+      ipc.dispatch(message as InvocationMessage);
+    });
+
+    const bootstrapPromise = new Promise<void>((resolve, reject) => {
+      ipc.listen('bootstrapped', async () => {
+        logger.debug(`${logTag}OMS builder has bootstrapped`);
+        await ipc.invoke('setup', {
+          project: Editor.Project.path,
+        });
+        resolve();
+      });
+    });
 
     ipc.listen('pong', async () => {
       this._pongReceived = true;
     });
 
-    await new Promise<void>((resolve, reject) => {
-      ipc.listen('bootstrapped', async () => {
-        await ipc.invoke('setup', {
-          project: Editor.Project.path,
-        });
-        await this.rebuild();
-        resolve();
-      });
-    });
+    await bootstrapPromise;
 
     logger.debug(`${logTag}Builder has setup`);
 

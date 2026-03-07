@@ -20,6 +20,9 @@ export async function startWorker() {
   });
   globalOmsWorker = new OmsWorker(worker);
   await globalOmsWorker.ready();
+  if (process.argv.includes('--open-oms-devtools')) {
+    globalOmsWorker.openDevtools();
+  }
 }
 
 export async function openOmsDevtools() {

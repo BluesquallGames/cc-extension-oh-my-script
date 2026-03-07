@@ -38,7 +38,7 @@ export const logger = winston.createLogger({
   ),
   transports: [
     new EditorTransport({
-      level: 'info',
+      level: 'debug',
       format: winston.format.combine(
         printf(false),
       ),

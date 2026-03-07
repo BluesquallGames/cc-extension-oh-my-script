@@ -91,33 +91,43 @@ export class Bundle {
 
   private _makeEntrySource() {
     const lines: string[] = [];
-    lines.push(`const errors = new Set();`);
-    const entryModules: string[] = [];
+    // lines.push(`const errors = new Set();`);
+    // const entryModules: string[] = [];
+    // if (this._indexModule) {
+    //   entryModules.push(this._indexModule);
+    // }
+    // for (const componentModule of this._componentModules) {
+    //   entryModules.push(componentModule);
+    // }
+    // lines.push(`for (const exec of [`);
+    // for (const entryModule of entryModules) {
+    //   lines.push(`  () => import('${makeFileSystemAbsoluteImportSpecifier(entryModule)}'),`);
+    // }
+    // lines.push(dedent`
+    // ]) {
+    //   try {
+    //     await exec();
+    //   } catch (err) {
+    //     if (errors.has(err)) {
+    //       continue;
+    //     }
+    //     errors.add(err);
+    //     console.error('Failed to import %s: %o', entryModule, err);
+    //   }
+    // }
+    
+    // export {};
+    // `);
     if (this._indexModule) {
-      entryModules.push(this._indexModule);
+      lines.push(`import '${makeFileSystemAbsoluteImportSpecifier(this._indexModule)}';`);
     }
     for (const componentModule of this._componentModules) {
-      entryModules.push(componentModule);
+      lines.push(`import '${makeFileSystemAbsoluteImportSpecifier(componentModule)}';`);
     }
-    lines.push(`for (const exec of [`);
-    for (const entryModule of entryModules) {
-      lines.push(`  () => import('${makeFileSystemAbsoluteImportSpecifier(entryModule)}'),`);
-    }
-    lines.push(dedent`
-    ]) {
-      try {
-        await exec();
-      } catch (err) {
-        if (errors.has(err)) {
-          continue;
-        }
-        errors.add(err);
-        console.error('Failed to import %s: %o', entryModule, err);
-      }
-    }
-    
-    export {};
-    `);
+    lines.push(
+      '',
+      'export {};'
+    );
     return lines.join('\n');
   }
 

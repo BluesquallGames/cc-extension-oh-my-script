@@ -18,11 +18,12 @@ export const methods = {
   async beforePreStart(assetDBInfo: AssetDBInfo) {
     void assetDBInfo;
     logger.debug(`Wait for ${selfExtensionName} first build...`);
+    const timeoutSec = 30;
     try {
       firstBuildResult = await Promise.race([
         requestSelfWorkerMessage('rebuild'),
-        setTimeout(1000 * 15).then(() => {
-          throw new Error(`${selfExtensionName} first build timeout after 15s`);
+        setTimeout(timeoutSec * 1000).then(() => {
+          throw new Error(`${selfExtensionName} first build timeout after ${timeoutSec}s`);
         }),
       ]);
       logger.debug(`${selfExtensionName} first build done: %o`, firstBuildResult);
@@ -46,6 +47,7 @@ export const methods = {
           logger.error(`Failed to import asset: ${beggingModulePath}, error: %o`, err);
         }
       }
+      logger.debug(`Successfully beginning modules: ${firstBuildResult.beginningModules.join(', ')}`);
     }
   },
 };

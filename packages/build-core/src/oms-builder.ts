@@ -47,23 +47,43 @@ export class OmsBuilder {
   }
 
   async rebuild(opts: BuildOptions): Promise<BuildResult> {
-    this._buildOptions = opts;
-    return await this._rebuild();
+    return await this._taskQueue.queueTask({
+      type: 'rebuild',
+      exec: async () => {
+        this._buildOptions = opts;
+        return await this._rebuild();
+      }
+    });
   }
 
   async updateBuildOptions(opts: BuildOptions) {
-    this._buildOptions = opts;
-    if (this._watcher) {
-      await this._watcher.updateBuildOptions(opts);
-    }
+    return await this._taskQueue.queueTask({
+      type: 'updateBuildOptions',
+      exec: async () => {
+        this._buildOptions = opts;
+        if (this._watcher) {
+          await this._watcher.updateBuildOptions(opts);
+        }
+      }
+    });
   }
 
   async inlineUUIDs() {
-    await this._watcher?.inlineUUIDs();
+    return await this._taskQueue.queueTask({
+      type: 'inlineUUIDs',
+      exec: async () => {
+        await this._watcher?.inlineUUIDs();
+      }
+    });
   }
 
   async buildProd(opts: InvocationParams<'build-prod'>) {
-    await this._watcher?.buildProd(opts);
+    return await this._taskQueue.queueTask({
+      type: 'buildProd',
+      exec: async () => {
+        await this._watcher?.buildProd(opts);
+      }
+    });
   }
 
   private _projectPath: string;
@@ -71,6 +91,7 @@ export class OmsBuilder {
   private _buildOptions: BuildOptions = {
     extensionBuildOptions: [],
   };
+  private _taskQueue = new TaskQueue();
 
   private async _clean() {
     const watcher = this._watcher;
@@ -84,8 +105,13 @@ export class OmsBuilder {
     await this._clean();
 
     const outDir = resolve(this._projectPath, 'temp', 'oms', 'out');
-    await fs.ensureDir(outDir);
-    await fs.emptyDir(outDir);
+    try {
+      await fs.ensureDir(outDir);
+      await fs.emptyDir(outDir);
+    } catch (err) {
+      logger.error(`Failed to clean output directory ${outDir}: ${err}`);
+    }
+
     await fs.outputJSON(join(outDir, 'package.json'), {
       type: 'commonjs',
     }, {
