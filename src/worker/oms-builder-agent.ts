@@ -216,6 +216,7 @@ export class OmsBuilderAgent {
         await ipc.invoke('setup', {
           project: Editor.Project.path,
         });
+        await this.rebuild();
         resolve();
       });
     });
