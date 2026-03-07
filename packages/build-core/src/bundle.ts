@@ -3,6 +3,7 @@ import { extractInlineUUID, UUIDManager } from './uuid-manager.js';
 import { logger } from './logger.js';
 import fs from 'fs-extra';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
+import dedent from 'dedent';
 
 export class Bundle {
   constructor(private _id: string, private _indexModuleDirs: string[], private _uuidManager: UUIDManager) {
@@ -89,18 +90,35 @@ export class Bundle {
   }
 
   private _makeEntrySource() {
-    let source = '';
+    const lines: string[] = [];
+    lines.push(`const errors = new Set();`);
+    const entryModules: string[] = [];
     if (this._indexModule) {
-      source
-        += `/// The index module.\n`
-          + `import '${makeFileSystemAbsoluteImportSpecifier(this._indexModule)}';\n`;
+      entryModules.push(this._indexModule);
     }
     for (const componentModule of this._componentModules) {
-      source += `import '${makeFileSystemAbsoluteImportSpecifier(componentModule)}';\n`;
+      entryModules.push(componentModule);
     }
-    // Explicitly mark this as a module.
-    source += `export {};\n`;
-    return source;
+    lines.push(`for (const exec of [`);
+    for (const entryModule of entryModules) {
+      lines.push(`  () => import('${makeFileSystemAbsoluteImportSpecifier(entryModule)}'),`);
+    }
+    lines.push(dedent`
+    ]) {
+      try {
+        await exec();
+      } catch (err) {
+        if (errors.has(err)) {
+          continue;
+        }
+        errors.add(err);
+        console.error('Failed to import %s: %o', entryModule, err);
+      }
+    }
+    
+    export {};
+    `);
+    return lines.join('\n');
   }
 
   private _isComponentModule(sourceFile: string) {

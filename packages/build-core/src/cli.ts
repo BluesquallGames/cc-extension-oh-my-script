@@ -25,4 +25,4 @@ const builder = new OmsBuilder({
   project: process.argv[process.argv.length - 1],
 });
 
-await builder.rebuild();
+void builder;

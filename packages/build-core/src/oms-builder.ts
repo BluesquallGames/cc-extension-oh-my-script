@@ -26,7 +26,7 @@ import { rollupPluginMemoryModules } from './features/rollup-plugin-memory-modul
 import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate-cc-env.js';
 import { Domain, readDomainExports, readDomainPackageJson, type BundleEntrySpec } from './domain.js';
 import { rollupPluginDomain } from './features/rollup-plugin-domain.js';
-import { TaskQueue, type TaskExecuteContext } from './task-queue.js';
+import { MergedTaskExecError, TaskQueue, type TaskExecuteContext } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
@@ -175,7 +175,7 @@ class OmsWatcher {
           return;
         }
         this._fileQueue[path] = 'add';
-        this._queueBuild('file added');
+        this._queueBuildIgnoringResult('file added');
       })
       .on('change', (path) => {
         switch (this._fileQueue[path]) {
@@ -184,11 +184,11 @@ class OmsWatcher {
           return;
         }
         this._fileQueue[path] = 'change';
-        this._queueBuild('file changed');
+        this._queueBuildIgnoringResult('file changed');
       })
       .on('unlink', (path) => {
         this._fileQueue[path] = 'delete';
-        this._queueBuild('file deleted');
+        this._queueBuildIgnoringResult('file deleted');
       })
       .on('addDir', (path) => {
         void 0;
@@ -217,7 +217,7 @@ class OmsWatcher {
         await this._updateDomains();
       },
     });
-    this._queueBuild('build options updated');
+    this._queueBuildIgnoringResult('build options updated');
   }
 
   async inlineUUIDs() {
@@ -230,7 +230,13 @@ class OmsWatcher {
   }
 
   async build() {
-    return await this._queueBuild('build');
+    return await this._queueBuild('build').catch((err) => {
+      if (err instanceof MergedTaskExecError) {
+        throw err.cause;
+      } else {
+        throw err;
+      }
+    });
   }
 
   async buildProd(opts: InvocationParams<'build-prod'>) {
@@ -433,23 +439,22 @@ class OmsWatcher {
         await this._fileWatcherReadyPromise?.promise;
         return await this._execBuild();
       },
-    }).catch((err) => {
-      logger.error(err);
+    });
+  }
+
+  private async _queueBuildIgnoringResult(reason: string) {
+    return this._queueBuild(reason).catch((err) => {
+      if (err instanceof MergedTaskExecError) {
+        logger.debug(`Ignored merged task exec error: ${err}`);
+      } else {
+        logger.error(`Build failed: ${err}`);
+      }
     });
   }
 
   private async _execBuild(): Promise<BuildResult> {
-    try {
       const [buildResult, buildExtras] = await this._doExecBuild();
-      if (buildResult.ok) {
-        return await this._onBuildEnd(buildResult.buildResult, buildExtras);
-      } else {
-        // @ts-expect-error
-        throw new Error(`Build failed`, {cause: buildResult});
-      }
-    } catch (err) {
-      throw err;
-    }
+      return await this._onBuildEnd(buildResult, buildExtras);
   }
 
   private async _doExecBuild() {
@@ -681,14 +686,7 @@ class BuildRecord {
     return await this.build();
   }
 
-  async build(): Promise<{
-    ok: true;
-    buildResult: InternalBuildResult;
-  } | {
-    ok: false;
-    message: string;
-    stack?: string;
-  }> {
+  async build(): Promise<InternalBuildResult> {
     logger.debug(`Build with options: %o`, this._buildOptions);
     try {
       const {
@@ -699,30 +697,15 @@ class BuildRecord {
         entries: { ...entries },
         ...passthroughBuildOptions,
       });
-      return {
-        ok: true,
-        buildResult,
-      };
+      return buildResult;
     } catch (error) {
       logger.debug('Build failed: %o', error);
-      let message = '';
-      let stack: string | undefined;
       if (error instanceof Error) {
         if (error instanceof Error && error.name === 'RollupError') {
-          const rollupError = error as rollup.RollupError;
-          message = rollupError.message;
-        } else {
-          message = error.message;
+          throw new RollupBuildError(error as rollup.RollupError);
         }
-        stack = error.stack;
-      } else {
-        message = String(error);
       }
-      return {
-        ok: false,
-        message,
-        stack,
-      };
+      throw new BuildError(`Unexpected build error`, {cause: error});
     }
   }
 
@@ -962,3 +945,18 @@ class BuildRecord {
 }
 
 const ROLLUP_MODULE_CACHE_KEY_UUID = '__oms_uuid__';
+
+class BuildError extends Error { }
+
+class RollupBuildError extends BuildError {
+  constructor(cause: rollup.RollupError) {
+    super(cause.message, {cause});
+    this._cause = cause;
+  }
+  
+  override get cause() {
+    return this._cause;
+  }
+
+  private _cause: rollup.RollupError;
+}

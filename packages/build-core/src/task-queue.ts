@@ -23,7 +23,14 @@ export class TaskQueue<TTaskMap extends {
       if (this._runningTask.ctx.acceptMerge) {
         logger.debug(`Queuing task [${task.type}] merged with running task ${this._runningTask.id}[${this._runningTask.type}].`);
         this._runningTask.ctx.emit('merge');
-        return this._runningTask.execPromiseWithResolvers.promise;
+        return this._runningTask.execPromiseWithResolvers.promise.then(
+          (value) => {
+            return value;
+          },
+          (reason) => {
+            throw new MergedTaskExecError(reason);
+          },
+        );
       }
     }
     for (const pendingTask of this._pendingTasks) {
@@ -114,4 +121,17 @@ export class TaskQueue<TTaskMap extends {
           }
         });
     }
+}
+
+export class MergedTaskExecError extends Error {
+  constructor(cause: Error) {
+    super('Merged task execution failed', { cause });
+    this._cause = cause;
+  }
+
+  override get cause() {
+    return this._cause;
+  }
+
+  private _cause: Error;
 }

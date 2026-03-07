@@ -62,20 +62,15 @@ export class OmsBuilderAgent {
     }
 
     const serverAgent = await this._setup();
-    try {
-      const buildOptions = await this._makeBuildOptions();
-      const rebuildResult = await serverAgent.ipc.invoke('rebuild', buildOptions);
-      for (const file of rebuildResult.affectedFiles) {
-        logger.debug(`${logTag}Reimport asset: %s`, file);
-        await Editor.Message.request('asset-db', 'refresh-asset', file);
-      }
-      return {
-        beginningModules: rebuildResult.affectedFiles,
-      };
-    } catch (err) {
-      logger.error(`${logTag}rebuild failed: ${err}`);
-      throw err;
+    const buildOptions = await this._makeBuildOptions();
+    const rebuildResult = await serverAgent.ipc.invoke('rebuild', buildOptions);
+    for (const file of rebuildResult.affectedFiles) {
+      logger.debug(`${logTag}Reimport asset: %s`, file);
+      await Editor.Message.request('asset-db', 'refresh-asset', file);
     }
+    return {
+      beginningModules: rebuildResult.affectedFiles,
+    };
   }
 
   async restart() {

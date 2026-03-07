@@ -90,6 +90,19 @@ export interface IpcTransport {
   send<T extends InvocationMethodId>(message: InvocationMessage<T>): void;
 }
 
+export class InvocationFailed extends Error {
+  constructor(response: Extract<InvocationResultMessage<InvocationMethodId>, { ok: false }>) {
+    super(stringifyResponseError(response.error));
+    this._responseStack = response.error.stack;
+  }
+
+  get responseStack() {
+    return this._responseStack;
+  }
+
+  private _responseStack: string | undefined;
+}
+
 export class Ipc<
   TOutgoingMessageId extends InvocationMethodId = InvocationMethodId,
   TIncomingMessageId extends InvocationMethodId = InvocationMethodId,
@@ -131,7 +144,7 @@ export class Ipc<
         if (response.ok) {
           resolve(response.returnValue as InvocationReturnValue<T>);
         } else {
-          reject(new Error(`Invocation ${invocationId} failed: ${stringifyResponseError(response.error)}`));
+          reject(new InvocationFailed(response));
         }
       });
     });
