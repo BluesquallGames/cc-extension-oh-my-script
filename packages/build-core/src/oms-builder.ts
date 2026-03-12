@@ -956,12 +956,13 @@ class BuildRecord {
       assetFileNames: '_assets/[name]-[hash][extname]',
       sourcemap: this._sourceMaps,
       plugins: outputPlugins,
-      manualChunks(id) {
-        if (id.includes('node_modules')) {
-          return 'vendor';
-        }
-        return null;
-      },
+      // onlyExplicitManualChunks: true,
+      // manualChunks(id) {
+      //   if (id.includes('node_modules')) {
+      //     return 'vendor';
+      //   }
+      //   return null;
+      // },
     };
 
     await rollupBuild.write(outputOptions);
