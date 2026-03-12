@@ -35,6 +35,9 @@ export const methods = {
   async afterPreStart(assetDBInfo: AssetDBInfo) {
     void assetDBInfo;
     if (firstBuildResult) {
+      if (!firstBuildResult.ok) {
+        return;
+      }
       logger.debug(`Import beginning modules: %o`, firstBuildResult.beginningModules);
       for (const beggingModulePath of firstBuildResult.beginningModules) {
         try {

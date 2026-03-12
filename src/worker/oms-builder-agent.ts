@@ -1,6 +1,6 @@
 import cp from 'node:child_process';
 import { logger } from '../logger.js';
-import { Ipc, type InvocationMessage, type ClientInvocationMethodId, type ServerInvocationMethodId, setLogger, type BuildOptions, type ExtensionBuildOptions } from '@oms/build-core/protocol';
+import { Ipc, type InvocationMessage, type ClientInvocationMethodId, type ServerInvocationMethodId, setLogger, type BuildOptions, type ExtensionBuildOptions, BuildResult as ProtocolBuildResult } from '@oms/build-core/protocol';
 import { addEditorBroadcastListener } from '../utils/editor/common.js';
 import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
 import type { BuildResult } from './worker-message-descriptions.js';
@@ -69,11 +69,12 @@ export class OmsBuilderAgent extends EventEmitter<{
     const buildOptions = await this._makeBuildOptions();
     logger.debug(`${logTag}Rebuild with options: %o`, buildOptions);
     const rebuildResult = await serverAgent.ipc.invoke('rebuild', buildOptions);
-    for (const file of rebuildResult.affectedFiles) {
-      logger.debug(`${logTag}Reimport asset: %s`, file);
-      await Editor.Message.request('asset-db', 'refresh-asset', file);
+    await this._handleBuildResult(rebuildResult);
+    if (!rebuildResult.ok) {
+      return rebuildResult;
     }
     return {
+      ok: true,
       beginningModules: rebuildResult.affectedFiles,
     };
   }
@@ -219,6 +220,10 @@ export class OmsBuilderAgent extends EventEmitter<{
       this._pongReceived = true;
     });
 
+    ipc.listen('passive-build-end', async (result) => {
+      await this._handleBuildResult(result.result);
+    });
+
     await bootstrapPromise;
 
     logger.debug(`${logTag}Builder has setup`);
@@ -268,6 +273,17 @@ export class OmsBuilderAgent extends EventEmitter<{
     return {
       extensionBuildOptions,
     };
+  }
+
+  private async _handleBuildResult(buildResult: ProtocolBuildResult) {
+    if (buildResult.ok) {
+      for (const file of buildResult.affectedFiles) {
+        logger.debug(`${logTag}Reimport asset: %s`, file);
+        await Editor.Message.request('asset-db', 'refresh-asset', file);
+      }
+    } else {
+      logger.error(`${buildResult.error.message}`);
+    }
   }
 }
 

@@ -18,7 +18,7 @@ import assert from 'node:assert';
 import { UUIDManager, writeInlineUUID } from './uuid-manager.js';
 import { format } from 'node:util';
 import { rollupPluginWasm } from './features/rollup-plugin-wasm.js';
-import type { BuildOptions, BuildResult, InvocationParams } from './protocol.js';
+import type { BuildOptions, BuildResult, InvocationParams, PassiveBuildEndInfo } from './protocol.js';
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
@@ -28,6 +28,7 @@ import { Domain, readDomainExports, readDomainPackageJson, type BundleEntrySpec 
 import { rollupPluginDomain } from './features/rollup-plugin-domain.js';
 import { MergedTaskExecError, TaskQueue, type TaskExecuteContext } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
+import EventEmitter from 'node:events';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -37,12 +38,15 @@ const rollupPluginJson = rollupPluginJson_ as unknown as typeof rollupPluginJson
 const mainBundleId = 'main';
 const mainDomainId = 'main';
 
-export class OmsBuilder {
+export class OmsBuilder extends EventEmitter<{
+  'passive-build-end': [PassiveBuildEndInfo],
+}> {
   constructor(private _ctx: ServerContext, {
     project,
   }: {
     project: string;
   }) {
+    super();
     this._projectPath = project;
   }
 
@@ -91,7 +95,12 @@ export class OmsBuilder {
   private _buildOptions: BuildOptions = {
     extensionBuildOptions: [],
   };
-  private _taskQueue = new TaskQueue();
+  private _taskQueue = new TaskQueue<{
+    'rebuild': () => BuildResult,
+    'updateBuildOptions': () => void,
+    'inlineUUIDs': () => void,
+    'buildProd': () => void,
+  }>();
 
   private async _clean() {
     const watcher = this._watcher;
@@ -130,12 +139,17 @@ export class OmsBuilder {
       ctx: this._ctx,
       buildOptions: this._buildOptions,
     });
+    this._watcher.on('passive-build-end', (buildResult) => {
+      this.emit('passive-build-end', buildResult);
+    });
     await this._watcher.start();
     return await this._watcher.build();
   }
 }
 
-class OmsWatcher {
+class OmsWatcher extends EventEmitter<{
+  'passive-build-end': [PassiveBuildEndInfo],
+}> {
   constructor(options: {
     projectPath: string;
     outDir: string;
@@ -143,6 +157,7 @@ class OmsWatcher {
     ctx: ServerContext;
     buildOptions: BuildOptions;
   }) {
+    super();
     const {
       projectPath,
       outDir,
@@ -201,7 +216,7 @@ class OmsWatcher {
           return;
         }
         this._fileQueue[path] = 'add';
-        this._queueBuildIgnoringResult('file added');
+        this._queuePassiveBuild('file added');
       })
       .on('change', (path) => {
         switch (this._fileQueue[path]) {
@@ -210,11 +225,11 @@ class OmsWatcher {
           return;
         }
         this._fileQueue[path] = 'change';
-        this._queueBuildIgnoringResult('file changed');
+        this._queuePassiveBuild('file changed');
       })
       .on('unlink', (path) => {
         this._fileQueue[path] = 'delete';
-        this._queueBuildIgnoringResult('file deleted');
+        this._queuePassiveBuild('file deleted');
       })
       .on('addDir', (path) => {
         void 0;
@@ -243,7 +258,7 @@ class OmsWatcher {
         await this._updateDomains();
       },
     });
-    this._queueBuildIgnoringResult('build options updated');
+    this._queuePassiveBuild('build options updated');
   }
 
   async inlineUUIDs() {
@@ -316,11 +331,11 @@ class OmsWatcher {
   private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
   private _lastBuildExtras: BuildExtras | undefined;
   private _taskQueue: TaskQueue<{
-    'build': { exec: (ctx: TaskExecuteContext) => Promise<BuildResult> },
-    'rebuild': { exec: () => Promise<void> },
-    'inlineUUIDs': { exec: () => Promise<void> },
-    'build-prod': { exec: () => Promise<void> },
-    'update-build-options': { exec: () => Promise<void> },
+    'build': () => BuildResult,
+    'rebuild': () => void,
+    'inlineUUIDs': () => void,
+    'build-prod': () => void,
+    'update-build-options': () => void,
   }> = new TaskQueue();
 
   private async _updateDomains() {
@@ -468,8 +483,10 @@ class OmsWatcher {
     });
   }
 
-  private async _queueBuildIgnoringResult(reason: string) {
-    return this._queueBuild(reason).catch((err) => {
+  private async _queuePassiveBuild(reason: string) {
+    return this._queueBuild(reason).then((buildResult) => {
+      this.emit('passive-build-end', {result: buildResult});
+    }).catch((err) => {
       if (err instanceof MergedTaskExecError) {
         logger.debug(`Ignored merged task exec error: ${err}`);
       } else {
@@ -519,6 +536,13 @@ class OmsWatcher {
   private async _onBuildEnd(buildResult: InternalBuildResult, extras: BuildExtras): Promise<BuildResult> {
     this._nBuildEnds++;
 
+    if (!buildResult.ok) {
+      return {
+        ok: false,
+        error: buildResult.error,
+      };
+    }
+
     const affectedFiles: string[] = [];
     for (const {entryId, bundleId} of extras.autoRunInfos) {
       const proxyFile = join(this._projectPath, 'assets/oms', `${bundleId}.ts`);
@@ -550,7 +574,10 @@ class OmsWatcher {
 
     await this._saveCentralizedUUIDs();
 
-    return {affectedFiles};
+    return {
+      ok: true,
+      affectedFiles,
+    };
   }
 
   private async _renderProxyFile(bundleId: string) {
@@ -690,8 +717,15 @@ interface InternalBuildOptions {
   uuidProvider: UUIDProvider | undefined;
 }
 
-interface InternalBuildResult {
+type InternalBuildResult = {
+  ok: true;
   inferredFiles: string[];
+} | {
+  ok: false;
+  error: {
+    message: string;
+    stack: string | undefined;
+  };
 }
 
 class BuildRecord {
@@ -728,7 +762,22 @@ class BuildRecord {
       logger.debug('Build failed: %o', error);
       if (error instanceof Error) {
         if (error instanceof Error && error.name === 'RollupError') {
-          throw new RollupBuildError(error as rollup.RollupError);
+          return {
+            ok: false,
+            error: {
+              message: error.message,
+              stack: error.stack,
+            },
+          };
+        }
+        if (error instanceof SyntaxError) {
+          return {
+            ok: false,
+            error: {
+              message: error.message,
+              stack: error.stack,
+            },
+          };
         }
       }
       throw new BuildError(`Unexpected build error`, {cause: error});
@@ -757,6 +806,7 @@ class BuildRecord {
       logger.debug('No entry found, skip build');
       this._cache = undefined;
       return {
+        ok: true,
         inferredFiles: [],
       };
     }
@@ -917,6 +967,7 @@ class BuildRecord {
     await rollupBuild.write(outputOptions);
 
     return {
+      ok: true,
       inferredFiles: rollupBuild.watchFiles,
     };
   }

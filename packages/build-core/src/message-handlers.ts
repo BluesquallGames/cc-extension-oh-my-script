@@ -8,6 +8,9 @@ export function registerMessageHandlers(ctx: ServerContext) {
   ctx.ipc.listen('setup', async (args) => {
     assert(!globalOmsBuilder, 'omsBuilder already setup');
     globalOmsBuilder = new OmsBuilder(ctx, args);
+    globalOmsBuilder.on('passive-build-end', (buildResult) => {
+      ctx.ipc.invoke('passive-build-end', buildResult);
+    });
   });
 
   ctx.ipc.listen('rebuild', async (opts) => {

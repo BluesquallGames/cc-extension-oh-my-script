@@ -11,14 +11,12 @@ export class TaskExecuteContext extends EventEmitter<{
 }
 
 export class TaskQueue<TTaskMap extends {
-  [x: string]: {
-    exec: (ctx: TaskExecuteContext) => any;
-  };
+  [x: string]: (ctx: TaskExecuteContext) => any;
 }> {
   queueTask<TType extends Extract<keyof TTaskMap, string>>(task: {
     type: TType;
-    exec: TTaskMap[TType]['exec'];
-  }): Promise<ReturnType<TTaskMap[TType]['exec']>> {
+    exec: (ctx: TaskExecuteContext) => Promise<ReturnType<TTaskMap[TType]>>;
+  }): Promise<ReturnType<TTaskMap[TType]>> {
     if (this._runningTask && this._runningTask.type === task.type) {
       if (this._runningTask.ctx.acceptMerge) {
         logger.debug(`Queuing task [${task.type}] merged with running task ${this._runningTask.id}[${this._runningTask.type}].`);
@@ -40,7 +38,7 @@ export class TaskQueue<TTaskMap extends {
       }
     }
     logger.debug(`Queue task: [${task.type}]`);
-    const execPromiseWithResolvers = promiseWithResolvers<ReturnType<TTaskMap[TType]['exec']>>();
+    const execPromiseWithResolvers = promiseWithResolvers<ReturnType<TTaskMap[TType]>>();
     const taskId = this._nextTaskId++;
     this._pendingTasks.push({
       id: taskId,
@@ -101,8 +99,7 @@ export class TaskQueue<TTaskMap extends {
             task.execPromiseWithResolvers.resolve(result);
             logger.debug(`Task ${task.id}[${task.type}] done`);
           } catch (err) {
-            logger.debug(`Task ${task.id}[${task.type}] failed`);
-            logger.error(err);
+            logger.debug(`Task ${task.id}[${task.type}] failed: %o`, err);
             task.execPromiseWithResolvers.reject(err);
           } finally {
             this._runningTask = undefined;

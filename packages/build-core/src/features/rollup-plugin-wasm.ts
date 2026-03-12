@@ -30,10 +30,10 @@ export function rollupPluginWasm(opts: {
           skipSelf: true,
         });
         if (!resolved) {
-          throw new Error(`Unable to resolve WebAssembly binary ${source} from ${importer}`);
+          return this.error(`Unable to resolve WebAssembly binary ${source} from ${importer}`);
         }
         if (resolved.external) {
-          throw new Error(`WebAssembly binary ${source} from ${importer} can not named an external module`);
+          return this.error(`WebAssembly binary ${source} from ${importer} can not named an external module`);
         }
         return {
           id: `${resolvedWasmBinaryPrefix}${resolved.id}`,
@@ -45,10 +45,10 @@ export function rollupPluginWasm(opts: {
           skipSelf: true,
         });
         if (!resolved) {
-          throw new Error(`Unable to resolve Emscripten glue ${source} from ${importer}`);
+          return this.error(`Unable to resolve Emscripten glue ${source} from ${importer}`);
         }
         if (resolved.external) {
-          throw new Error(`Emscripten glue ${source} from ${importer} can not named an external module`);
+          return this.error(`Emscripten glue ${source} from ${importer} can not named an external module`);
         }
         return {
           id: `${resolvedEmscriptenGlueWrapper}${resolved.id}`,

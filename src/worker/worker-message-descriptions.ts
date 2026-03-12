@@ -10,9 +10,12 @@ function defineWorkerMessage<TSignature extends (...args: any) => any>() {
   } as WorkerMessageDescription<TSignature>;
 }
 
-export interface BuildResult {
+export type BuildResult = {
+  ok: true;
   beginningModules: string[];
-}
+} | {
+  ok: false;
+};
 
 export const workerMessageDescriptions = {
   'rebuild': defineWorkerMessage<() => Promise<BuildResult>>(),

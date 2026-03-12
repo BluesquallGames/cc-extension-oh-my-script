@@ -3,8 +3,15 @@ import { logger } from './logger.js';
 
 export { setLogger } from './logger.js';
 
-export interface BuildResult {
+export type BuildResult = {
+  ok: true;
   affectedFiles: string[];
+} | {
+  ok: false;
+  error: {
+    message: string;
+    stack?: string;
+  };
 }
 
 export interface ClientInvocationMap {
@@ -39,10 +46,16 @@ export interface ExtensionBuildOptions {
 
 export type ClientInvocationMethodId = keyof ClientInvocationMap;
 
+export interface PassiveBuildEndInfo {
+  result: BuildResult;
+}
+
 export interface ServerInvocationMap {
   'bootstrapped': () => void;
 
   'pong': () => void;
+
+  'passive-build-end': (info: PassiveBuildEndInfo) => void;
 }
 
 export type ServerInvocationMethodId = keyof ServerInvocationMap;
