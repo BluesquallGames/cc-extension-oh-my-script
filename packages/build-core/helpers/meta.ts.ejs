@@ -1,0 +1,7 @@
+export default {
+  entries: [
+<% entries.forEach(entry => { -%>
+    ['<%= entry.bundleId %>', <%= entry.isEditorEntry %>],
+<% }); %>
+  ],
+};

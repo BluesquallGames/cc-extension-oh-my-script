@@ -300,7 +300,7 @@ class OmsWatcher extends EventEmitter<{
       type: 'build-prod',
 
       exec: async () => {
-        const { entries, autoRunInfos } = this._makeEntries(false);
+        const { entries, autoRunInfos } = await this._makeEntries(false);
         await buildRecord.rebuild({
           entries,
           uuidProvider: this._uuidProvider,
@@ -394,7 +394,7 @@ class OmsWatcher extends EventEmitter<{
     }
   }
 
-  private _makeEntries(includeEditorBundle: boolean) {
+  private async _makeEntries(includeEditorBundle: boolean) {
     const entries: Record<string, string> = {};
     const autoRunInfos: Array<{
       entryId: string;
@@ -418,6 +418,11 @@ class OmsWatcher extends EventEmitter<{
         }
       }
     }
+
+    const metadataFileEntry = 'metadata';
+    const metadataFileContent = await this._renderMetadataFile(autoRunInfos);
+    entries[metadataFileEntry] = metadataFileContent;
+
     return {
       entries,
       autoRunInfos,
@@ -514,7 +519,7 @@ class OmsWatcher extends EventEmitter<{
 
     this._lastBuildExtras = undefined;
 
-    const { entries, autoRunInfos } = this._makeEntries(true);
+    const { entries, autoRunInfos } = await this._makeEntries(true);
     const buildExtras: BuildExtras = {
       entryFiles: new Set(),
       autoRunInfos,
@@ -547,11 +552,11 @@ class OmsWatcher extends EventEmitter<{
     }
 
     const affectedFiles: string[] = [];
-    for (const { entryId, bundleId, isEditorEntry } of extras.autoRunInfos) {
-      const proxyFile = join(this._projectPath, 'assets/oms', `${bundleId}.ts`);
-      const proxyFileContent = await this._renderProxyFile(bundleId, isEditorEntry);
-      await fs.outputFile(proxyFile, proxyFileContent, 'utf8');
-      affectedFiles.push(proxyFile);
+    {
+      const mainFile = join(this._projectPath, 'assets/oms.ts');
+      const mainFileContent = await this._renderMainFile();
+      await fs.outputFile(mainFile, mainFileContent, 'utf8');
+      affectedFiles.push(mainFile);
     }
 
     logger.debug(`[Build x ${this._nBuildEnds}] Build end, inferred files: %s`, buildResult.inferredFiles);
@@ -583,11 +588,23 @@ class OmsWatcher extends EventEmitter<{
     };
   }
 
-  private async _renderProxyFile(bundleId: string, isEditorEntry: boolean) {
-    const template = await fs.readFile(join(helpersDir, 'proxy.ts.ejs'), 'utf8');
+  private async _renderMetadataFile(autoRunInfos: BuildExtras['autoRunInfos']) {
+    const template = await fs.readFile(join(helpersDir, 'meta.ts.ejs'), 'utf8');
     const source = Ejs.render(template, {
-      bundleId,
-      isEditorEntry,
+      entries: autoRunInfos.map(({ bundleId, isEditorEntry }) => {
+        return {
+          bundleId,
+          isEditorEntry,
+        };
+      }),
+    });
+    return source;
+  }
+
+  private async _renderMainFile() {
+    const template = await fs.readFile(join(helpersDir, 'main.ts.ejs'), 'utf8');
+    const source = Ejs.render(template, {
+      // nope
     });
     return source;
   }
@@ -678,7 +695,7 @@ class OmsWatcher extends EventEmitter<{
         logger.error(`Failed to write file ${file}: %o`, err);
         continue;
       }
-      this._uuidManager.update(file, uuid);
+      await this._uuidManager.update(file, uuid);
     }
     await this._saveCentralizedUUIDs();
   }

@@ -11,7 +11,7 @@ declare interface SystemJS {
 
 declare const System: SystemJS;
 
-import { HTML5, PREVIEW, EDITOR, BUILD, NATIVE } from 'cc/env';
+import { HTML5, PREVIEW, EDITOR, BUILD, NATIVE, EDITOR_NOT_IN_PREVIEW } from 'cc/env';
 import { cclegacy } from 'cc';
 
 let omsBaseDir = '';
@@ -262,4 +262,24 @@ export function saveRequiringFrames() {
     }
     frames.length = 0;
   };
+}
+
+export async function start() {
+  const { default: metadata } = (await import(`${omsURLPrefix}metadata.js`)) as {
+    default: {
+      entries: Array<[bundleId: string, isEditorEntry: boolean]>;
+    };
+  };
+  console.warn(`Loaded metadata: %o`, metadata);
+  for (const [bundleId, isEditorEntry] of metadata.entries) {
+    if (!EDITOR_NOT_IN_PREVIEW && isEditorEntry) {
+      continue;
+    }
+    const restoreRequiringFrames = saveRequiringFrames();
+    try {
+      await loadBundleEntry(bundleId, '');
+    } finally {
+      restoreRequiringFrames();
+    }
+  }
 }
