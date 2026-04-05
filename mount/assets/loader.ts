@@ -38,7 +38,7 @@ if (EDITOR) {
     vendorCreateContext: () => Record<string, unknown>;
     instantiatedModules: string[];
     hot: {
-      controllerOnReload: AbortController;
+      controllerOnDispose: AbortController;
     };
   }
   const omsSymbol = Symbol.for('oms');
@@ -46,7 +46,7 @@ if (EDITOR) {
   const systemJSPrototype = System.constructor.prototype;
   const oldSystemInfo = systemJSPrototype[omsSymbol] as OmsSystemInfo | undefined;
   if (oldSystemInfo) {
-    oldSystemInfo.hot.controllerOnReload.abort();
+    oldSystemInfo.hot.controllerOnDispose.abort('OMS module dispose');
     for (const instantiatedModule of oldSystemInfo.instantiatedModules) {
       System.delete(instantiatedModule);
     }
@@ -62,7 +62,7 @@ if (EDITOR) {
     vendorResolve,
     vendorCreateContext,
     hot: {
-      controllerOnReload: new AbortController(),
+      controllerOnDispose: new AbortController(),
     },
   } as OmsSystemInfo;
 
@@ -132,7 +132,7 @@ if (EDITOR) {
   systemJSPrototype.createContext = function () {
     const vendorContext = vendorCreateContext.call(this);
     vendorContext.hot = {
-      signalOnDispose: omsSystemInfo.hot.controllerOnReload.signal,
+      signalOnDispose: omsSystemInfo.hot.controllerOnDispose.signal,
     };
     return vendorContext;
   };
