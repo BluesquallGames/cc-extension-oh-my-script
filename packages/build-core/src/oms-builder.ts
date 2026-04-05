@@ -1,4 +1,4 @@
-import { join, parse, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import fs from 'fs-extra';
 import { logger } from './logger.js';
 import { ServerContext } from './server-context.js';
@@ -16,7 +16,6 @@ import * as chokidar from 'chokidar';
 import { transformCCComponent, type UUIDProvider } from './features/babel-plugin-cc-component.js';
 import assert from 'node:assert';
 import { UUIDManager, writeInlineUUID } from './uuid-manager.js';
-import { format } from 'node:util';
 import { rollupPluginWasm } from './features/rollup-plugin-wasm.js';
 import type { BuildOptions, BuildResult, InvocationParams, PassiveBuildEndInfo } from './protocol.js';
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
@@ -24,22 +23,22 @@ import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
 import { rollupPluginMemoryModules } from './features/rollup-plugin-memory-modules.js';
 import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate-cc-env.js';
-import { Domain, readDomainExports, readDomainPackageJson, type BundleEntrySpec } from './domain.js';
+import { Domain, readDomainExports, readDomainPackageJson } from './domain.js';
 import { rollupPluginDomain } from './features/rollup-plugin-domain.js';
-import { MergedTaskExecError, TaskQueue, type TaskExecuteContext } from './task-queue.js';
+import { MergedTaskExecError, TaskQueue } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
+import { rollupPluginNodeBuiltinModules } from './features/rollup-plugin-node-builtin-modules.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
 const rollupPluginBabel = rollupPluginBabel_ as unknown as typeof rollupPluginBabel_.default;
 const rollupPluginJson = rollupPluginJson_ as unknown as typeof rollupPluginJson_.default;
 
-const mainBundleId = 'main';
 const mainDomainId = 'main';
 
 export class OmsBuilder extends EventEmitter<{
-  'passive-build-end': [PassiveBuildEndInfo],
+  'passive-build-end': [PassiveBuildEndInfo];
 }> {
   constructor(private _ctx: ServerContext, {
     project,
@@ -56,7 +55,7 @@ export class OmsBuilder extends EventEmitter<{
       exec: async () => {
         this._buildOptions = opts;
         return await this._rebuild();
-      }
+      },
     });
   }
 
@@ -68,7 +67,7 @@ export class OmsBuilder extends EventEmitter<{
         if (this._watcher) {
           await this._watcher.updateBuildOptions(opts);
         }
-      }
+      },
     });
   }
 
@@ -77,7 +76,7 @@ export class OmsBuilder extends EventEmitter<{
       type: 'inlineUUIDs',
       exec: async () => {
         await this._watcher?.inlineUUIDs();
-      }
+      },
     });
   }
 
@@ -86,7 +85,7 @@ export class OmsBuilder extends EventEmitter<{
       type: 'buildProd',
       exec: async () => {
         await this._watcher?.buildProd(opts);
-      }
+      },
     });
   }
 
@@ -95,11 +94,12 @@ export class OmsBuilder extends EventEmitter<{
   private _buildOptions: BuildOptions = {
     extensionBuildOptions: [],
   };
+
   private _taskQueue = new TaskQueue<{
-    'rebuild': () => BuildResult,
-    'updateBuildOptions': () => void,
-    'inlineUUIDs': () => void,
-    'buildProd': () => void,
+    rebuild: () => BuildResult;
+    updateBuildOptions: () => void;
+    inlineUUIDs: () => void;
+    buildProd: () => void;
   }>();
 
   private async _clean() {
@@ -148,12 +148,12 @@ export class OmsBuilder extends EventEmitter<{
 }
 
 class OmsWatcher extends EventEmitter<{
-  'passive-build-end': [PassiveBuildEndInfo],
+  'passive-build-end': [PassiveBuildEndInfo];
 }> {
   constructor(options: {
     projectPath: string;
     outDir: string;
-    typingOutDir: string,
+    typingOutDir: string;
     ctx: ServerContext;
     buildOptions: BuildOptions;
   }) {
@@ -232,10 +232,10 @@ class OmsWatcher extends EventEmitter<{
         this._queuePassiveBuild('file deleted');
       })
       .on('addDir', (path) => {
-        void 0;
+        void path;
       })
       .on('unlinkDir', (path) => {
-        void 0;
+        void path;
       })
     ;
   }
@@ -300,7 +300,7 @@ class OmsWatcher extends EventEmitter<{
       type: 'build-prod',
 
       exec: async () => {
-        const {entries, autoRunInfos} = this._makeEntries();
+        const { entries, autoRunInfos } = this._makeEntries(false);
         await buildRecord.rebuild({
           entries,
           uuidProvider: this._uuidProvider,
@@ -328,14 +328,15 @@ class OmsWatcher extends EventEmitter<{
     domainId: string;
     sourceRoot: string;
   }> = [];
+
   private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
   private _lastBuildExtras: BuildExtras | undefined;
   private _taskQueue: TaskQueue<{
-    'build': () => BuildResult,
-    'rebuild': () => void,
-    'inlineUUIDs': () => void,
-    'build-prod': () => void,
-    'update-build-options': () => void,
+    'build': () => BuildResult;
+    'rebuild': () => void;
+    'inlineUUIDs': () => void;
+    'build-prod': () => void;
+    'update-build-options': () => void;
   }> = new TaskQueue();
 
   private async _updateDomains() {
@@ -346,7 +347,7 @@ class OmsWatcher extends EventEmitter<{
     domainPromises.push(this._addDomain(
       mainDomainId, mainDomainRoot, 'src',
     ));
-    for (const {name: extensionName, path: extensionPath} of this._buildOptions.extensionBuildOptions) {
+    for (const { name: extensionName, path: extensionPath } of this._buildOptions.extensionBuildOptions) {
       const extensionDomainRoot = join(extensionPath);
       domainPromises.push(this._addDomain(
         extensionName, extensionDomainRoot, 'oms/src',
@@ -370,7 +371,7 @@ class OmsWatcher extends EventEmitter<{
   private async _addDomain(domainId: string, domainRoot: string, preferredDomainSourceRoot: string) {
     const domainPackageJson = await readDomainPackageJson(domainRoot);
     const partitions = domainPackageJson?.oms?.partitions ?? [
-      {rootDir: preferredDomainSourceRoot},
+      { rootDir: preferredDomainSourceRoot },
     ];
     const domainExports = await readDomainExports(domainRoot, partitions, domainPackageJson);
     const domain = this._domains[domainId] = new Domain(
@@ -393,14 +394,15 @@ class OmsWatcher extends EventEmitter<{
     }
   }
 
-  private _makeEntries() {
+  private _makeEntries(includeEditorBundle: boolean) {
     const entries: Record<string, string> = {};
     const autoRunInfos: Array<{
       entryId: string;
       bundleId: string;
+      isEditorEntry: boolean;
     }> = [];
     for (const [domainId, domain] of Object.entries(this._domains)) {
-      const domainEntrySpecs = domain.getEntrySpecs();
+      const domainEntrySpecs = domain.getEntrySpecs(includeEditorBundle);
       for (const [domainEntrySpecId, domainEntrySpec] of Object.entries(domainEntrySpecs)) {
         if (domainEntrySpecId in entries) {
           logger.warn(`Duplicate entry spec id: ${domainEntrySpecId}`);
@@ -411,6 +413,7 @@ class OmsWatcher extends EventEmitter<{
           autoRunInfos.push({
             entryId: domainEntrySpecId,
             bundleId: domainEntrySpec.autoRun.bundleId,
+            isEditorEntry: domainEntrySpec.autoRun.isEditorEntry,
           });
         }
       }
@@ -476,16 +479,16 @@ class OmsWatcher extends EventEmitter<{
 
         logger.verbose(`Build started.`);
         ctx.acceptMerge = false;
-        
+
         await this._fileWatcherReadyPromise?.promise;
         return await this._execBuild();
       },
     });
   }
 
-  private async _queuePassiveBuild(reason: string) {
-    return this._queueBuild(reason).then((buildResult) => {
-      this.emit('passive-build-end', {result: buildResult});
+  private _queuePassiveBuild(reason: string) {
+    this._queueBuild(reason).then((buildResult) => {
+      this.emit('passive-build-end', { result: buildResult });
     }).catch((err) => {
       if (err instanceof MergedTaskExecError) {
         logger.debug(`Ignored merged task exec error: ${err}`);
@@ -496,8 +499,8 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private async _execBuild(): Promise<BuildResult> {
-      const [buildResult, buildExtras] = await this._doExecBuild();
-      return await this._onBuildEnd(buildResult, buildExtras);
+    const [buildResult, buildExtras] = await this._doExecBuild();
+    return await this._onBuildEnd(buildResult, buildExtras);
   }
 
   private async _doExecBuild() {
@@ -511,7 +514,7 @@ class OmsWatcher extends EventEmitter<{
 
     this._lastBuildExtras = undefined;
 
-    const {entries, autoRunInfos} = this._makeEntries();
+    const { entries, autoRunInfos } = this._makeEntries(true);
     const buildExtras: BuildExtras = {
       entryFiles: new Set(),
       autoRunInfos,
@@ -544,9 +547,9 @@ class OmsWatcher extends EventEmitter<{
     }
 
     const affectedFiles: string[] = [];
-    for (const {entryId, bundleId} of extras.autoRunInfos) {
+    for (const { entryId, bundleId, isEditorEntry } of extras.autoRunInfos) {
       const proxyFile = join(this._projectPath, 'assets/oms', `${bundleId}.ts`);
-      const proxyFileContent = await this._renderProxyFile(bundleId);
+      const proxyFileContent = await this._renderProxyFile(bundleId, isEditorEntry);
       await fs.outputFile(proxyFile, proxyFileContent, 'utf8');
       affectedFiles.push(proxyFile);
     }
@@ -580,10 +583,11 @@ class OmsWatcher extends EventEmitter<{
     };
   }
 
-  private async _renderProxyFile(bundleId: string) {
+  private async _renderProxyFile(bundleId: string, isEditorEntry: boolean) {
     const template = await fs.readFile(join(helpersDir, 'proxy.ts.ejs'), 'utf8');
     const source = Ejs.render(template, {
       bundleId,
+      isEditorEntry,
     });
     return source;
   }
@@ -695,6 +699,7 @@ interface BuildExtras {
   autoRunInfos: Array<{
     entryId: string;
     bundleId: string;
+    isEditorEntry: boolean;
   }>;
   entryFiles: Set<string>;
 }
@@ -726,7 +731,7 @@ type InternalBuildResult = {
     message: string;
     stack: string | undefined;
   };
-}
+};
 
 class BuildRecord {
   constructor(options: {
@@ -780,7 +785,7 @@ class BuildRecord {
           };
         }
       }
-      throw new BuildError(`Unexpected build error`, {cause: error});
+      throw new BuildError(`Unexpected build error`, { cause: error });
     }
   }
 
@@ -793,6 +798,7 @@ class BuildRecord {
     'THIS_IS_UNDEFINED',
     'UNUSED_EXTERNAL_IMPORT',
   ];
+
   private _ccEnvParams: CCEnvParams | undefined;
   private _buildOptions: InternalBuildOptions = {
     entries: {},
@@ -894,6 +900,8 @@ class BuildRecord {
       }),
 
       rollupPluginWasm({}),
+
+      rollupPluginNodeBuiltinModules({}),
 
       rollupPluginJson({
         namedExports: false,
@@ -1028,10 +1036,10 @@ class BuildError extends Error { }
 
 class RollupBuildError extends BuildError {
   constructor(cause: rollup.RollupError) {
-    super(cause.message, {cause});
+    super(cause.message, { cause });
     this._cause = cause;
   }
-  
+
   override get cause() {
     return this._cause;
   }

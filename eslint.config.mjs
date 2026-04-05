@@ -48,4 +48,12 @@ export default defineConfig([
       'n/no-unsupported-features/node-builtins': 'off',
     },
   },
+  {
+    files: ['*.ts'],
+    rules: {
+      '@typescript-eslint/ban-ts-comment': ['on', {
+        'ts-expect-error': true,
+      }],
+    },
+  },
 ]);

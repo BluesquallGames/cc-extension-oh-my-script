@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { Bundle } from './bundle.js';
 import type { UUIDManager } from './uuid-manager.js';
 import fs from 'fs-extra';
-import { dirname, join, normalize, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { logger } from './logger.js';
 import { glob } from 'node:fs/promises';
 import { domainURLProtocol } from './constants.js';
@@ -16,12 +16,18 @@ export class Domain {
     uuidManager: UUIDManager,
   ) {
     {
-      const bundleId = this._id;
-      this._mainBundle = new Bundle(bundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager);
-      this._bundles[bundleId] = this._mainBundle;
+      const domainId = this._id;
+
+      const mainBundleId = domainId;
+      this._mainBundle = new Bundle(mainBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, false);
+      this._bundles[mainBundleId] = this._mainBundle;
       for (const partition of _partitions) {
-        this._bundleSourceRootMap.push({ sourceRoot: join(this._domainRoot, partition.rootDir), bundleId });
+        this._bundleSourceRootMap.push({ sourceRoot: join(this._domainRoot, partition.rootDir), bundleId: mainBundleId });
       }
+
+      const editorBundleId = `${domainId}.editor`;
+      this._editorBundle = new Bundle(editorBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, true);
+      this._bundles[editorBundleId] = this._editorBundle;
     }
   }
 
@@ -29,10 +35,13 @@ export class Domain {
     return this._partitions.map((p) => join(this._domainRoot, p.rootDir));
   }
 
-  getEntrySpecs(): Record<string, BundleEntrySpec> {
+  getEntrySpecs(includeEditorBundle: boolean): Record<string, BundleEntrySpec> {
     const entrySpecs: Record<string, BundleEntrySpec> = {};
 
     for (const [bundleId, bundle] of Object.entries(this._bundles)) {
+      if (!includeEditorBundle && bundle === this._editorBundle) {
+        continue;
+      }
       if (bundle.empty) {
         continue;
       }
@@ -40,6 +49,7 @@ export class Domain {
         source: bundle.entrySource,
         autoRun: {
           bundleId,
+          isEditorEntry: bundle === this._editorBundle,
         },
       };
     }
@@ -60,7 +70,6 @@ export class Domain {
 
     return entrySpecs;
   }
-
 
   getImplicitEntries(): string[] {
     const implicitEntries = new Set<string>();
@@ -97,15 +106,16 @@ export class Domain {
 
   generatePathMappings() {
     return Object.fromEntries(Object.entries(this._exports).map(([exportId, exportValue]) => {
-        const path = exportId === '.' ? '' : `/${exportId.replace(/^\.\//, '')}`;
-        return [
-          `${domainURLProtocol}://${this._id}${path}`,
-          [join(this._domainRoot, exportValue)],
-        ];
+      const path = exportId === '.' ? '' : `/${exportId.replace(/^\.\//, '')}`;
+      return [
+        `${domainURLProtocol}://${this._id}${path}`,
+        [join(this._domainRoot, exportValue)],
+      ];
     }));
   }
-  
+
   private _mainBundle: Bundle;
+  private _editorBundle: Bundle;
   private _bundles: Record<string, Bundle> = {};
   private _bundleSourceRootMap: Array<{
     sourceRoot: string;
@@ -113,9 +123,12 @@ export class Domain {
   }> = [];
 
   private _getBundle(path: string) {
+    if (/\.editor\.\w+$/.test(path)) {
+      return this._editorBundle;
+    }
     const bundleId = this._bundleSourceRootMap.find(({ sourceRoot }) => path.startsWith(sourceRoot))?.bundleId;
     if (!bundleId) {
-      throw new Error(`Bundle for ${path} not found in domain ${this._id}, root dirs: ${this._bundleSourceRootMap.map(({sourceRoot}) => sourceRoot).join(', ')}`);
+      throw new Error(`Bundle for ${path} not found in domain ${this._id}, root dirs: ${this._bundleSourceRootMap.map(({ sourceRoot }) => sourceRoot).join(', ')}`);
     }
     const bundle = this._bundles[bundleId];
     assert.ok(bundle, `Bundle for ${path} not found in domain ${this._id}`);
@@ -127,6 +140,7 @@ export interface BundleEntrySpec {
   source: string;
   autoRun?: {
     bundleId: string;
+    isEditorEntry: boolean;
   };
 }
 
@@ -193,7 +207,7 @@ async function* readFilesRecursive(root: string): AsyncGenerator<string> {
 }
 
 export interface DomainPackageJson {
-  _path: string,
+  _path: string;
   exports: null | PackageExports;
   oms: PackageOmsConfig;
 }

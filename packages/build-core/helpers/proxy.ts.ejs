@@ -4,6 +4,13 @@
 
 import { loadBundleEntry, saveRequiringFrames } from 'db://oh-my-script/loader.ts';
 import { cclegacy} from 'cc';
+<% if (isEditorEntry) { -%>
+import { EDITOR_NOT_IN_PREVIEW } from 'cc/env';
+<% } %>
+
+<% if (isEditorEntry) { -%>
+if (EDITOR_NOT_IN_PREVIEW) {
+<% } %>
 
 const restoreRequiringFrames = saveRequiringFrames();
 try {
@@ -12,3 +19,7 @@ try {
 } finally {
   restoreRequiringFrames();
 }
+
+<% if (isEditorEntry) { -%>
+}
+<% } %>

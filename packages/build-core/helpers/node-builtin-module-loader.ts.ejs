@@ -1,0 +1,13 @@
+/// This module loads node builtin modules.
+
+export function requireNodeBuiltinModule(moduleId) {
+  if (typeof require !== 'function') {
+    throw new Error('Current environment does not provide node builtin modules.');
+  }
+  const r = require;
+  const m = r(moduleId);
+  return {
+    ...m,
+    default: m,
+  };
+}

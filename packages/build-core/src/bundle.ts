@@ -3,10 +3,9 @@ import { extractInlineUUID, UUIDManager } from './uuid-manager.js';
 import { logger } from './logger.js';
 import fs from 'fs-extra';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
-import dedent from 'dedent';
 
 export class Bundle {
-  constructor(private _id: string, private _indexModuleDirs: string[], private _uuidManager: UUIDManager) {
+  constructor(private _id: string, private _indexModuleDirs: string[], private _uuidManager: UUIDManager, private _isEditorBundle: boolean) {
   }
 
   get empty() {
@@ -115,7 +114,7 @@ export class Bundle {
     //     console.error('Failed to import %s: %o', entryModule, err);
     //   }
     // }
-    
+
     // export {};
     // `);
     if (this._indexModule) {
@@ -126,27 +125,27 @@ export class Bundle {
     }
     lines.push(
       '',
-      'export {};'
+      'export {};',
     );
     return lines.join('\n');
   }
 
   private _isComponentModule(sourceFile: string) {
-    return /\.component\.[cm]?[jt]s$/.test(sourceFile.toLocaleLowerCase());
+    return /\.component(\.editor)?\.[cm]?[jt]s$/.test(sourceFile.toLocaleLowerCase());
   }
 
   private _isIndexModule(sourceFile: string) {
     const { dir, name, ext } = parse(sourceFile);
     if (this._indexModuleDirs.includes(dir)
       && /^\.[cm]?[jt]s$/.test(ext.toLowerCase())
-      && name.toLocaleLowerCase() === 'index'
+      && name.toLocaleLowerCase() === (this._isEditorBundle ? 'index.editor' : 'index')
     ) {
       return true;
     }
     return false;
   }
 
-    _addComponentModule(sourceFile: string) {
+  _addComponentModule(sourceFile: string) {
     if (this._componentModules.includes(sourceFile)) {
       return false;
     }
