@@ -270,7 +270,6 @@ export async function start() {
       entries: Array<[bundleId: string, isEditorEntry: boolean]>;
     };
   };
-  console.warn(`Loaded metadata: %o`, metadata);
   for (const [bundleId, isEditorEntry] of metadata.entries) {
     if (!EDITOR_NOT_IN_PREVIEW && isEditorEntry) {
       continue;
