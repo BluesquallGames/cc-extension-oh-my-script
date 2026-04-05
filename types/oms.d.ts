@@ -7,11 +7,3 @@ interface ImportMetaHot {
 interface ImportMeta {
   hot?: ImportMetaHot;
 }
-
-declare module 'module' {
-  global {
-    interface ImportMeta {
-      hot?: ImportMetaHot;
-    }
-  }
-}
