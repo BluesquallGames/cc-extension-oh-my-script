@@ -35,13 +35,18 @@ if (EDITOR) {
   interface OmsSystemInfo {
     vendorResolve: (specifier: string, parent?: string) => Promise<void>;
     vendorInstantiate: () => void;
+    vendorCreateContext: () => Record<string, unknown>;
     instantiatedModules: string[];
+    hot: {
+      controllerOnReload: AbortController;
+    };
   }
   const omsSymbol = Symbol.for('oms');
 
   const systemJSPrototype = System.constructor.prototype;
   const oldSystemInfo = systemJSPrototype[omsSymbol] as OmsSystemInfo | undefined;
   if (oldSystemInfo) {
+    oldSystemInfo.hot.controllerOnReload.abort();
     for (const instantiatedModule of oldSystemInfo.instantiatedModules) {
       System.delete(instantiatedModule);
     }
@@ -50,10 +55,15 @@ if (EDITOR) {
 
   const vendorResolve = oldSystemInfo?.vendorResolve ?? systemJSPrototype.resolve;
   const vendorInstantiate = oldSystemInfo?.vendorInstantiate ?? systemJSPrototype.instantiate;
+  const vendorCreateContext = oldSystemInfo?.vendorCreateContext ?? systemJSPrototype.createContext;
   const omsSystemInfo = systemJSPrototype[omsSymbol] = {
     instantiatedModules: [],
     vendorInstantiate,
     vendorResolve,
+    vendorCreateContext,
+    hot: {
+      controllerOnReload: new AbortController(),
+    },
   } as OmsSystemInfo;
 
   systemJSPrototype.resolve = function (id: string, ...args: unknown[]) {
@@ -117,6 +127,14 @@ if (EDITOR) {
       return register;
     }
     return vendorInstantiate.call(this, id, parentURL, ...args);
+  };
+
+  systemJSPrototype.createContext = function () {
+    const vendorContext = vendorCreateContext.call(this);
+    vendorContext.hot = {
+      signalOnDispose: omsSystemInfo.hot.controllerOnReload.signal,
+    };
+    return vendorContext;
   };
 
   async function retryByInterval<T>(execute: () => Promise<T> | T, interval: number, timeout: number, title: string) {

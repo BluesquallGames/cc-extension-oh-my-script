@@ -32,6 +32,7 @@ export default defineConfig([
             'eslint.config.mjs',
             'vite.config.ts',
             'packages/*/vite.config.ts',
+            'types/*.d.ts',
           ],
         },
       },
