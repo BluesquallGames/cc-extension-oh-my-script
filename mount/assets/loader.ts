@@ -27,7 +27,6 @@ if (EDITOR) {
     fileURLToPath,
   } = r('url');
   const fs = r('fs');
-  const vm = r('vm') as typeof import('vm');
   // @ts-expect-error
   omsBaseDir = ps.join(Editor.Project.tmpDir, 'oms/out', ps.sep);
   const omsBaseURL = pathToFileURL(omsBaseDir);
@@ -98,9 +97,7 @@ if (EDITOR) {
             }
             let fn: Function;
             try {
-              fn = vm.compileFunction(code + `\n//# sourceURL=${pathToFileURL(path).href}`, ['System'], {
-                filename: path,
-              });
+              fn = new Function('System', code + `\n//# sourceURL=${pathToFileURL(path).href}`);
             } catch (err) {
               throw new Error(`Failed to read module ${path}: ${err}`);
             }
