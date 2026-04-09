@@ -12,7 +12,7 @@ export type BuildResult = {
     message: string;
     stack?: string;
   };
-}
+};
 
 export interface ClientInvocationMap {
   'setup': (options: {
@@ -56,6 +56,17 @@ export interface ServerInvocationMap {
   'pong': () => void;
 
   'passive-build-end': (info: PassiveBuildEndInfo) => void;
+
+  'build-start': (state: {
+    time: number;
+  }) => void;
+
+  'build-end': (state: {
+    time: number;
+    startState: {
+      time: number;
+    };
+  }) => void;
 }
 
 export type ServerInvocationMethodId = keyof ServerInvocationMap;

@@ -504,7 +504,18 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private async _execBuild(): Promise<BuildResult> {
+    const startState = {
+      time: Date.now(),
+    };
+    await this._ctx.ipc.invoke('build-start', startState);
+
     const [buildResult, buildExtras] = await this._doExecBuild();
+
+    await this._ctx.ipc.invoke('build-end', {
+      time: Date.now(),
+      startState,
+    });
+
     return await this._onBuildEnd(buildResult, buildExtras);
   }
 

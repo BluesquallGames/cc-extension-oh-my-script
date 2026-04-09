@@ -54,6 +54,7 @@ const entries = defineEntries([
   'contributions/server.ts',
   'contributions/builder/index.ts',
   'contributions/builder/default-hooks.ts',
+  'contributions/footer/right.ts',
   // ...(await readDirEntries('./src', 'contributions/inspector/exports')),
 ]);
 

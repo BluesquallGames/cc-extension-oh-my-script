@@ -6,6 +6,7 @@ import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../ut
 import type { BuildResult } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
+import { broadcastInner, InnerPackageMessageId } from '../inner-package-messaging.js';
 
 setLogger(logger);
 
@@ -222,6 +223,18 @@ export class OmsBuilderAgent extends EventEmitter<{
 
     ipc.listen('passive-build-end', async (result) => {
       await this._handleBuildResult(result.result);
+    });
+
+    ipc.listen('build-start', async (opts) => {
+      broadcastInner(InnerPackageMessageId.buildStart, {
+        ...opts,
+      });
+    });
+
+    ipc.listen('build-end', async (opts) => {
+      broadcastInner(InnerPackageMessageId.buildEnd, {
+        ...opts,
+      });
     });
 
     await bootstrapPromise;

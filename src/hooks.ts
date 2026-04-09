@@ -89,5 +89,9 @@ async function getContributions(): Promise<ExtensionContributions> {
     },
 
     'server': './dist/contributions/server.cjs',
+
+    'footer': {
+      right: './dist/contributions/footer/right.cjs',
+    },
   };
 }
