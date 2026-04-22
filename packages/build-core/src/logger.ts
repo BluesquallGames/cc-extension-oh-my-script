@@ -11,12 +11,14 @@ const printf = () => winston.format.printf(({ level, message, timestamp }) => {
 
 export let logger = winston.createLogger({
   format: winston.format.combine(
+    winston.format.errors({ stack: true }),
     winston.format.splat(),
   ),
   transports: [
     new winston.transports.Console({
       level: 'debug',
       format: winston.format.combine(
+        winston.format.errors({ stack: true }),
         printf(),
       ),
       stderrLevels: ['error', 'warn'],

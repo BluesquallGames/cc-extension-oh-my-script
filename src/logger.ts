@@ -34,6 +34,7 @@ class EditorTransport extends Transport {
 export const logger = winston.createLogger({
   level: 'debug',
   format: winston.format.combine(
+    winston.format.errors({ stack: true }),
     winston.format.splat(),
   ),
   transports: [
@@ -49,6 +50,7 @@ export const logger = winston.createLogger({
       // options: { flags: 'w' },
       format: winston.format.combine(
         winston.format.timestamp(),
+        winston.format.errors({ stack: true }),
         printf(true),
       ),
     }),

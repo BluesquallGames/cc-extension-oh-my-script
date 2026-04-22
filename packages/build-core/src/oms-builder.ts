@@ -29,6 +29,9 @@ import { MergedTaskExecError, TaskQueue } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { rollupPluginNodeBuiltinModules } from './features/rollup-plugin-node-builtin-modules.js';
+import { OmsConfigWatcher } from './config-watcher.js';
+import type { OmsConfig } from './config.js';
+import rollupPluginAlias from '@rollup/plugin-alias';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -90,6 +93,7 @@ export class OmsBuilder extends EventEmitter<{
   }
 
   private _projectPath: string;
+  private _configWatcher: OmsConfigWatcher | undefined;
   private _watcher: OmsWatcher | undefined;
   private _buildOptions: BuildOptions = {
     extensionBuildOptions: [],
@@ -103,6 +107,11 @@ export class OmsBuilder extends EventEmitter<{
   }>();
 
   private async _clean() {
+    const configWatcher = this._configWatcher;
+    if (configWatcher) {
+      this._configWatcher = undefined;
+      await configWatcher.close();
+    }
     const watcher = this._watcher;
     if (watcher) {
       this._watcher = undefined;
@@ -112,6 +121,10 @@ export class OmsBuilder extends EventEmitter<{
 
   private async _rebuild() {
     await this._clean();
+
+    const configWatcher = await this._initializeConfigWatcher();
+
+    const config = await configWatcher.ready();
 
     const outDir = resolve(this._projectPath, 'temp', 'oms', 'out');
     try {
@@ -132,18 +145,33 @@ export class OmsBuilder extends EventEmitter<{
     await fs.emptyDir(typingOutDir);
 
     assert(!this._watcher);
-    this._watcher = new OmsWatcher({
+    const watcher = this._watcher = new OmsWatcher({
       projectPath: this._projectPath,
       outDir,
       typingOutDir,
       ctx: this._ctx,
       buildOptions: this._buildOptions,
+      config,
     });
     this._watcher.on('passive-build-end', (buildResult) => {
       this.emit('passive-build-end', buildResult);
     });
+
+    configWatcher.on('configUpdated', (config) => {
+      watcher.updateConfig(config).catch((err) => {
+        logger.error(err);
+      });
+    });
+
     await this._watcher.start();
     return await this._watcher.build();
+  }
+
+  private async _initializeConfigWatcher() {
+    assert.ok(!this._configWatcher);
+    return this._configWatcher = new OmsConfigWatcher({
+      projectPath: this._projectPath,
+    });
   }
 }
 
@@ -156,6 +184,7 @@ class OmsWatcher extends EventEmitter<{
     typingOutDir: string;
     ctx: ServerContext;
     buildOptions: BuildOptions;
+    config: OmsConfig;
   }) {
     super();
     const {
@@ -164,6 +193,7 @@ class OmsWatcher extends EventEmitter<{
       typingOutDir,
       ctx,
       buildOptions,
+      config,
     } = options;
 
     this._projectPath = projectPath;
@@ -172,8 +202,11 @@ class OmsWatcher extends EventEmitter<{
     this._typingOutDir = typingOutDir;
     this._ctx = ctx;
 
+    this._config = config;
+
     const buildRecord = new BuildRecord({
       outDir,
+      config,
     });
     this._buildRecord = buildRecord;
 
@@ -261,6 +294,17 @@ class OmsWatcher extends EventEmitter<{
     this._queuePassiveBuild('build options updated');
   }
 
+  async updateConfig(config: OmsConfig) {
+    await this._taskQueue.queueTask({
+      type: 'update-config',
+      exec: async () => {
+        this._config = config;
+        await this._updateDomains();
+      },
+    });
+    this._queuePassiveBuild('config updated');
+  }
+
   async inlineUUIDs() {
     await this._taskQueue.queueTask({
       type: 'inlineUUIDs',
@@ -285,6 +329,13 @@ class OmsWatcher extends EventEmitter<{
 
     const outDir = join(opts.buildDir, 'oms');
 
+    const configWatcher = new OmsConfigWatcher({
+      projectPath: this._projectPath,
+      once: true,
+    });
+    const config = await configWatcher.ready();
+    await configWatcher.close();
+
     const buildRecord = new BuildRecord({
       outDir,
       sourceMaps: opts.sourceMaps,
@@ -294,6 +345,7 @@ class OmsWatcher extends EventEmitter<{
         mode: 'BUILD',
         debug: opts.debug,
       },
+      config,
     });
 
     await this._taskQueue.queueTask({
@@ -305,6 +357,7 @@ class OmsWatcher extends EventEmitter<{
           entries,
           uuidProvider: this._uuidProvider,
           domains: this._domains,
+          config: this._config,
         });
       },
     });
@@ -312,6 +365,7 @@ class OmsWatcher extends EventEmitter<{
 
   private _projectPath: string;
   private _buildOptions: Readonly<BuildOptions>;
+  private _config: OmsConfig;
 
   private _outDir: string;
   private _typingOutDir: string;
@@ -337,6 +391,7 @@ class OmsWatcher extends EventEmitter<{
     'inlineUUIDs': () => void;
     'build-prod': () => void;
     'update-build-options': () => void;
+    'update-config': () => void;
   }> = new TaskQueue();
 
   private async _updateDomains() {
@@ -547,6 +602,7 @@ class OmsWatcher extends EventEmitter<{
         entries: entries,
         uuidProvider: this._uuidProvider,
         domains: this._domains,
+        config: this._config,
       }),
       buildExtras,
     ] as const;
@@ -748,6 +804,7 @@ interface InternalBuildOptions {
   entries: Record<string, string>;
   domains: Record<string, Domain>;
   uuidProvider: UUIDProvider | undefined;
+  config: OmsConfig;
 }
 
 type InternalBuildResult = {
@@ -767,11 +824,18 @@ class BuildRecord {
     sourceMaps?: boolean | 'inline';
     debug?: boolean;
     ccEnvParams?: CCEnvParams;
+    config: OmsConfig;
   }) {
     this._outDir = options.outDir;
     this._sourceMaps = options.sourceMaps ?? true;
     this._debug = options.debug ?? true;
     this._ccEnvParams = options.ccEnvParams;
+    this._buildOptions = {
+      entries: {},
+      uuidProvider: undefined,
+      domains: {},
+      config: options.config,
+    };
   }
 
   async rebuild(options: InternalBuildOptions) {
@@ -828,11 +892,7 @@ class BuildRecord {
   ];
 
   private _ccEnvParams: CCEnvParams | undefined;
-  private _buildOptions: InternalBuildOptions = {
-    entries: {},
-    uuidProvider: undefined,
-    domains: {},
-  };
+  private _buildOptions: InternalBuildOptions;
 
   private async _doBuild(options: InternalBuildOptions): Promise<InternalBuildResult> {
     const entries = options.entries;
@@ -940,6 +1000,10 @@ class BuildRecord {
           '.js',
           '.cjs',
         ],
+      }),
+
+      rollupPluginAlias({
+        entries: this._buildOptions.config.resolve.alias,
       }),
 
       rollupPluginNodeResolve({
