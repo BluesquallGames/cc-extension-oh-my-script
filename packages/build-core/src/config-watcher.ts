@@ -1,6 +1,6 @@
 import EventEmitter from 'node:events';
 import * as chokidar from 'chokidar';
-import type { OmsConfig } from './config.js';
+import { normalizeUserConfig, type OmsConfig, type OmsUserConfig } from './config.js';
 import { promiseWithResolvers } from './utils/promise-with-resolvers.js';
 import { logger } from './logger.js';
 import { basename, relative, resolve } from 'node:path';
@@ -71,6 +71,9 @@ export class OmsConfigWatcher extends EventEmitter<{
 
   private _config: OmsConfig = {
     resolve: {},
+    headless: {
+      enabled: false,
+    },
   };
 
   private _rootDir: string;
@@ -93,11 +96,14 @@ export class OmsConfigWatcher extends EventEmitter<{
     const path = resolve(this._rootDir, this._effectiveConfigFile);
     (async () => {
       const { default: config } = await import(pathToFileURL(path).href + '?timestamp=' + Date.now());
+      let useConfig: OmsUserConfig;
       if (typeof config === 'function') {
-        this._config = config();
+        useConfig = config();
       } else {
-        this._config = config;
+        useConfig = config;
       }
+      logger.debug('user config read: %o', useConfig);
+      this._config = normalizeUserConfig(useConfig);
       logger.debug('config updated: %o', this._config);
       this.emit('configUpdated', this._config);
     })().catch((err) => {

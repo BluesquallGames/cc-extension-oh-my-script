@@ -4,8 +4,25 @@ import { logger } from './logger.js';
 import fs from 'fs-extra';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
 
+export enum BundleUsage {
+  regular = 'regular',
+  editor = 'editor',
+  headless = 'headless',
+}
+
 export class Bundle {
-  constructor(private _id: string, private _indexModuleDirs: string[], private _uuidManager: UUIDManager, private _isEditorBundle: boolean) {
+  constructor(private _id: string, private _indexModuleDirs: string[], private _uuidManager: UUIDManager, private _usage: BundleUsage) {
+    switch (_usage) {
+    case BundleUsage.regular:
+      this._desiredIndexModuleFileStem = 'index';
+      break;
+    case BundleUsage.editor:
+      this._desiredIndexModuleFileStem = 'index.editor';
+      break;
+    case BundleUsage.headless:
+      this._desiredIndexModuleFileStem = 'index.headless';
+      break;
+    }
   }
 
   get empty() {
@@ -40,6 +57,10 @@ export class Bundle {
     }
     files.push(...this._componentModules);
     return files;
+  }
+
+  isHeadlessModule(path: string) {
+    return this._usage === BundleUsage.headless && this._isIndexModule(path);
   }
 
   async addSourceFile(path: string) {
@@ -82,6 +103,7 @@ export class Bundle {
   private _componentModules: string[] = [];
   private _entryDirty = true;
   private _entrySource = '';
+  private _desiredIndexModuleFileStem = '';
 
   private _invalidateEntry() {
     this._entryDirty = true;
@@ -138,7 +160,7 @@ export class Bundle {
     const { dir, name, ext } = parse(sourceFile);
     if (this._indexModuleDirs.includes(dir)
       && /^\.[cm]?[jt]s$/.test(ext.toLowerCase())
-      && name.toLocaleLowerCase() === (this._isEditorBundle ? 'index.editor' : 'index')
+      && name.toLocaleLowerCase() === this._desiredIndexModuleFileStem
     ) {
       return true;
     }

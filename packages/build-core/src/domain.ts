@@ -1,11 +1,18 @@
 import assert from 'node:assert';
-import { Bundle } from './bundle.js';
+import { Bundle, BundleUsage } from './bundle.js';
 import type { UUIDManager } from './uuid-manager.js';
 import fs from 'fs-extra';
 import { dirname, join, relative } from 'node:path';
 import { logger } from './logger.js';
 import { glob } from 'node:fs/promises';
 import { domainURLProtocol } from './constants.js';
+import type { HeadlessConfig } from './config.js';
+
+export interface DomainEntryQueryOptions {
+  regular: boolean;
+  editor: boolean;
+  headless: boolean;
+}
 
 export class Domain {
   constructor(
@@ -14,20 +21,27 @@ export class Domain {
     private _partitions: PackageOmsPartitionConfig[],
     private _exports: Record<string, string>,
     uuidManager: UUIDManager,
+    private _headlessConfig: HeadlessConfig,
   ) {
     {
       const domainId = this._id;
 
       const mainBundleId = domainId;
-      this._mainBundle = new Bundle(mainBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, false);
+      this._mainBundle = new Bundle(mainBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, BundleUsage.regular);
       this._bundles[mainBundleId] = this._mainBundle;
       for (const partition of _partitions) {
         this._bundleSourceRootMap.push({ sourceRoot: join(this._domainRoot, partition.rootDir), bundleId: mainBundleId });
       }
 
       const editorBundleId = `${domainId}.editor`;
-      this._editorBundle = new Bundle(editorBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, true);
+      this._editorBundle = new Bundle(editorBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, BundleUsage.editor);
       this._bundles[editorBundleId] = this._editorBundle;
+
+      if (this._headlessConfig.enabled) {
+        const headlessBundleId = `${domainId}.headless`;
+        this._headlessBundle = new Bundle(headlessBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, BundleUsage.headless);
+        this._bundles[headlessBundleId] = this._headlessBundle;
+      }
     }
   }
 
@@ -35,12 +49,22 @@ export class Domain {
     return this._partitions.map((p) => join(this._domainRoot, p.rootDir));
   }
 
-  getEntrySpecs(includeEditorBundle: boolean): Record<string, BundleEntrySpec> {
+  getEntrySpecs(opts: DomainEntryQueryOptions): Record<string, BundleEntrySpec> {
     const entrySpecs: Record<string, BundleEntrySpec> = {};
 
     for (const [bundleId, bundle] of Object.entries(this._bundles)) {
-      if (!includeEditorBundle && bundle === this._editorBundle) {
-        continue;
+      if (bundle === this._editorBundle) {
+        if (!opts.editor) {
+          continue;
+        }
+      } else if (bundle === this._headlessBundle) {
+        if (!opts.headless) {
+          continue;
+        }
+      } else {
+        if (!opts.regular) {
+          continue;
+        }
       }
       if (bundle.empty) {
         continue;
@@ -54,16 +78,18 @@ export class Domain {
       };
     }
 
-    for (const [key, value] of Object.entries(this._exports)) {
-      let entryName = '';
-      if (key === '.') {
-        entryName = `${this._id}-export`;
-      } else {
-        entryName = `${this._id}-export/${key.startsWith('./') ? key.slice(2) : key}`;
+    if (opts.regular) {
+      for (const [key, value] of Object.entries(this._exports)) {
+        let entryName = '';
+        if (key === '.') {
+          entryName = `${this._id}-export`;
+        } else {
+          entryName = `${this._id}-export/${key.startsWith('./') ? key.slice(2) : key}`;
+        }
+        entrySpecs[entryName] = {
+          source: `export * from ${JSON.stringify(join(this._domainRoot, value))}`,
+        };
       }
-      entrySpecs[entryName] = {
-        source: `export * from ${JSON.stringify(join(this._domainRoot, value))}`,
-      };
     }
 
     logger.verbose(`Entry specs for domain ${this._id}: ${JSON.stringify(entrySpecs, undefined, 2)}`);
@@ -116,6 +142,7 @@ export class Domain {
 
   private _mainBundle: Bundle;
   private _editorBundle: Bundle;
+  private _headlessBundle: Bundle | undefined;
   private _bundles: Record<string, Bundle> = {};
   private _bundleSourceRootMap: Array<{
     sourceRoot: string;
@@ -126,6 +153,9 @@ export class Domain {
     if (/\.editor\.\w+$/.test(path)) {
       return this._editorBundle;
     }
+    if (this._headlessBundle && this._testHeadlessModule(path)) {
+      return this._headlessBundle;
+    }
     const bundleId = this._bundleSourceRootMap.find(({ sourceRoot }) => path.startsWith(sourceRoot))?.bundleId;
     if (!bundleId) {
       throw new Error(`Bundle for ${path} not found in domain ${this._id}, root dirs: ${this._bundleSourceRootMap.map(({ sourceRoot }) => sourceRoot).join(', ')}`);
@@ -133,6 +163,28 @@ export class Domain {
     const bundle = this._bundles[bundleId];
     assert.ok(bundle, `Bundle for ${path} not found in domain ${this._id}`);
     return bundle;
+  }
+
+  private _testHeadlessModule(path: string): boolean {
+    const headlessConfig = this._headlessConfig;
+    if (!headlessConfig.enabled) {
+      return false;
+    }
+    if (this._editorBundle?.isHeadlessModule(path)) {
+      return true;
+    }
+    const relativePath = relative(this._domainRoot, path);
+    if (headlessConfig.include) {
+      if (!headlessConfig.include(relativePath)) {
+        return false;
+      }
+    }
+    if (headlessConfig.exclude) {
+      if (headlessConfig.exclude(relativePath)) {
+        return false;
+      }
+    }
+    return true;
   }
 }
 

@@ -28,6 +28,7 @@ export interface ClientInvocationMap {
     debug: boolean;
     sourceMaps: boolean | 'inline';
     platform: string;
+    headless: boolean;
   }) => void;
 
   'update-build-options': (options: BuildOptions) => void;

@@ -10,13 +10,13 @@ import type { BuildOptions, BuildResult, InvocationParams, PassiveBuildEndInfo }
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
-import { Domain, readDomainExports, readDomainPackageJson } from './domain.js';
+import { Domain, readDomainExports, readDomainPackageJson, type DomainEntryQueryOptions } from './domain.js';
 import { MergedTaskExecError, TaskQueue } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { OmsConfigWatcher } from './config-watcher.js';
 import type { OmsConfig } from './config.js';
-import { BuildRecord, type InternalBuildResult } from './build-record.js';
+import { BuildRecord, mergeBuildResults, type InternalBuildResult } from './build-record.js';
 
 const mainDomainId = 'main';
 
@@ -106,29 +106,41 @@ export class OmsBuilder extends EventEmitter<{
 
     const config = await configWatcher.ready();
 
-    const outDir = resolve(this._projectPath, 'temp', 'oms', 'out');
-    try {
-      await fs.ensureDir(outDir);
-      await fs.emptyDir(outDir);
-    } catch (err) {
-      logger.error(`Failed to clean output directory ${outDir}: ${err}`);
-    }
-
-    await fs.outputJSON(join(outDir, 'package.json'), {
+    const defaultProfile = {
+      outDir: resolve(this._projectPath, 'temp', 'oms', 'out'),
+      typingOutDir: resolve(this._projectPath, 'temp', 'oms', 'typing'),
+    };
+    await createProfileOutDirs(defaultProfile);
+    await fs.outputJSON(join(defaultProfile.outDir, 'package.json'), {
       type: 'commonjs',
     }, {
       spaces: 2,
     });
 
-    const typingOutDir = resolve(this._projectPath, 'temp', 'oms', 'typing');
-    await fs.ensureDir(typingOutDir);
-    await fs.emptyDir(typingOutDir);
+    let headlessProfile: undefined | BuildProfile;
+    if (config.headless.enabled) {
+      headlessProfile = {
+        outDir: resolve(this._projectPath, 'temp', 'oms', 'out-headless'),
+        typingOutDir: resolve(this._projectPath, 'temp', 'oms', 'typing-headless'),
+      };
+      await createProfileOutDirs(headlessProfile);
+      await fs.outputJSON(join(headlessProfile.outDir, 'package.json'), {
+        type: 'module',
+      }, {
+        spaces: 2,
+      });
+      await fs.outputJSON(join(defaultProfile.outDir, 'package.json'), {
+        type: 'module',
+      }, {
+        spaces: 2,
+      });
+    }
 
     assert(!this._watcher);
     const watcher = this._watcher = new OmsWatcher({
       projectPath: this._projectPath,
-      outDir,
-      typingOutDir,
+      defaultProfile,
+      headlessProfile,
       ctx: this._ctx,
       buildOptions: this._buildOptions,
       config,
@@ -155,13 +167,32 @@ export class OmsBuilder extends EventEmitter<{
   }
 }
 
+interface BuildProfile {
+  outDir: string;
+  typingOutDir: string;
+}
+
+async function createProfileOutDirs(profile: BuildProfile) {
+  await ensureEmptyDirSafe(profile.outDir);
+  await ensureEmptyDirSafe(profile.typingOutDir);
+}
+
+async function ensureEmptyDirSafe(dir: string) {
+  try {
+    await fs.ensureDir(dir);
+    await fs.emptyDir(dir);
+  } catch (err) {
+    logger.error(`Failed to clean directory ${dir}: ${err}`);
+  }
+}
+
 class OmsWatcher extends EventEmitter<{
   'passive-build-end': [PassiveBuildEndInfo];
 }> {
   constructor(options: {
     projectPath: string;
-    outDir: string;
-    typingOutDir: string;
+    defaultProfile: BuildProfile;
+    headlessProfile: BuildProfile | undefined;
     ctx: ServerContext;
     buildOptions: BuildOptions;
     config: OmsConfig;
@@ -169,8 +200,8 @@ class OmsWatcher extends EventEmitter<{
     super();
     const {
       projectPath,
-      outDir,
-      typingOutDir,
+      defaultProfile,
+      headlessProfile,
       ctx,
       buildOptions,
       config,
@@ -178,17 +209,30 @@ class OmsWatcher extends EventEmitter<{
 
     this._projectPath = projectPath;
     this._buildOptions = buildOptions;
-    this._outDir = outDir;
-    this._typingOutDir = typingOutDir;
+    this._defaultProfile = defaultProfile;
+    this._headlessProfile = headlessProfile;
     this._ctx = ctx;
 
     this._config = config;
 
     const buildRecord = new BuildRecord({
-      outDir,
+      title: `default-build`,
+      outDir: defaultProfile.outDir,
       config,
+      headless: false,
     });
     this._buildRecord = buildRecord;
+
+    let headlessBuildRecord: undefined | BuildRecord;
+    if (headlessProfile) {
+      headlessBuildRecord = new BuildRecord({
+        title: `headless-build`,
+        outDir: headlessProfile.outDir,
+        config,
+        headless: true,
+      });
+    }
+    this._headlessBuildRecord = headlessBuildRecord;
 
     const uuidManager = new UUIDManager(this._projectPath);
     this._uuidManager = uuidManager;
@@ -316,7 +360,10 @@ class OmsWatcher extends EventEmitter<{
     const config = await configWatcher.ready();
     await configWatcher.close();
 
+    const headless = opts.headless ?? false;
+
     const buildRecord = new BuildRecord({
+      title: `prod-build`,
       outDir,
       sourceMaps: opts.sourceMaps,
       debug: opts.debug,
@@ -326,13 +373,18 @@ class OmsWatcher extends EventEmitter<{
         debug: opts.debug,
       },
       config,
+      headless,
     });
 
     await this._taskQueue.queueTask({
       type: 'build-prod',
 
       exec: async () => {
-        const { entries, autoRunInfos } = await this._makeEntries(false);
+        const { entries } = await this._makeEntries({
+          regular: !headless,
+          editor: false,
+          headless: headless,
+        });
         await buildRecord.rebuild({
           entries,
           uuidProvider: this._uuidProvider,
@@ -347,12 +399,13 @@ class OmsWatcher extends EventEmitter<{
   private _buildOptions: Readonly<BuildOptions>;
   private _config: OmsConfig;
 
-  private _outDir: string;
-  private _typingOutDir: string;
+  private _defaultProfile: BuildProfile;
+  private _headlessProfile: BuildProfile | undefined;
   private _ctx: ServerContext;
   private _uuidManager: UUIDManager;
   private _uuidProvider: UUIDProvider;
   private _buildRecord: BuildRecord;
+  private _headlessBuildRecord: BuildRecord | undefined;
   private _fileWatcher: chokidar.FSWatcher;
   private _fileWatcherReadyPromise: PromiseWithResolvers<void> | undefined = promiseWithResolvers();
   private _passiveWatchedFiles = new Set<string>();
@@ -394,7 +447,7 @@ class OmsWatcher extends EventEmitter<{
       const domainPathMappings = domain.generatePathMappings();
       Object.assign(pathMappings, domainPathMappings);
     }
-    await fs.outputJson(join(this._typingOutDir, 'tsconfig.json'), {
+    await fs.outputJson(join(this._defaultProfile.outDir, 'tsconfig.json'), {
       compilerOptions: {
         paths: pathMappings,
       },
@@ -415,6 +468,7 @@ class OmsWatcher extends EventEmitter<{
       partitions,
       domainExports,
       this._uuidManager,
+      domainId === mainDomainId ? this._config.headless : { enabled: false },
     );
     const sourceRoots = domain.sourceRoots;
     for (const sourceRoot of sourceRoots) {
@@ -429,7 +483,7 @@ class OmsWatcher extends EventEmitter<{
     }
   }
 
-  private async _makeEntries(includeEditorBundle: boolean) {
+  private async _makeEntries(opts: DomainEntryQueryOptions) {
     const entries: Record<string, string> = {};
     const autoRunInfos: Array<{
       entryId: string;
@@ -437,7 +491,7 @@ class OmsWatcher extends EventEmitter<{
       isEditorEntry: boolean;
     }> = [];
     for (const [domainId, domain] of Object.entries(this._domains)) {
-      const domainEntrySpecs = domain.getEntrySpecs(includeEditorBundle);
+      const domainEntrySpecs = domain.getEntrySpecs(opts);
       for (const [domainEntrySpecId, domainEntrySpec] of Object.entries(domainEntrySpecs)) {
         if (domainEntrySpecId in entries) {
           logger.warn(`Duplicate entry spec id: ${domainEntrySpecId}`);
@@ -460,7 +514,6 @@ class OmsWatcher extends EventEmitter<{
 
     return {
       entries,
-      autoRunInfos,
     };
   }
 
@@ -557,35 +610,77 @@ class OmsWatcher extends EventEmitter<{
   private async _doExecBuild() {
     const entryChanged = await this._executeFileQueue();
 
-    if (this._lastBuildExtras) {
-      if (!entryChanged) {
-        return [await this._buildRecord.build(), this._lastBuildExtras] as const;
-      }
+    let defaultProfileBuildResult: InternalBuildResult;
+    let headlessBuildResult: InternalBuildResult | undefined;
+    if (this._lastBuildExtras && !entryChanged) {
+      ([
+        defaultProfileBuildResult,
+        headlessBuildResult,
+      ] = await promiseSequential([
+        this._buildRecord.build(),
+        this._headlessBuildRecord?.build(),
+      ]));
+    } else {
+      this._lastBuildExtras = undefined;
+
+      const buildExtras: BuildExtras = {
+        entryFiles: new Set(),
+      };
+
+      const defaultProfileBuildPromise = (async () => {
+        const { entries } = await this._makeEntries({
+          regular: true,
+          editor: true,
+          headless: true,
+        });
+        for (const domain of Object.values(this._domains)) {
+          for (const implicitEntry of domain.getImplicitEntries()) {
+            buildExtras.entryFiles.add(implicitEntry);
+          }
+        }
+        return this._buildRecord.rebuild({
+          entries: entries,
+          uuidProvider: this._uuidProvider,
+          domains: this._domains,
+          config: this._config,
+        });
+      })();
+
+      const headlessBuildPromise = (async () => {
+        if (!this._headlessBuildRecord) {
+          return undefined;
+        }
+        const { entries } = await this._makeEntries({
+          regular: false,
+          editor: false,
+          headless: true,
+        });
+        for (const domain of Object.values(this._domains)) {
+          for (const implicitEntry of domain.getImplicitEntries()) {
+            buildExtras.entryFiles.add(implicitEntry);
+          }
+        }
+        return this._headlessBuildRecord.rebuild({
+          entries: entries,
+          uuidProvider: this._uuidProvider,
+          domains: this._domains,
+          config: this._config,
+        });
+      })();
+
+      ([
+        defaultProfileBuildResult,
+        headlessBuildResult,
+      ] = await promiseSequential([
+        defaultProfileBuildPromise,
+        headlessBuildPromise,
+      ]));
+
+      this._lastBuildExtras = buildExtras;
     }
 
-    this._lastBuildExtras = undefined;
-
-    const { entries, autoRunInfos } = await this._makeEntries(true);
-    const buildExtras: BuildExtras = {
-      entryFiles: new Set(),
-      autoRunInfos,
-    };
-    for (const domain of Object.values(this._domains)) {
-      for (const implicitEntry of domain.getImplicitEntries()) {
-        buildExtras.entryFiles.add(implicitEntry);
-      }
-    }
-
-    this._lastBuildExtras = buildExtras;
-    return [
-      await this._buildRecord.rebuild({
-        entries: entries,
-        uuidProvider: this._uuidProvider,
-        domains: this._domains,
-        config: this._config,
-      }),
-      buildExtras,
-    ] as const;
+    const mergedBuildResult = headlessBuildResult ? mergeBuildResults(defaultProfileBuildResult, headlessBuildResult) : defaultProfileBuildResult;
+    return [mergedBuildResult, this._lastBuildExtras] as const;
   }
 
   private async _onBuildEnd(buildResult: InternalBuildResult, extras: BuildExtras): Promise<BuildResult> {
@@ -635,7 +730,7 @@ class OmsWatcher extends EventEmitter<{
     };
   }
 
-  private async _renderMetadataFile(autoRunInfos: BuildExtras['autoRunInfos']) {
+  private async _renderMetadataFile(autoRunInfos: AutoRunInfos) {
     const template = await fs.readFile(join(helpersDir, 'meta.ts.ejs'), 'utf8');
     const source = Ejs.render(template, {
       entries: autoRunInfos.map(({ bundleId, isEditorEntry }) => {
@@ -748,6 +843,15 @@ class OmsWatcher extends EventEmitter<{
   }
 }
 
+async function promiseSequential<T extends readonly unknown[] | []>(promises: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]>; }> {
+  type ResultType = { -readonly [P in keyof T]: Awaited<T[P]>; };
+  const result: ResultType = new Array(promises.length) as ResultType;
+  for (let i = 0; i < promises.length; i++) {
+    result[i] = await promises[i];
+  }
+  return result;
+}
+
 function* listEntries(sourceRoot: string) {
   if (!fs.existsSync(sourceRoot)) {
     return;
@@ -760,13 +864,14 @@ function* listEntries(sourceRoot: string) {
 }
 
 interface BuildExtras {
-  autoRunInfos: Array<{
-    entryId: string;
-    bundleId: string;
-    isEditorEntry: boolean;
-  }>;
   entryFiles: Set<string>;
 }
+
+type AutoRunInfos = Array<{
+  entryId: string;
+  bundleId: string;
+  isEditorEntry: boolean;
+}>;
 
 function* readDirRecurse(root: string, current: string = ''): Generator<string> {
   const path = resolve(root, current);

@@ -43,15 +43,43 @@ export type InternalBuildResult = {
   };
 };
 
+export function mergeBuildResults(a: InternalBuildResult, b: InternalBuildResult): InternalBuildResult {
+  if (a.ok && b.ok) {
+    return {
+      ok: true,
+      inferredFiles: [...a.inferredFiles, ...b.inferredFiles],
+    };
+  }
+  if (!a.ok && !b.ok) {
+    return {
+      ok: false,
+      error: {
+        message: a.error.message + '\n' + b.error.message,
+        stack: undefined,
+      },
+    };
+  }
+
+  if (!a.ok) {
+    return a;
+  }
+
+  return b;
+}
+
 export class BuildRecord {
   constructor(options: {
+    title: string;
     outDir: string;
     sourceMaps?: boolean | 'inline';
     debug?: boolean;
     ccEnvParams?: CCEnvParams;
     config: OmsConfig;
+    headless: boolean;
   }) {
+    this._title = options.title;
     this._outDir = options.outDir;
+    this._headless = options.headless;
     this._sourceMaps = options.sourceMaps ?? true;
     this._debug = options.debug ?? true;
     this._ccEnvParams = options.ccEnvParams;
@@ -69,7 +97,7 @@ export class BuildRecord {
   }
 
   async build(): Promise<InternalBuildResult> {
-    logger.debug(`Build with options: %o`, this._buildOptions);
+    logger.debug(`${this._title} Build with options: %o`, this._buildOptions);
     try {
       const {
         entries,
@@ -81,7 +109,7 @@ export class BuildRecord {
       });
       return buildResult;
     } catch (error) {
-      logger.debug('Build failed: %o', error);
+      logger.debug(`${this._title} Build failed: %o`, error);
       if (error instanceof Error) {
         if (error instanceof Error && error.name === 'RollupError') {
           return {
@@ -106,8 +134,10 @@ export class BuildRecord {
     }
   }
 
+  private _title: string;
   private _cache: rollup.RollupCache | undefined;
   private _outDir: string;
+  private _headless: boolean;
   private _sourceMaps: boolean | 'inline';
   private _debug: boolean;
   private _suppressRollupWarningCodes = [
@@ -122,7 +152,7 @@ export class BuildRecord {
   private async _doBuild(options: InternalBuildOptions): Promise<InternalBuildResult> {
     const entries = options.entries;
     if (Object.keys(entries).length === 0) {
-      logger.debug('No entry found, skip build');
+      logger.debug(`${this._title} No entry found, skip build`);
       this._cache = undefined;
       return {
         ok: true,
@@ -275,7 +305,7 @@ export class BuildRecord {
 
     const outputOptions: rollup.OutputOptions = {
       dir: join(this._outDir),
-      format: 'systemjs',
+      format: this._headless ? 'es' : 'systemjs',
       entryFileNames: '[name].js',
       chunkFileNames: '_chunks/[name]-[hash].js',
       assetFileNames: '_assets/[name]-[hash][extname]',
@@ -288,6 +318,7 @@ export class BuildRecord {
       //   }
       //   return null;
       // },
+      preserveModules: !!this._headless,
     };
 
     await rollupBuild.write(outputOptions);
