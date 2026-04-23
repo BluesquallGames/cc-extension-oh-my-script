@@ -220,6 +220,9 @@ class OmsWatcher extends EventEmitter<{
       outDir: defaultProfile.outDir,
       config,
       headless: false,
+      ccEnvParams: {
+        debug: true,
+      },
     });
     this._buildRecord = buildRecord;
 
@@ -230,6 +233,11 @@ class OmsWatcher extends EventEmitter<{
         outDir: headlessProfile.outDir,
         config,
         headless: true,
+        ccEnvParams: {
+          platform: 'nodejs',
+          debug: true,
+          headless: true,
+        },
       });
     }
     this._headlessBuildRecord = headlessBuildRecord;

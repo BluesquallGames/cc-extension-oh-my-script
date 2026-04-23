@@ -1,8 +1,9 @@
-import { EDITOR, HTML5 } from 'cc/env';
+import { EDITOR, HTML5, NODEJS } from 'cc/env';
 
 export async function importWasmBinary(input: string) {
-  if (EDITOR) {
-    const r = require;
+  if (EDITOR || NODEJS) {
+    const { createRequire } = await import('node:module');
+    const r = createRequire(typeof __dirname === 'string' ? __dirname : import.meta.url);
     const ps = r('path');
     const fs = r('fs/promises');
     const { fileURLToPath } = r('url');
@@ -20,7 +21,7 @@ export async function importWasmBinary(input: string) {
 }
 
 export async function importWasmInstance(input: string, imports?: WebAssembly.Imports) {
-  if (EDITOR) {
+  if (EDITOR || NODEJS) {
     const r = require;
     const ps = r('path');
     const fs = r('fs/promises');
@@ -28,7 +29,7 @@ export async function importWasmInstance(input: string, imports?: WebAssembly.Im
     const binary = await fs.readFile(fileURLToPath(input));
     const module = await WebAssembly.compile(binary);
     return await WebAssembly.instantiate(module, imports);
-  } else if (HTML5) {
+  } else if (HTML5 || NODEJS) {
     const response = await fetch(input);
     if (!response.ok) {
       throw new Error(`Failed to fetch WebAssembly file: ${input}`);

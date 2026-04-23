@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { helpersDir } from '../helpers-dir.js';
 
 export interface CCEnvParams {
-  platform: string;
-  mode: string;
-  debug: boolean;
+  platform?: string;
+  mode?: string;
+  headless?: boolean;
+  debug?: boolean;
 }
 
 export function generateCCEnvModuleSource(input: {

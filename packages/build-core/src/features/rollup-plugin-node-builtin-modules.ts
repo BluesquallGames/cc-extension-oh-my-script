@@ -70,12 +70,19 @@ const nodeUnscopedBuiltinModules = [
 ];
 
 export function rollupPluginNodeBuiltinModules(opts: {
+  supportsNativeModules: boolean;
 }): Plugin {
   return {
     name: pluginName,
 
     async resolveId(source) {
       if (source.startsWith('node:') || nodeUnscopedBuiltinModules.includes(source)) {
+        if (opts.supportsNativeModules) {
+          return {
+            id: source,
+            external: true,
+          };
+        }
         return nodeBuiltinModuleProxyPrefix + source;
       }
       if (source === nodeBuiltinModuleLoaderModuleId) {

@@ -170,7 +170,7 @@ export class Domain {
     if (!headlessConfig.enabled) {
       return false;
     }
-    if (this._editorBundle?.isHeadlessModule(path)) {
+    if (this._headlessBundle?.isHeadlessModule(path)) {
       return true;
     }
     const relativePath = relative(this._domainRoot, path);

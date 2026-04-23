@@ -244,7 +244,9 @@ export class BuildRecord {
 
       rollupPluginWasm({}),
 
-      rollupPluginNodeBuiltinModules({}),
+      rollupPluginNodeBuiltinModules({
+        supportsNativeModules: !!this._headless,
+      }),
 
       rollupPluginJson({
         namedExports: false,
@@ -272,6 +274,7 @@ export class BuildRecord {
         ],
         allowExportsFolderMapping: false,
         preferBuiltins: false,
+        exportConditions: [this._headless ? 'headless' : undefined].filter((condition) => condition !== undefined),
       }),
 
       this._makeRollupBabelPlugin({
@@ -303,6 +306,7 @@ export class BuildRecord {
     const outputPlugins: rollup.Plugin[] = [
     ];
 
+    const preserveModules = !!this._headless;
     const outputOptions: rollup.OutputOptions = {
       dir: join(this._outDir),
       format: this._headless ? 'es' : 'systemjs',
@@ -312,12 +316,14 @@ export class BuildRecord {
       sourcemap: this._sourceMaps,
       plugins: outputPlugins,
       // onlyExplicitManualChunks: true,
-      // manualChunks(id) {
-      //   if (id.includes('node_modules')) {
-      //     return 'vendor';
-      //   }
-      //   return null;
-      // },
+      manualChunks: preserveModules
+        ? undefined
+        : (id, _meta) => {
+          if (id === 'cc/env') {
+            return 'cc-env';
+          }
+          return null;
+        },
       preserveModules: !!this._headless,
     };
 
