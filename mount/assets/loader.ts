@@ -34,7 +34,7 @@ if (EDITOR) {
   interface OmsSystemInfo {
     vendorResolve: (specifier: string, parent?: string) => Promise<void>;
     vendorInstantiate: () => void;
-    vendorCreateContext: () => Record<string, unknown>;
+    vendorCreateContext: (id: string, ...args: unknown[]) => Record<string, unknown>;
     instantiatedModules: string[];
     hot: {
       controllerOnDispose: AbortController;
@@ -126,8 +126,8 @@ if (EDITOR) {
     return vendorInstantiate.call(this, id, parentURL, ...args);
   };
 
-  systemJSPrototype.createContext = function () {
-    const vendorContext = vendorCreateContext.call(this);
+  systemJSPrototype.createContext = function (id: string, ...args: unknown[]) {
+    const vendorContext = vendorCreateContext.call(this, id, ...args);
     vendorContext.hot = {
       signalOnDispose: omsSystemInfo.hot.controllerOnDispose.signal,
     };
