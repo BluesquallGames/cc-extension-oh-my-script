@@ -70,7 +70,10 @@ export class OmsConfigWatcher extends EventEmitter<{
   }
 
   private _config: OmsConfig = {
-    resolve: {},
+    resolve: {
+      alias: undefined,
+      maybeExternals: undefined,
+    },
     headless: {
       enabled: false,
     },

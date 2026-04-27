@@ -140,7 +140,7 @@ export class Bundle {
     // export {};
     // `);
     if (this._indexModule) {
-      lines.push(`import '${makeFileSystemAbsoluteImportSpecifier(this._indexModule)}';`);
+      lines.push(`export * from '${makeFileSystemAbsoluteImportSpecifier(this._indexModule)}';`);
     }
     for (const componentModule of this._componentModules) {
       lines.push(`import '${makeFileSystemAbsoluteImportSpecifier(componentModule)}';`);

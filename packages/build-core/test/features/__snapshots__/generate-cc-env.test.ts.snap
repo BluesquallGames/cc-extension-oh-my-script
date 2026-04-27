@@ -22,9 +22,9 @@ exports[`empty 1`] = `
 export const ANDROID = false;
 export const BYTEDANCE = false;
 export const COCOS_RUNTIME = false;
-export const EDITOR = false;
+export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
 export const HONOR = false;
-export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+export const HTML5 = typeof CSSStyleSheet === 'function' ;
 export const HUAWEI = false;
 export const IOS = false;
 export const LINUX = false;
@@ -42,7 +42,7 @@ export const WINDOWS = false;
 export const XIAOMI = false;
 export const NODEJS = false;
 
-export const EDITOR_NOT_IN_PREVIEW = false;
+export const EDITOR_NOT_IN_PREVIEW = EDITOR && !(typeof isPreviewProcess !== 'undefined' && isPreviewProcess === true);
 export const PREVIEW = false;
 export const BUILD = false;
 export const TEST = false;
@@ -91,9 +91,6 @@ exports[`mode > editor-not-in-preview 1`] = `
 "===================================================================
 --- empty
 +++ mode=editor-not-in-preview
-@@ -25,1 +25,1 @@
--export const EDITOR_NOT_IN_PREVIEW = false;
-+export const EDITOR_NOT_IN_PREVIEW = true;
 "
 `;
 
@@ -124,8 +121,11 @@ exports[`platform > alipay 1`] = `
 @@ -1,1 +1,1 @@
 -export const ALIPAY = false;
 +export const ALIPAY = true;
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 "
 `;
@@ -137,8 +137,11 @@ exports[`platform > android 1`] = `
 @@ -2,1 +2,1 @@
 -export const ANDROID = false;
 +export const ANDROID = true;
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 "
 `;
@@ -150,8 +153,11 @@ exports[`platform > bytedance 1`] = `
 @@ -3,1 +3,1 @@
 -export const BYTEDANCE = false;
 +export const BYTEDANCE = true;
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 "
 `;
@@ -160,11 +166,13 @@ exports[`platform > cocos-runtime 1`] = `
 "===================================================================
 --- empty
 +++ platform=cocos-runtime
-@@ -4,1 +4,1 @@
+@@ -4,2 +4,2 @@
 -export const COCOS_RUNTIME = false;
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
 +export const COCOS_RUNTIME = true;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 "
 `;
@@ -174,10 +182,10 @@ exports[`platform > editor 1`] = `
 --- empty
 +++ platform=editor
 @@ -5,1 +5,1 @@
--export const EDITOR = false;
-+export const EDITOR = true;
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = true ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 "
 `;
@@ -186,9 +194,11 @@ exports[`platform > honor 1`] = `
 "===================================================================
 --- empty
 +++ platform=honor
-@@ -6,2 +6,2 @@
+@@ -5,3 +5,3 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
 -export const HONOR = false;
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
++export const EDITOR = false ;
 +export const HONOR = true;
 +export const HTML5 =  false ;
 "
@@ -198,8 +208,11 @@ exports[`platform > huawei 1`] = `
 "===================================================================
 --- empty
 +++ platform=huawei
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,2 +7,2 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 -export const HUAWEI = false;
 +export const HTML5 =  false ;
 +export const HUAWEI = true;
@@ -210,8 +223,11 @@ exports[`platform > ios 1`] = `
 "===================================================================
 --- empty
 +++ platform=ios
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -9,1 +9,1 @@
 -export const IOS = false;
@@ -223,8 +239,11 @@ exports[`platform > linux 1`] = `
 "===================================================================
 --- empty
 +++ platform=linux
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -10,1 +10,1 @@
 -export const LINUX = false;
@@ -236,8 +255,11 @@ exports[`platform > mac 1`] = `
 "===================================================================
 --- empty
 +++ platform=mac
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -11,1 +11,1 @@
 -export const MAC = false;
@@ -249,8 +271,11 @@ exports[`platform > migu 1`] = `
 "===================================================================
 --- empty
 +++ platform=migu
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -12,1 +12,1 @@
 -export const MIGU = false;
@@ -262,8 +287,11 @@ exports[`platform > nodejs 1`] = `
 "===================================================================
 --- empty
 +++ platform=nodejs
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -23,1 +23,1 @@
 -export const NODEJS = false;
@@ -275,8 +303,11 @@ exports[`platform > non-existing 1`] = `
 "===================================================================
 --- empty
 +++ platform=non-existing
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 "
 `;
@@ -285,8 +316,11 @@ exports[`platform > ohos 1`] = `
 "===================================================================
 --- empty
 +++ platform=ohos
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -13,1 +13,1 @@
 -export const OHOS = false;
@@ -298,8 +332,11 @@ exports[`platform > ohos 2`] = `
 "===================================================================
 --- empty
 +++ platform=ohos
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -13,1 +13,1 @@
 -export const OHOS = false;
@@ -311,8 +348,11 @@ exports[`platform > open-harmony 1`] = `
 "===================================================================
 --- empty
 +++ platform=open-harmony
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 "
 `;
@@ -321,8 +361,11 @@ exports[`platform > openharmony 1`] = `
 "===================================================================
 --- empty
 +++ platform=openharmony
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -14,1 +14,1 @@
 -export const OPEN_HARMONY = false;
@@ -334,8 +377,11 @@ exports[`platform > oppo 1`] = `
 "===================================================================
 --- empty
 +++ platform=oppo
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -15,1 +15,1 @@
 -export const OPPO = false;
@@ -347,8 +393,11 @@ exports[`platform > taobao 1`] = `
 "===================================================================
 --- empty
 +++ platform=taobao
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -16,1 +16,1 @@
 -export const TAOBAO = false;
@@ -360,8 +409,11 @@ exports[`platform > taobao-minigame 1`] = `
 "===================================================================
 --- empty
 +++ platform=taobao-minigame
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -17,1 +17,1 @@
 -export const TAOBAO_MINIGAME = false;
@@ -373,8 +425,11 @@ exports[`platform > vivo 1`] = `
 "===================================================================
 --- empty
 +++ platform=vivo
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -18,1 +18,1 @@
 -export const VIVO = false;
@@ -386,8 +441,11 @@ exports[`platform > wechat 1`] = `
 "===================================================================
 --- empty
 +++ platform=wechat
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -19,1 +19,1 @@
 -export const WECHAT = false;
@@ -399,8 +457,11 @@ exports[`platform > wechat-mini-program 1`] = `
 "===================================================================
 --- empty
 +++ platform=wechat-mini-program
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -20,1 +20,1 @@
 -export const WECHAT_MINI_PROGRAM = false;
@@ -412,8 +473,11 @@ exports[`platform > windows 1`] = `
 "===================================================================
 --- empty
 +++ platform=windows
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -21,1 +21,1 @@
 -export const WINDOWS = false;
@@ -425,8 +489,11 @@ exports[`platform > xiaomi 1`] = `
 "===================================================================
 --- empty
 +++ platform=xiaomi
+@@ -5,1 +5,1 @@
+-export const EDITOR = (typeof Editor !== 'undefined' && typeof process !== 'undefined' && ('electron' in process.versions)) ;
++export const EDITOR = false ;
 @@ -7,1 +7,1 @@
--export const HTML5 =  typeof CSSStyleSheet === 'function' ;
+-export const HTML5 = typeof CSSStyleSheet === 'function' ;
 +export const HTML5 =  false ;
 @@ -22,1 +22,1 @@
 -export const XIAOMI = false;

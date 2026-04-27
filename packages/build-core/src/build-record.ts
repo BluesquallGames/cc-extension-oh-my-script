@@ -19,6 +19,7 @@ import type { OmsConfig } from './config.js';
 import { logger } from './logger.js';
 import type { Domain } from './domain.js';
 import { join } from 'node:path';
+import { rollupPluginMaybeExternals } from './features/rollup-plugin-maybe-externals.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -191,7 +192,7 @@ export class BuildRecord {
     }
 
     const uuidProvider = options.uuidProvider;
-    const inputPlugins: rollup.Plugin[] = [
+    const inputPlugins: (rollup.Plugin | undefined)[] = [
       {
         name: 'oms:uuid',
 
@@ -237,6 +238,12 @@ export class BuildRecord {
       rollupPluginMemoryModules({
         modules: memoryModules,
       }),
+
+      this._buildOptions.config.resolve.maybeExternals
+        ? rollupPluginMaybeExternals({
+          maybeExternals: this._buildOptions.config.resolve.maybeExternals ?? [],
+        })
+        : undefined,
 
       rollupPluginDomain({
         domains: options.domains,

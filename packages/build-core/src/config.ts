@@ -4,6 +4,7 @@ import picomatch from 'picomatch';
 export interface OmsUserConfig {
   resolve?: {
     alias?: Record<string, string>;
+    maybeExternals?: string[];
   };
 
   headless?: boolean | {
@@ -16,6 +17,7 @@ export interface OmsUserConfig {
 export interface OmsConfig {
   resolve: {
     alias?: Record<string, string>;
+    maybeExternals: undefined | string[];
   };
 
   headless: HeadlessConfig;
@@ -30,8 +32,11 @@ export interface HeadlessConfig {
 export function normalizeUserConfig(userConfig: OmsUserConfig): OmsConfig {
   return {
     resolve: userConfig.resolve
-      ? userConfig.resolve
-      : {},
+      ? {
+        alias: userConfig.resolve.alias,
+        maybeExternals: userConfig.resolve.maybeExternals,
+      }
+      : { alias: undefined, maybeExternals: undefined },
 
     headless: userConfig.headless === true
       ? { enabled: true }
