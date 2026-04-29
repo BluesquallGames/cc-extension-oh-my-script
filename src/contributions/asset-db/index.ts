@@ -3,6 +3,7 @@ import { logger } from '../../logger.js';
 import { selfExtensionName } from '../../self-info.js';
 import { requestSelfWorkerMessage } from '../../utils/request-self.js';
 import { type BuildResult } from '../../worker/worker-message-descriptions.js';
+import { SceneScriptManager } from '../scene/scene-script-manager.js';
 
 interface AssetDBInfo {
   preImportExtList?: string[];
@@ -18,7 +19,7 @@ export const methods = {
   async beforePreStart(assetDBInfo: AssetDBInfo) {
     void assetDBInfo;
     logger.debug(`Wait for ${selfExtensionName} first build...`);
-    const timeoutSec = 30;
+    const timeoutSec = 1 * 60;
     try {
       firstBuildResult = await Promise.race([
         requestSelfWorkerMessage('rebuild'),
@@ -38,19 +39,13 @@ export const methods = {
       if (!firstBuildResult.ok) {
         return;
       }
-      logger.debug(`Import beginning modules: %o`, firstBuildResult.beginningModules);
-      for (const beggingModulePath of firstBuildResult.beginningModules) {
-        try {
-          const dbURL = await Editor.Message.request('asset-db', 'query-url', beggingModulePath);
-          if (!dbURL) {
-            throw new Error(`Failed to query url for asset: ${beggingModulePath}, 'query-url' method returned empty nil`);
-          }
-          await Editor.Module.importProjectModule(dbURL);
-        } catch (err) {
-          logger.error(`Failed to import asset: ${beggingModulePath}, error: %o`, err);
-        }
+      try {
+        logger.debug(`Run project scripts in asset-db`);
+        const scriptManager = new SceneScriptManager();
+        await scriptManager.reload();
+      } catch (err) {
+        logger.error(`Failed to run project scripts in asset-db: %o`, err);
       }
-      logger.debug(`Successfully beginning modules: ${firstBuildResult.beginningModules.join(', ')}`);
     }
   },
 };

@@ -77,6 +77,7 @@ export class BuildRecord {
     ccEnvParams?: CCEnvParams;
     config: OmsConfig;
     headless: boolean;
+    treeShake?: boolean;
   }) {
     this._title = options.title;
     this._outDir = options.outDir;
@@ -84,6 +85,7 @@ export class BuildRecord {
     this._sourceMaps = options.sourceMaps ?? true;
     this._debug = options.debug ?? true;
     this._ccEnvParams = options.ccEnvParams;
+    this._treeShake = options.treeShake ?? true;
     this._buildOptions = {
       entries: {},
       uuidProvider: undefined,
@@ -131,7 +133,7 @@ export class BuildRecord {
           };
         }
       }
-      throw new BuildError(`Unexpected build error`, { cause: error });
+      throw new BuildError(`${this._title} Unexpected build error`, { cause: error });
     }
   }
 
@@ -141,6 +143,7 @@ export class BuildRecord {
   private _headless: boolean;
   private _sourceMaps: boolean | 'inline';
   private _debug: boolean;
+  private _treeShake: boolean;
   private _suppressRollupWarningCodes = [
     'CIRCULAR_DEPENDENCY',
     'THIS_IS_UNDEFINED',
@@ -186,7 +189,7 @@ export class BuildRecord {
       const ccEnvMouseSource = memoryModules['cc/env'] = generateCCEnvModuleSource({
         params: this._ccEnvParams,
       });
-      logger.debug('"cc/env" source: %s', ccEnvMouseSource);
+      logger.debug(`${this._title} "cc/env" source: %s`, ccEnvMouseSource);
     } else {
       externals.push('cc/env');
     }
@@ -200,11 +203,12 @@ export class BuildRecord {
           if (!uuidProvider) {
             return undefined;
           }
+          const cacheKey = ROLLUP_MODULE_CACHE_KEY_UUID + ':' + options.id;
           const uuid = uuidProvider(options.id);
-          const previousUUID = options.meta[ROLLUP_MODULE_CACHE_KEY_UUID];
+          const previousUUID = this.cache.get(cacheKey);
           if (uuid !== previousUUID) {
             logger.debug(`UUID of ${options.id} changed from ${previousUUID} to ${uuid}, invalidate its cache`);
-            options.meta[ROLLUP_MODULE_CACHE_KEY_UUID] = uuid;
+            this.cache.set(cacheKey, uuid);
             return true;
           }
           return undefined;
@@ -288,6 +292,14 @@ export class BuildRecord {
         uuidProvider: options.uuidProvider,
         decorators: true,
       }),
+
+      {
+        name: 'oms:perf-watch',
+
+        transform: (code, id) => {
+          logger.debug(`Transforming ${id}`);
+        },
+      },
     ];
 
     const rollupBuild = await rollup.rollup({
@@ -306,6 +318,8 @@ export class BuildRecord {
         }
         warn(warning);
       },
+      perf: true,
+      treeshake: this._treeShake,
     });
 
     this._cache = rollupBuild.cache;
@@ -335,6 +349,9 @@ export class BuildRecord {
     };
 
     await rollupBuild.write(outputOptions);
+    if (rollupBuild.getTimings) {
+      logger.debug(`${this._title} Rollup timings: %o`, rollupBuild.getTimings());
+    }
 
     return {
       ok: true,

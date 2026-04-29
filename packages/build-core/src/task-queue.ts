@@ -4,8 +4,8 @@ import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise
 import EventEmitter from 'node:events';
 
 export class TaskExecuteContext extends EventEmitter<{
-  'merge': [];
-  'abort': [];
+  merge: [args: any];
+  abort: [];
 }> {
   acceptMerge = false;
 }
@@ -16,11 +16,12 @@ export class TaskQueue<TTaskMap extends {
   queueTask<TType extends Extract<keyof TTaskMap, string>>(task: {
     type: TType;
     exec: (ctx: TaskExecuteContext) => Promise<ReturnType<TTaskMap[TType]>>;
+    mergeArgs?: any[];
   }): Promise<ReturnType<TTaskMap[TType]>> {
     if (this._runningTask && this._runningTask.type === task.type) {
       if (this._runningTask.ctx.acceptMerge) {
         logger.debug(`Queuing task [${task.type}] merged with running task ${this._runningTask.id}[${this._runningTask.type}].`);
-        this._runningTask.ctx.emit('merge');
+        this._runningTask.ctx.emit('merge', task.mergeArgs);
         return this._runningTask.execPromiseWithResolvers.promise.then(
           (value) => {
             return value;
@@ -72,52 +73,54 @@ export class TaskQueue<TTaskMap extends {
     exec: (ctx: TaskExecuteContext) => unknown;
     execPromiseWithResolvers: PromiseWithResolvers<any>;
   }> = [];
+
   private _runningTask: undefined | {
     id: number;
     type: string;
     ctx: TaskExecuteContext;
     execPromiseWithResolvers: PromiseWithResolvers<any>;
   };
+
   private _runningPromise: Promise<void> | undefined;
 
-    private _executeTasks() {
-      assert.ok(!this._runningPromise);
-      const tasks = this._pendingTasks.slice();
-      this._pendingTasks.length = 0;
-      this._runningPromise = (async () => {
-        for (const task of tasks) {
-          const ctx = new TaskExecuteContext();
-          this._runningTask = {
-            id: task.id,
-            type: task.type,
-            ctx,
-            execPromiseWithResolvers: task.execPromiseWithResolvers,
-          };
-          try {
-            logger.debug(`Execute task ${task.id}[${task.type}]`);
-            const result = await task.exec(ctx);
-            task.execPromiseWithResolvers.resolve(result);
-            logger.debug(`Task ${task.id}[${task.type}] done`);
-          } catch (err) {
-            logger.debug(`Task ${task.id}[${task.type}] failed: %o`, err);
-            task.execPromiseWithResolvers.reject(err);
-          } finally {
-            this._runningTask = undefined;
-          }
+  private _executeTasks() {
+    assert.ok(!this._runningPromise);
+    const tasks = this._pendingTasks.slice();
+    this._pendingTasks.length = 0;
+    this._runningPromise = (async () => {
+      for (const task of tasks) {
+        const ctx = new TaskExecuteContext();
+        this._runningTask = {
+          id: task.id,
+          type: task.type,
+          ctx,
+          execPromiseWithResolvers: task.execPromiseWithResolvers,
+        };
+        try {
+          logger.debug(`Execute task ${task.id}[${task.type}]`);
+          const result = await task.exec(ctx);
+          task.execPromiseWithResolvers.resolve(result);
+          logger.debug(`Task ${task.id}[${task.type}] done`);
+        } catch (err) {
+          logger.debug(`Task ${task.id}[${task.type}] failed: %o`, err);
+          task.execPromiseWithResolvers.reject(err);
+        } finally {
+          this._runningTask = undefined;
         }
-      })()
-        .catch((err) => {
-          logger.error(err);
-        })
-        .finally(() => {
-          this._runningPromise = undefined;
-          if (this._pendingTasks.length !== 0) {
-            this._executeTasks();
-          } else {
-            logger.debug('Task queue empty, idling.');
-          }
-        });
-    }
+      }
+    })()
+      .catch((err) => {
+        logger.error(err);
+      })
+      .finally(() => {
+        this._runningPromise = undefined;
+        if (this._pendingTasks.length !== 0) {
+          this._executeTasks();
+        } else {
+          logger.debug('Task queue empty, idling.');
+        }
+      });
+  }
 }
 
 export class MergedTaskExecError extends Error {

@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "include": ["."],
+  "compilerOptions": {
+    "rootDir": ".",
+    "emitDeclarationOnly": true,
+    "types": [
+      "node",
+      "vitest",
+    ],
+  },
+  "references": [
+    { "path": "../tsconfig.json" },
+  ]
+}

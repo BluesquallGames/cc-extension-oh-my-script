@@ -1,0 +1,23 @@
+{
+  "name": "@oms/systemjs",
+  "type": "module",
+  "files": [
+    "lib",
+    "!lib/**/*.d.ts",
+    "!lib/**/*.map"
+  ],
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "scripts": {
+    "prepublishOnly": "npm run build",
+    "build": "tsc -b",
+    "dev": "tsc -b -w",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

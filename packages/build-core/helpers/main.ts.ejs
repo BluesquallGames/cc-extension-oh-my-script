@@ -2,4 +2,8 @@
 /// Neither don't edit it, nor add it into version control system(eg. Git).
 
 import { start } from 'db://oh-my-script/loader.ts';
-await start();
+import { EDITOR_NOT_IN_PREVIEW } from 'cc/env';
+
+if (!EDITOR_NOT_IN_PREVIEW) {
+  await start();
+}

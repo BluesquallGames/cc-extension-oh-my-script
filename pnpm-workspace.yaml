@@ -1,8 +1,8 @@
 catalog:
   'vite': '^6.2.2'
   'vitest': '^3.0.8'
-  '@types/node': '22.10.7'
-  'typescript': '^5.8.3'
+  '@types/node': '25.6.0'
+  'typescript': '^6.0.3'
 packages:
   - 'packages/*'
 supportedArchitectures:

@@ -186,6 +186,10 @@ async function ensureEmptyDirSafe(dir: string) {
   }
 }
 
+interface BuildState {
+  fullPassive: boolean;
+}
+
 class OmsWatcher extends EventEmitter<{
   'passive-build-end': [PassiveBuildEndInfo];
 }> {
@@ -215,10 +219,12 @@ class OmsWatcher extends EventEmitter<{
 
     this._config = config;
 
+    const treeShake = false;
     const buildRecord = new BuildRecord({
       title: `default-build`,
       outDir: defaultProfile.outDir,
       config,
+      treeShake,
       headless: false,
       ccEnvParams: {
         debug: true,
@@ -232,6 +238,7 @@ class OmsWatcher extends EventEmitter<{
         title: `headless-build`,
         outDir: headlessProfile.outDir,
         config,
+        treeShake,
         headless: true,
         ccEnvParams: {
           platform: 'nodejs',
@@ -251,10 +258,14 @@ class OmsWatcher extends EventEmitter<{
     const watcher = chokidar.watch([], {
       ignored: (path, stats) => {
         if (stats?.isFile()) {
-          if (/\.[mc]?[jt]sx?$/.test(path.toLocaleLowerCase())) {
+          const lowercase = path.toLocaleLowerCase();
+          if (lowercase.endsWith('.d.ts')) {
+            return true;
+          }
+          if (/\.[mc]?[jt]sx?$/.test(lowercase)) {
             return false;
           }
-          if (/.jsonc?$/.test(path.toLocaleLowerCase())) {
+          if (/.jsonc?$/.test(lowercase)) {
             return false;
           }
           return true;
@@ -347,7 +358,7 @@ class OmsWatcher extends EventEmitter<{
   }
 
   async build() {
-    return await this._queueBuild('build').catch((err) => {
+    return await this._queueBuild('build', false).catch((err) => {
       if (err instanceof MergedTaskExecError) {
         throw err.cause;
       } else {
@@ -382,6 +393,7 @@ class OmsWatcher extends EventEmitter<{
       },
       config,
       headless,
+      treeShake: true,
     });
 
     await this._taskQueue.queueTask({
@@ -534,18 +546,25 @@ class OmsWatcher extends EventEmitter<{
     return undefined;
   }
 
-  private _queueBuild(reason: string) {
+  private _queueBuild(reason: string, passive: boolean) {
     logger.verbose(`Will queue build. Reason: ${reason}`);
     return this._taskQueue.queueTask({
       type: 'build',
+      mergeArgs: [passive],
       exec: async (ctx) => {
         ctx.acceptMerge = true;
+        const state: BuildState = {
+          fullPassive: passive,
+        };
 
         let interruptedByAbort = false;
         for (; ;) {
           const timerInterruptController = new AbortController();
           let interruptedByMerge = false;
-          const onMerge = () => {
+          const onMerge = ([inputPassive]: [boolean]) => {
+            if (!inputPassive) {
+              state.fullPassive = false;
+            }
             interruptedByMerge = true;
             timerInterruptController.abort();
           };
@@ -582,15 +601,13 @@ class OmsWatcher extends EventEmitter<{
         ctx.acceptMerge = false;
 
         await this._fileWatcherReadyPromise?.promise;
-        return await this._execBuild();
+        return await this._execBuild({ fullPassive: passive });
       },
     });
   }
 
   private _queuePassiveBuild(reason: string) {
-    this._queueBuild(reason).then((buildResult) => {
-      this.emit('passive-build-end', { result: buildResult });
-    }).catch((err) => {
+    this._queueBuild(reason, true).catch((err) => {
       if (err instanceof MergedTaskExecError) {
         logger.debug(`Ignored merged task exec error: ${err}`);
       } else {
@@ -599,7 +616,7 @@ class OmsWatcher extends EventEmitter<{
     });
   }
 
-  private async _execBuild(): Promise<BuildResult> {
+  private async _execBuild(state: BuildState): Promise<BuildResult> {
     const startState = {
       time: Date.now(),
     };
@@ -612,7 +629,11 @@ class OmsWatcher extends EventEmitter<{
       startState,
     });
 
-    return await this._onBuildEnd(buildResult, buildExtras);
+    const publicBuildResult = await this._onBuildEnd(buildResult, buildExtras);
+    if (state.fullPassive) {
+      this.emit('passive-build-end', { result: publicBuildResult });
+    }
+    return publicBuildResult;
   }
 
   private async _doExecBuild() {
@@ -705,7 +726,15 @@ class OmsWatcher extends EventEmitter<{
     {
       const mainFile = join(this._projectPath, 'assets/oms.ts');
       const mainFileContent = await this._renderMainFile();
-      await fs.outputFile(mainFile, mainFileContent, 'utf8');
+      let existingContent = '';
+      try {
+        existingContent = await fs.readFile(mainFile, 'utf8');
+      } catch (err) {
+        void err;
+      }
+      if (existingContent !== mainFileContent) {
+        await fs.outputFile(mainFile, mainFileContent, 'utf8');
+      }
       affectedFiles.push(mainFile);
     }
 

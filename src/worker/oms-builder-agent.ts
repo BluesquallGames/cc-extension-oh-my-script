@@ -7,6 +7,9 @@ import type { BuildResult } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { broadcastInner, InnerPackageMessageId } from '../inner-package-messaging.js';
+import { selfExtensionName } from '../self-info.js';
+import { SceneMethods } from '../contributions/scene/index.js';
+import { createInterface } from 'node:readline/promises';
 
 setLogger(logger);
 
@@ -68,9 +71,12 @@ export class OmsBuilderAgent extends EventEmitter<{
 
     const serverAgent = await this._setup();
     const buildOptions = await this._makeBuildOptions();
+    const t0 = Date.now();
     logger.debug(`${logTag}Rebuild with options: %o`, buildOptions);
     const rebuildResult = await serverAgent.ipc.invoke('rebuild', buildOptions);
-    await this._handleBuildResult(rebuildResult);
+    logger.debug(`${logTag}Rebuild ok in ${Date.now() - t0}ms, let's handle the result`);
+    await this._handleBuildResult(rebuildResult, 'rebuild()');
+    logger.debug(`${logTag}Rebuild done in ${Date.now() - t0}ms`);
     if (!rebuildResult.ok) {
       return rebuildResult;
     }
@@ -171,15 +177,31 @@ export class OmsBuilderAgent extends EventEmitter<{
   private async _doSetup(): Promise<ServerAgent> {
     logger.debug(`${logTag}Setup OMS builder`);
     const main = require.resolve('@oms/build-core/main');
+    const workerLogFd = 3;
     const childProcess = cp.spawn('node', ['--inspect', main], {
-      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'],
+      env: {
+        OMS_BUILDER_CORE_LOG_FD: `${workerLogFd}`,
+      },
     });
-    childProcess.stdout?.on('data', (data) => {
-      logger.info('[worker] ' + data.toString());
-    });
-    childProcess.stderr?.on('data', (data) => {
-      logger.error('[worker] ' + data.toString());
-    });
+    if (childProcess.stdout) {
+      (async () => {
+        for await (const line of createInterface(childProcess.stdout as NodeJS.ReadableStream)) {
+          logger.info('[worker-console] ' + line);
+        }
+      })().catch((err) => {
+        logger.error(err);
+      });
+    }
+    if (childProcess.stderr) {
+      (async () => {
+        for await (const line of createInterface(childProcess.stderr as NodeJS.ReadableStream)) {
+          logger.error('[worker-console] ' + line);
+        }
+      })().catch((err) => {
+        logger.error(err);
+      });
+    }
     childProcess.on('close', (code, signal) => {
       logger.info(`${logTag}child process closed with code ${code} and signal ${signal}`);
     });
@@ -189,6 +211,18 @@ export class OmsBuilderAgent extends EventEmitter<{
     childProcess.on('error', (err) => {
       logger.error(`${logTag}child process error: ${err}`);
     });
+    const logStream = childProcess.stdio[workerLogFd];
+    if (logStream) {
+      (async () => {
+        for await (const line of createInterface(logStream as NodeJS.ReadableStream)) {
+          const j = JSON.parse(line);
+          const { level, message } = j;
+          logger[level as keyof typeof logger]('[Worker] ' + message);
+        }
+      })().catch((err) => {
+        logger.error(`${logTag}OMS builder log read failed: %o`, err);
+      });
+    }
     const ipc = new Ipc<ClientInvocationMethodId, ServerInvocationMethodId>({
       send: (message) => {
         childProcess.send(message);
@@ -222,7 +256,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     });
 
     ipc.listen('passive-build-end', async (result) => {
-      await this._handleBuildResult(result.result);
+      await this._handleBuildResult(result.result, 'passive build');
     });
 
     ipc.listen('build-start', async (opts) => {
@@ -288,8 +322,17 @@ export class OmsBuilderAgent extends EventEmitter<{
     };
   }
 
-  private async _handleBuildResult(buildResult: ProtocolBuildResult) {
+  private async _handleBuildResult(buildResult: ProtocolBuildResult, reason: string) {
     if (buildResult.ok) {
+      // 不要在这里 await，因为场景进程可能正在等待 db，而 db 又在等待我们，造成死循环。
+      Editor.Message.request('scene', 'execute-scene-script', {
+        name: selfExtensionName,
+        method: 'reloadScripts' satisfies keyof SceneMethods,
+        args: [reason] as Parameters<SceneMethods['reloadScripts']>,
+      }).catch((err) => {
+        logger.error(`execute-scene-script failed: ${err}`);
+      });
+
       for (const file of buildResult.affectedFiles) {
         logger.debug(`${logTag}Reimport asset: %s`, file);
         await Editor.Message.request('asset-db', 'refresh-asset', file);
