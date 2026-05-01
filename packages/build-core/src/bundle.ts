@@ -90,7 +90,7 @@ export class Bundle {
   }
 
   async updateSourceFile(path: string) {
-    if (this._isIndexModule(path)) {
+    if (this._isComponentModule(path)) {
       try {
         await this._ensureUUID(path);
       } catch (err) {
