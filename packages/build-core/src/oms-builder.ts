@@ -410,6 +410,7 @@ class OmsWatcher extends EventEmitter<{
           uuidProvider: this._uuidProvider,
           domains: this._domains,
           config: this._config,
+          profileBuildConfig: undefined,
         });
       },
     });
@@ -488,7 +489,7 @@ class OmsWatcher extends EventEmitter<{
       partitions,
       domainExports,
       this._uuidManager,
-      domainId === mainDomainId ? this._config.headless : { enabled: false },
+      domainId === mainDomainId ? this._config.headless : undefined,
     );
     const sourceRoots = domain.sourceRoots;
     for (const sourceRoot of sourceRoots) {
@@ -672,6 +673,7 @@ class OmsWatcher extends EventEmitter<{
           uuidProvider: this._uuidProvider,
           domains: this._domains,
           config: this._config,
+          profileBuildConfig: undefined,
         });
       })();
 
@@ -694,6 +696,7 @@ class OmsWatcher extends EventEmitter<{
           uuidProvider: this._uuidProvider,
           domains: this._domains,
           config: this._config,
+          profileBuildConfig: this._config.headless.build,
         });
       })();
 

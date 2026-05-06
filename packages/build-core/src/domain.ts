@@ -21,7 +21,7 @@ export class Domain {
     private _partitions: PackageOmsPartitionConfig[],
     private _exports: Record<string, string>,
     uuidManager: UUIDManager,
-    private _headlessConfig: HeadlessConfig,
+    private _headlessConfig: HeadlessConfig | undefined,
   ) {
     {
       const domainId = this._id;
@@ -37,7 +37,7 @@ export class Domain {
       this._editorBundle = new Bundle(editorBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, BundleUsage.editor);
       this._bundles[editorBundleId] = this._editorBundle;
 
-      if (this._headlessConfig.enabled) {
+      if (this._headlessConfig && this._headlessConfig.enabled) {
         const headlessBundleId = `${domainId}.headless`;
         this._headlessBundle = new Bundle(headlessBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, BundleUsage.headless);
         this._bundles[headlessBundleId] = this._headlessBundle;
@@ -167,7 +167,7 @@ export class Domain {
 
   private _testHeadlessModule(path: string): boolean {
     const headlessConfig = this._headlessConfig;
-    if (!headlessConfig.enabled) {
+    if (!headlessConfig || !headlessConfig.enabled) {
       return false;
     }
     if (this._headlessBundle?.isHeadlessModule(path)) {

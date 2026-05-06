@@ -5,7 +5,7 @@ import rollupPluginBabel_ from '@rollup/plugin-babel';
 import rollupPluginJson_ from '@rollup/plugin-json';
 // @ts-expect-error
 import babelPluginProposalDecorators from '@babel/plugin-proposal-decorators';
-import babelPresetEnv from '@babel/preset-env';
+import babelPresetEnv, { type TargetsOptions } from '@babel/preset-env';
 // @ts-expect-error
 import babelPresetTypescript from '@babel/preset-typescript';
 import { transformCCComponent, type UUIDProvider } from './features/babel-plugin-cc-component.js';
@@ -15,7 +15,7 @@ import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate
 import { rollupPluginDomain } from './features/rollup-plugin-domain.js';
 import { rollupPluginNodeBuiltinModules } from './features/rollup-plugin-node-builtin-modules.js';
 import rollupPluginAlias from '@rollup/plugin-alias';
-import type { OmsConfig } from './config.js';
+import type { OmsConfig, ProfileBuildConfig } from './config.js';
 import { logger } from './logger.js';
 import type { Domain } from './domain.js';
 import { join } from 'node:path';
@@ -31,6 +31,7 @@ export interface InternalBuildOptions {
   domains: Record<string, Domain>;
   uuidProvider: UUIDProvider | undefined;
   config: OmsConfig;
+  profileBuildConfig: ProfileBuildConfig | undefined;
 }
 
 export type InternalBuildResult = {
@@ -91,6 +92,7 @@ export class BuildRecord {
       uuidProvider: undefined,
       domains: {},
       config: options.config,
+      profileBuildConfig: undefined,
     };
   }
 
@@ -366,6 +368,8 @@ export class BuildRecord {
     decorators?: boolean;
     uuidProvider?: UUIDProvider;
   }) {
+    const babelTarget = toBabelEnvTarget(this._buildOptions.profileBuildConfig?.target);
+    logger.debug(`Babel target: ${JSON.stringify(babelTarget)}`);
     return rollupPluginBabel({
       extensions: [
         '.js',
@@ -393,11 +397,10 @@ export class BuildRecord {
       presets: [
         [babelPresetEnv, {
           modules: false,
-          targets: {
-            node: '14',
-          },
+          targets: babelTarget,
           include: [
             decorators ? '@babel/plugin-transform-class-properties' : undefined,
+            '@babel/plugin-transform-class-static-block',
           ].filter((p): p is string => !!p),
         } satisfies babelPresetEnv.Options],
         [babelPresetTypescript, {
@@ -423,4 +426,20 @@ class _RollupBuildError extends BuildError {
   }
 
   private _cause: rollup.RollupError;
+}
+
+function toBabelEnvTarget(target: string | undefined): TargetsOptions {
+  if (!target) {
+    return {
+      node: '14',
+    };
+  }
+  const match = /(\w+)(\d.+)/.exec(target);
+  if (!match) {
+    return target;
+  }
+  const [_, runtime, version] = match;
+  return {
+    [runtime]: version,
+  };
 }

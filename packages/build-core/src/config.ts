@@ -11,6 +11,9 @@ export interface OmsUserConfig {
     enabled?: boolean;
     include?: string[];
     exclude?: string[];
+    build?: {
+      target?: string;
+    };
   };
 }
 
@@ -27,6 +30,11 @@ export interface HeadlessConfig {
   enabled: boolean;
   include?: (string: string) => boolean;
   exclude?: (string: string) => boolean;
+  build: ProfileBuildConfig;
+}
+
+export interface ProfileBuildConfig {
+  target: string | undefined;
 }
 
 export function normalizeUserConfig(userConfig: OmsUserConfig): OmsConfig {
@@ -38,16 +46,37 @@ export function normalizeUserConfig(userConfig: OmsUserConfig): OmsConfig {
       }
       : { alias: undefined, maybeExternals: undefined },
 
-    headless: userConfig.headless === true
-      ? { enabled: true }
-      : typeof userConfig.headless === 'object' && userConfig.headless
-        ? {
-          ...userConfig.headless,
-          enabled: userConfig.headless.enabled ?? true,
-          include: normalizeHeadlessFilter(userConfig.headless.include ?? []),
-          exclude: normalizeHeadlessFilter(userConfig.headless.exclude ?? []),
-        }
-        : { enabled: false },
+    headless: normalizeUserHeadlessConfig(userConfig.headless),
+  };
+}
+
+function normalizeUserHeadlessConfig(headlessConfig: OmsUserConfig['headless']): HeadlessConfig {
+  const defaultHeadlessConfig: HeadlessConfig = {
+    enabled: false,
+    build: {
+      target: undefined,
+    },
+  };
+  if (headlessConfig === true) {
+    return {
+      ...defaultHeadlessConfig,
+      enabled: true,
+    };
+  }
+  if (!(typeof headlessConfig === 'object' && headlessConfig)) {
+    return {
+      ...defaultHeadlessConfig,
+      enabled: false,
+    };
+  }
+  return {
+    ...defaultHeadlessConfig,
+    enabled: headlessConfig.enabled ?? true,
+    include: normalizeHeadlessFilter(headlessConfig.include ?? []),
+    exclude: normalizeHeadlessFilter(headlessConfig.exclude ?? []),
+    build: {
+      target: headlessConfig.build?.target,
+    },
   };
 }
 

@@ -69,15 +69,7 @@ export class OmsConfigWatcher extends EventEmitter<{
     return this._config;
   }
 
-  private _config: OmsConfig = {
-    resolve: {
-      alias: undefined,
-      maybeExternals: undefined,
-    },
-    headless: {
-      enabled: false,
-    },
-  };
+  private _config: OmsConfig = normalizeUserConfig({});
 
   private _rootDir: string;
   private _fsWatcher: chokidar.FSWatcher;
