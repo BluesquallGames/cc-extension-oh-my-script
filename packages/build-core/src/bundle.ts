@@ -14,19 +14,22 @@ export class Bundle {
   constructor(private _id: string, private _indexModuleDirs: string[], private _uuidManager: UUIDManager, private _usage: BundleUsage) {
     switch (_usage) {
     case BundleUsage.regular:
-      this._desiredIndexModuleFileStem = 'index';
+      this._desiredIndexModuleFileStemPre = 'index-pre';
+      this._desiredIndexModuleFileStemPost = 'index';
       break;
     case BundleUsage.editor:
-      this._desiredIndexModuleFileStem = 'index.editor';
+      this._desiredIndexModuleFileStemPre = 'index-pre.editor';
+      this._desiredIndexModuleFileStemPost = 'index.editor';
       break;
     case BundleUsage.headless:
-      this._desiredIndexModuleFileStem = 'index.headless';
+      this._desiredIndexModuleFileStemPre = 'index-pre.headless';
+      this._desiredIndexModuleFileStemPost = 'index.headless';
       break;
     }
   }
 
   get empty() {
-    return !this._indexModule && this._componentModules.length === 0;
+    return !this._indexPreModule && !this._indexPostModule && this._componentModules.length === 0;
   }
 
   get id() {
@@ -43,67 +46,116 @@ export class Bundle {
 
   getImplicitEntries(): string[] {
     const implicitEntries: string[] = [];
-    if (this._indexModule) {
-      implicitEntries.push(this._indexModule);
+    if (this._indexPreModule) {
+      implicitEntries.push(this._indexPreModule);
     }
     implicitEntries.push(...this._componentModules);
+    if (this._indexPostModule) {
+      implicitEntries.push(this._indexPostModule);
+    }
     return implicitEntries;
   }
 
-  entryFiles() {
-    const files: string[] = [];
-    if (this._indexModule) {
-      files.push(this._indexModule);
-    }
-    files.push(...this._componentModules);
-    return files;
-  }
-
   isHeadlessModule(path: string) {
-    return this._usage === BundleUsage.headless && this._isIndexModule(path);
+    if (this._usage !== BundleUsage.headless) {
+      return false;
+    }
+    const fileType = this._classifySourceFile(path);
+    return fileType === SourceFileType.indexPost || fileType === SourceFileType.indexPre;
   }
 
   async addSourceFile(path: string) {
     let shouldRebuildBundle = false;
-    if (this._isComponentModule(path)) {
+    const fileType = this._classifySourceFile(path);
+    switch (fileType) {
+    case SourceFileType.component: {
       try {
         await this._ensureUUID(path);
       } catch (err) {
         logger.error(`Failed to assign UUID for ${path}: %o`, err);
       }
       shouldRebuildBundle = this._addComponentModule(path) || shouldRebuildBundle;
-    } else if (this._isIndexModule(path)) {
-      shouldRebuildBundle = this._addIndexModule(path) || shouldRebuildBundle;
+      break;
+    }
+    case SourceFileType.indexPost: {
+      if (this._indexPostModule !== path) {
+        this._indexPostModule = path;
+        this._invalidateEntry();
+        shouldRebuildBundle = true;
+      }
+      break;
+    }
+    case SourceFileType.indexPre: {
+      if (this._indexPreModule !== path) {
+        this._indexPreModule = path;
+        this._invalidateEntry();
+        shouldRebuildBundle = true;
+      }
+      break;
+    }
+    default: {
+      break;
+    }
     }
     return shouldRebuildBundle;
   }
 
   removeSourceFile(path: string) {
     let shouldRebuildBundle = false;
-    if (this._isComponentModule(path)) {
+    const fileType = this._classifySourceFile(path);
+    switch (fileType) {
+    case SourceFileType.component: {
       this._uuidManager.delete(path);
       shouldRebuildBundle = this._deleteComponentModule(path) || shouldRebuildBundle;
-    } else if (this._isIndexModule(path)) {
-      shouldRebuildBundle = this._deleteIndexModule(path) || shouldRebuildBundle;
+      break;
+    }
+    case SourceFileType.indexPost: {
+      if (this._indexPostModule === path) {
+        this._indexPostModule = '';
+        this._invalidateEntry();
+        shouldRebuildBundle = true;
+      }
+      break;
+    }
+    case SourceFileType.indexPre: {
+      if (this._indexPreModule === path) {
+        this._indexPreModule = '';
+        this._invalidateEntry();
+        shouldRebuildBundle = true;
+      }
+      break;
+    }
+    default: {
+      break;
+    }
     }
     return shouldRebuildBundle;
   }
 
   async updateSourceFile(path: string) {
-    if (this._isComponentModule(path)) {
+    const fileType = this._classifySourceFile(path);
+    switch (fileType) {
+    case SourceFileType.component: {
       try {
         await this._ensureUUID(path);
       } catch (err) {
         logger.error(`Failed to assign UUID for ${path}: %o`, err);
       }
+      break;
+    }
+    default: {
+      break;
+    }
     }
   }
 
-  private _indexModule = '';
+  private _indexPreModule = '';
+  private _indexPostModule = '';
   private _componentModules: string[] = [];
   private _entryDirty = true;
   private _entrySource = '';
-  private _desiredIndexModuleFileStem = '';
+  private _desiredIndexModuleFileStemPre = '';
+  private _desiredIndexModuleFileStemPost = '';
 
   private _invalidateEntry() {
     this._entryDirty = true;
@@ -139,11 +191,14 @@ export class Bundle {
 
     // export {};
     // `);
-    if (this._indexModule) {
-      lines.push(`export * from '${makeFileSystemAbsoluteImportSpecifier(this._indexModule)}';`);
+    if (this._indexPreModule) {
+      lines.push(`export * from '${makeFileSystemAbsoluteImportSpecifier(this._indexPreModule)}';`);
     }
     for (const componentModule of this._componentModules) {
       lines.push(`import '${makeFileSystemAbsoluteImportSpecifier(componentModule)}';`);
+    }
+    if (this._indexPostModule) {
+      lines.push(`export * from '${makeFileSystemAbsoluteImportSpecifier(this._indexPostModule)}';`);
     }
     lines.push(
       '',
@@ -152,19 +207,24 @@ export class Bundle {
     return lines.join('\n');
   }
 
-  private _isComponentModule(sourceFile: string) {
-    return /\.component(\.editor)?\.[cm]?[jt]s$/.test(sourceFile.toLocaleLowerCase());
-  }
-
-  private _isIndexModule(sourceFile: string) {
-    const { dir, name, ext } = parse(sourceFile);
-    if (this._indexModuleDirs.includes(dir)
-      && /^\.[cm]?[jt]s$/.test(ext.toLowerCase())
-      && name.toLocaleLowerCase() === this._desiredIndexModuleFileStem
-    ) {
-      return true;
+  private _classifySourceFile(sourceFile: string): SourceFileType {
+    if (/\.component(\.editor)?\.[cm]?[jt]s$/.test(sourceFile.toLocaleLowerCase())) {
+      return SourceFileType.component;
     }
-    return false;
+
+    const { dir, name, ext } = parse(sourceFile);
+    if (this._indexModuleDirs.includes(dir)) {
+      if (/^\.[cm]?[jt]s$/.test(ext.toLocaleLowerCase())) {
+        if (name.toLocaleLowerCase() === this._desiredIndexModuleFileStemPost) {
+          return SourceFileType.indexPost;
+        }
+        if (name.toLocaleLowerCase() === this._desiredIndexModuleFileStemPre) {
+          return SourceFileType.indexPre;
+        }
+      }
+    }
+
+    return SourceFileType.other;
   }
 
   _addComponentModule(sourceFile: string) {
@@ -186,27 +246,16 @@ export class Bundle {
     return true;
   }
 
-  private _addIndexModule(sourceFile: string) {
-    if (this._indexModule === sourceFile) {
-      return false;
-    }
-    this._indexModule = sourceFile;
-    this._invalidateEntry();
-    return true;
-  }
-
-  private _deleteIndexModule(sourceFile: string) {
-    if (this._indexModule !== sourceFile) {
-      return false;
-    }
-    this._indexModule = '';
-    this._invalidateEntry();
-    return true;
-  }
-
   private async _ensureUUID(sourceFile: string) {
     const code = await fs.readFile(sourceFile, 'utf8');
     const inlineUUID = extractInlineUUID(code) ?? '';
     await this._uuidManager.update(sourceFile, inlineUUID);
   }
+}
+
+enum SourceFileType {
+  indexPre = 'indexPre',
+  indexPost = 'indexPost',
+  component = 'component',
+  other = 'other',
 }
