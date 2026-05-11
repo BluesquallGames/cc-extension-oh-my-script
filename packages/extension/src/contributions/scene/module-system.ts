@@ -27,6 +27,8 @@ type ReloadTaskMap = {
 export class SceneModuleSystem {
   constructor() {
     this._systemJS = new SystemJS();
+    const vendorCreateContext = this._systemJS.createContext.bind(this._systemJS);
+    this._systemJS.createContext = this._createContext.bind(this, vendorCreateContext);
     this._systemJS.resolve = this._resolve.bind(this);
     this._systemJS.instantiate = this._instantiate.bind(this);
     this._systemJS.onload = this._onModuleLoad.bind(this);
@@ -75,6 +77,8 @@ export class SceneModuleSystem {
     pending: false,
   };
 
+  private _controllerOnDispose = new AbortController();
+
   private get _runningReloadingLogTag() {
     return `[reloading-${this._runningReloadState.seqId}] `;
   }
@@ -87,6 +91,8 @@ export class SceneModuleSystem {
   }
 
   private async _doReload() {
+    this._controllerOnDispose.abort();
+    this._controllerOnDispose = new AbortController();
     this._unregisterClasses();
     this._invalidateHotModules();
     const disposeClassRegistrationContext = this._setupClassRegistrationContext();
@@ -95,6 +101,17 @@ export class SceneModuleSystem {
     } finally {
       disposeClassRegistrationContext();
     }
+  }
+
+  private _createContext(vendorCreateContext: typeof this._systemJS.createContext, id: string) {
+    const vendor = vendorCreateContext(id);
+    const signalOnDispose = this._controllerOnDispose.signal;
+    return {
+      ...vendor,
+      hot: {
+        signalOnDispose,
+      },
+    };
   }
 
   private _resolve(id: string, parent?: string, meta?: ModuleRequestMeta): string {

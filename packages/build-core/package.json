@@ -15,7 +15,6 @@
   "scripts": {
     "prepublishOnly": "vite build --mode=production",
     "build": "vite build --mode=development",
-    "dev": "vite build --mode=development --watch",
     "test": "vitest run"
   },
   "devDependencies": {

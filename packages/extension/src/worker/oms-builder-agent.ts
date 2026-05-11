@@ -115,7 +115,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     }
 
     const serverAgent = await this._setup();
-    await serverAgent.ipc.invoke('build-prod', opts);
+    await serverAgent.ipc.invoke('build-prod', { ...opts, headless: true });
   }
 
   private _state: {

@@ -6,9 +6,11 @@ import { readFileSync } from 'fs-extra';
 import { join } from 'node:path';
 import { BuildStateType, RightPanelState } from './state.js';
 import { addInnerPackageMessageListener, InnerPackageMessageArgs, InnerPackageMessageId } from '../../inner-package-messaging.js';
+// @ts-expect-error
+import styleLocation from '@/style-location';
 
 export default defineVuePanel(class RightPanel extends VuePanel<[]> {
-  static readonly style = readFileSync(join(__dirname, '../../../dist/oh-my-script.css'), 'utf-8');
+  static readonly style = readFileSync(styleLocation, 'utf-8');
 
   static readonly exposedMethods = {};
 

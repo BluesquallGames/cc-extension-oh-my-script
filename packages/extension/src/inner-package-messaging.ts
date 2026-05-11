@@ -23,19 +23,6 @@ export function broadcastInner<TMessageId extends keyof InnerPackageMessageMap>(
   Editor.Message.broadcast(`${selfExtensionName}:${messageId}`, ...args);
 }
 
-declare global {
-  namespace Editor {
-    namespace Message {
-      namespace __protected__ {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        function addBroadcastListener(id: string, callback: (...args: any[]) => void): void;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        function removeBroadcastListener(id: string, callback: (...args: any[]) => void): void;
-      }
-    }
-  }
-}
-
 export function addInnerPackageMessageListener<TMessageId extends keyof InnerPackageMessageMap>(messageId: TMessageId, callback: (...args: InnerPackageMessageArgs<TMessageId>) => void, opts?: { signal?: AbortSignal }) {
   const messageIdNormalized = `${selfExtensionName}:${messageId}`;
   Editor.Message.__protected__.addBroadcastListener(messageIdNormalized, callback);

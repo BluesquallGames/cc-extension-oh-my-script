@@ -10,11 +10,11 @@
     "outDir": "./dist",
     "sourceMap": true,
     "strict": true,
+    "skipLibCheck": true,
     "types": [
-      "electron",
-      "sharp",
       "./node_modules/@cocos/creator-types/engine",
       "./node_modules/@cocos/creator-types/editor",
+      "./src/@types/editor",
     ],
   },
 }

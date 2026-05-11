@@ -5,6 +5,7 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import useEditorModules from '@feb/cc-extension-utils/vite/plugin-use-editor-modules';
+import { contributionModules } from '@feb/cc-extension-utils/vite/plugin-contribution-modules';
 
 const readDirEntries = (() => {
   async function* r(root: string, currentDir: string = ''): AsyncGenerator<string> {
@@ -49,12 +50,7 @@ const entries = defineEntries([
   'main.ts',
   'worker/worker-entry.ts',
   'worker/worker-entry-prelude.ts',
-  'contributions/asset-db/index.ts',
-  'contributions/scene/index.ts',
-  'contributions/server.ts',
-  'contributions/builder/index.ts',
   'contributions/builder/default-hooks.ts',
-  'contributions/footer/right.ts',
   // ...(await readDirEntries('./src', 'contributions/inspector/exports')),
 ]);
 
@@ -71,6 +67,7 @@ export default defineConfig(({ mode }) => {
       lib: {
         entry: entries,
         formats: ['cjs'],
+        cssFileName: 'style',
       },
       rollupOptions: {
         external: [
@@ -101,6 +98,9 @@ export default defineConfig(({ mode }) => {
       }),
       useEditorModules(),
       styleLocation(),
+      contributionModules({
+        sourceRoot: resolve(import.meta.dirname, 'src'),
+      }),
     ],
   };
 });
@@ -128,7 +128,7 @@ function styleLocation(): Plugin {
 
     load(id, options) {
       if (id === styleModuleId) {
-        return `export default require('path').resolve(__dirname, import.meta.ROLLUP_FILE_URL_${helperFileId}, '../cc-extension-feb.css')`;
+        return `export default require('path').resolve(__dirname, import.meta.ROLLUP_FILE_URL_${helperFileId}, '../style.css')`;
       }
     },
 

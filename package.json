@@ -1,7 +1,8 @@
 {
   "name": "oh-my-script",
-  "extensionName": "oh-my-script",
+  "private": true,
   "version": "0.0.1-alpha.1",
+  "extensionName": "oh-my-script",
   "type": "module",
   "package_version": 2,
   "editor": ">=3.8.5",
@@ -10,43 +11,17 @@
     "dist/**/*",
     "mount/**/*"
   ],
-  "main": "dist/main.cjs",
+  "main": "packages/extension/dist/main.cjs",
   "creator": {
-    "hookScript": "dist/hooks.cjs"
+    "hookScript": "packages/extension/dist/hooks.cjs"
   },
   "scripts": {
-    "prepublishOnly": "vite build --mode=production",
-    "build": "pnpm --filter=* run build && vite build --mode=development",
-    "dev": "vite build --mode=development --watch",
-    "deploy": "npm run pack:build-core && pnpm --node-linker=hoisted --filter=\"oh-my-script\" deploy --legacy --prod .deploy && cd .deploy && bestzip ../oh-my-script.zip *",
-    "pack:build-core": "cd packages/build-core && npm run prepublishOnly",
-    "test": "vitest run"
+    "build": "turbo run build",
+    "dev": "turbo watch build"
   },
   "devDependencies": {
-    "@cocos/creator-types": "^3.8.5",
     "@shrinktofit/eslint-plugin": "^0.0.9",
-    "@types/fs-extra": "^11.0.4",
-    "@types/node": "catalog:",
-    "@vitejs/plugin-vue": "^5.2.1",
-    "bestzip": "^2.2.1",
-    "eslint": "^9.33.0",
-    "less": "^4.6.4",
-    "memfs": "^4.57.2",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
+    "eslint": "^9.33.0"
   },
-  "dependencies": {
-    "@feb/cc-extension-utils": "^0.0.3",
-    "@oms/build-core": "workspace:*",
-    "@oms/systemjs": "workspace:*",
-    "@oms/task-queue": "workspace:*",
-    "dayjs": "^1.11.20",
-    "fs-extra": "^11.3.0",
-    "primevue": "^4.3.1",
-    "vue": "^3.5.13",
-    "winston": "^3.17.0",
-    "winston-transport": "*",
-    "yaml": "^2.7.0"
-  }
+  "packageManager": "pnpm@10.29.3+sha512.498e1fb4cca5aa06c1dcf2611e6fafc50972ffe7189998c409e90de74566444298ffe43e6cd2acdc775ba1aa7cc5e092a8b7054c811ba8c5770f84693d33d2dc"
 }

@@ -120,11 +120,11 @@ export class SystemJS {
   }
 
   // Hookable createContext function -> allowing eg custom import meta
-  createContext(parentId: string) {
+  createContext(id: string) {
     return {
-      url: parentId,
+      url: id,
       resolve: (id: string, parentUrl?: string) => {
-        return Promise.resolve(this.resolve(id, parentUrl || parentId));
+        return Promise.resolve(this.resolve(id, parentUrl || id));
       },
     };
   }

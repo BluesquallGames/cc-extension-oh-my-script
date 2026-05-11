@@ -1,0 +1,39 @@
+{
+  "name": "@oms/extension",
+  "version": "0.0.1-alpha.1",
+  "extensionName": "oh-my-script",
+  "type": "module",
+  "scripts": {
+    "prepublishOnly": "vite build --mode=production",
+    "build": "vue-tsc -b --noEmit && vite build --mode=development",
+    "deploy": "npm run pack:build-core && pnpm --node-linker=hoisted --filter=\"oh-my-script\" deploy --legacy --prod .deploy && cd .deploy && bestzip ../oh-my-script.zip *",
+    "pack:build-core": "cd packages/build-core && npm run prepublishOnly",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cocos/creator-types": "^3.8.5",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "bestzip": "^2.2.1",
+    "less": "^4.6.4",
+    "memfs": "^4.57.2",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vue-tsc": "^3.2.8"
+  },
+  "dependencies": {
+    "@feb/cc-extension-utils": "^0.0.10",
+    "@oms/build-core": "workspace:*",
+    "@oms/systemjs": "workspace:*",
+    "@oms/task-queue": "workspace:*",
+    "dayjs": "^1.11.20",
+    "fs-extra": "^11.3.0",
+    "primevue": "^4.3.1",
+    "vue": "^3.5.13",
+    "winston": "^3.17.0",
+    "winston-transport": "*",
+    "yaml": "^2.7.0"
+  }
+}

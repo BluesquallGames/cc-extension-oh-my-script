@@ -1,6 +1,15 @@
+/// <reference types="@feb/cc-extension-utils/types/contribution-modules" />
+
 import { logger } from './logger.js';
 import { workerMessageDescriptions } from './worker/worker-message-descriptions.js';
 import { ExtensionContributions, mergeContributions } from '@feb/cc-extension-utils/extension';
+import sceneContributionScript from './contributions/scene/index.ts?contribution-script';
+import serverContributionScript from './contributions/server.ts?contribution-script';
+import footerContributionScript from './contributions/footer/right.ts?contribution-script';
+import builderContributionScript from './contributions/builder/index.ts?contribution-script';
+import assetDbContributionScript from './contributions/asset-db/index.ts?contribution-script';
+import { relative } from 'node:path';
+import { selfPackagePath } from './self-info.js';
 
 export async function register(info: {
   contributions: ExtensionContributions;
@@ -25,7 +34,7 @@ async function getContributions(): Promise<ExtensionContributions> {
 
   return {
     'asset-db': {
-      'script': './dist/contributions/asset-db/index.cjs',
+      'script': transformContributionScriptPath(assetDbContributionScript),
 
       'mount': {
         path: './mount/assets',
@@ -37,7 +46,7 @@ async function getContributions(): Promise<ExtensionContributions> {
       ],
     },
 
-    'builder': './dist/contributions/builder/index.cjs',
+    'builder': transformContributionScriptPath(builderContributionScript),
 
     'messages': {
       'open-devtools': {
@@ -85,13 +94,17 @@ async function getContributions(): Promise<ExtensionContributions> {
     ],
 
     'scene': {
-      script: './dist/contributions/scene/index.cjs',
+      script: transformContributionScriptPath(sceneContributionScript),
     },
 
-    'server': './dist/contributions/server.cjs',
+    'server': transformContributionScriptPath(serverContributionScript),
 
     'footer': {
-      right: './dist/contributions/footer/right.cjs',
+      right: transformContributionScriptPath(footerContributionScript),
     },
   };
+}
+
+function transformContributionScriptPath(path: string) {
+  return relative(selfPackagePath, path);
 }

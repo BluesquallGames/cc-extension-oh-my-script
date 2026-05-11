@@ -1,3 +1,4 @@
+// @ts-expect-error
 export const CreatorWorker = (globalThis.ccWorker) as unknown as {
   Ipc: {
     on(messageName: string, listener: (event: {

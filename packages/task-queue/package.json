@@ -12,7 +12,6 @@
   "scripts": {
     "prepublishOnly": "npm run build",
     "build": "tsc -b",
-    "dev": "tsc -b -w",
     "test": "vitest run"
   },
   "devDependencies": {
