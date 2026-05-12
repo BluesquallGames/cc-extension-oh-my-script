@@ -23,7 +23,7 @@ export const XIAOMI = <%= params.platform === 'xiaomi' -%>;
 export const NODEJS = <%= params.platform === 'nodejs' -%>;
 
 export const EDITOR_NOT_IN_PREVIEW = EDITOR && !(typeof isPreviewProcess !== 'undefined' && isPreviewProcess === true);
-export const PREVIEW = <%- params.mode === 'preview' -%>;
+export const PREVIEW =  <% if (params.mode) { _%> <%= params.mode === 'preview' -%> <% } else { _%> !EDITOR <% } %>;
 export const BUILD = <%- params.mode === 'build' -%>;
 export const TEST = <%- params.mode === 'test' -%>;
 
