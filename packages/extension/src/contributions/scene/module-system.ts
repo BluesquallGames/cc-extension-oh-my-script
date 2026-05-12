@@ -5,6 +5,8 @@ import { logger } from '../../logger.js';
 import { join } from 'node:path';
 import { cclegacy, js } from 'cc';
 import { TaskQueue } from '@oms/task-queue';
+import console from 'node:console';
+import { HotConsole } from './hot-console.js';
 
 const omsURLPrefix = 'oms://';
 
@@ -79,6 +81,8 @@ export class SceneModuleSystem {
 
   private _controllerOnDispose = new AbortController();
 
+  private _hotConsole = new HotConsole();
+
   private get _runningReloadingLogTag() {
     return `[reloading-${this._runningReloadState.seqId}] `;
   }
@@ -93,8 +97,12 @@ export class SceneModuleSystem {
   private async _doReload() {
     this._controllerOnDispose.abort();
     this._controllerOnDispose = new AbortController();
+
+    this._hotConsole.clear();
+
     this._unregisterClasses();
     this._invalidateHotModules();
+
     const disposeClassRegistrationContext = this._setupClassRegistrationContext();
     try {
       await this._reloadOmsModules();
@@ -188,14 +196,18 @@ export class SceneModuleSystem {
   }
 
   private _evaluateWrap(code: string, url: string) {
-    let fn: (System: SystemJS) => void;
+    const intrinsics: Record<string, unknown> = {
+      System: this._systemJS,
+      console: this._hotConsole,
+    };
+    let fn: (...args: unknown[]) => void;
     try {
-      fn = new Function('System', code + `\n//# sourceURL=${url}`) as typeof fn;
+      fn = new Function(...Object.keys(intrinsics), code + `\n//# sourceURL=${url}`) as typeof fn;
     } catch (err) {
       throw new Error(`${this._runningReloadingLogTag}Failed to read module ${url}: ${err}`);
     }
     try {
-      fn(this._systemJS);
+      fn(...Object.values(intrinsics));
     } catch (err) {
       throw new Error(`${this._runningReloadingLogTag}Failed to execute module ${url}: ${err}`);
     }
