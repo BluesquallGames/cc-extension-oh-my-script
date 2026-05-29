@@ -207,7 +207,7 @@ export async function load(id: string, parent: string) {
 
 export async function loadBundleEntry(bundleId: string, parent: string) {
   try {
-    return await import(`${omsURLPrefix}bundle-${bundleId}.js`);
+    return await import(`${omsURLPrefix}${makeOmsEntryFileName(`bundle-${bundleId}`)}.js`);
   } catch (err) {
     console.error(`Failed to load bundle entry: ${bundleId}, did you installed OMS extension?`);
     throw err;
@@ -215,19 +215,29 @@ export async function loadBundleEntry(bundleId: string, parent: string) {
 }
 
 export async function loadOMSExports(id: string, parent: string) {
-  const iSlash = id.indexOf('/');
-  if (iSlash < 0) {
+  void parent;
+  if (!id.includes(':')) {
     throw new Error(`Invalid OMS exports id: ${id}`);
   }
-  const domainId = id.slice(0, iSlash);
-  const exportsId = id.slice(iSlash + 1);
   try {
-    const exportSubpath = exportsId === '' ? '' : '/' + exportsId;
-    return await import(`${omsURLPrefix}${domainId}-export${exportSubpath}.js`);
+    return await import(`${omsURLPrefix}${makeOmsEntryFileName(id)}.js`);
   } catch (err) {
     console.error(`Failed to load OMS exports: ${id}, did you installed OMS extension?`);
     throw err;
   }
+}
+
+function makeOmsEntryFileName(entryId: string) {
+  const iColon = entryId.indexOf(':');
+  if (iColon < 0) {
+    return entryId;
+  }
+  const domainId = entryId.slice(0, iColon);
+  const exportId = entryId.slice(iColon + 1);
+  if (!domainId || !exportId) {
+    return entryId;
+  }
+  return `exports/${domainId}/${exportId === '.' ? 'index' : exportId}`;
 }
 
 export function saveRequiringFrames() {
@@ -265,6 +275,7 @@ export async function start() {
   const { default: metadata } = (await import(`${omsURLPrefix}metadata.js`)) as {
     default: {
       entries: Array<[bundleId: string, isEditorEntry: boolean]>;
+      exports?: Record<string, string>;
     };
   };
   for (const [bundleId, isEditorEntry] of metadata.entries) {

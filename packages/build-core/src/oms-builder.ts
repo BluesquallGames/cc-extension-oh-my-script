@@ -10,13 +10,15 @@ import type { BuildOptions, BuildResult, InvocationParams, PassiveBuildEndInfo }
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
-import { Domain, readDomainExports, readDomainPackageJson, type DomainEntryQueryOptions } from './domain.js';
+import { Domain, type DomainEntryQueryOptions } from './domain.js';
 import { MergedTaskExecError, TaskQueue } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
-import { OmsConfigWatcher } from './config-watcher.js';
-import type { OmsConfig } from './config.js';
-import { BuildRecord, mergeBuildResults, type InternalBuildResult } from './build-record.js';
+import { OmsProjectConfigWatcher } from './config-watcher.js';
+import type { OmsProjectConfig } from './config.js';
+import { BuildRecord, mergeBuildResults, type InternalBuildEntry, type InternalBuildResult } from './build-record.js';
+import { OmsDomainConfigWatcher } from './domain-config-watcher.js';
+import { makeOmsEntryFileName } from './utils/entry-id.js';
 
 const mainDomainId = 'main';
 
@@ -73,7 +75,7 @@ export class OmsBuilder extends EventEmitter<{
   }
 
   private _projectPath: string;
-  private _configWatcher: OmsConfigWatcher | undefined;
+  private _configWatcher: OmsProjectConfigWatcher | undefined;
   private _watcher: OmsWatcher | undefined;
   private _buildOptions: BuildOptions = {
     extensionBuildOptions: [],
@@ -164,7 +166,7 @@ export class OmsBuilder extends EventEmitter<{
 
   private async _initializeConfigWatcher() {
     assert.ok(!this._configWatcher);
-    return this._configWatcher = new OmsConfigWatcher({
+    return this._configWatcher = new OmsProjectConfigWatcher({
       projectPath: this._projectPath,
     });
   }
@@ -202,7 +204,7 @@ class OmsWatcher extends EventEmitter<{
     headlessProfile: BuildProfile | undefined;
     ctx: ServerContext;
     buildOptions: BuildOptions;
-    config: OmsConfig;
+    config: OmsProjectConfig;
     uuidMapOutPath: string;
   }) {
     super();
@@ -327,6 +329,8 @@ class OmsWatcher extends EventEmitter<{
 
   async close() {
     await this._fileWatcher.close();
+    await Promise.all(Object.values(this._domainConfigWatchers).map((watcher) => watcher.close()));
+    this._domainConfigWatchers = {};
     await this._taskQueue.abort();
   }
 
@@ -341,7 +345,7 @@ class OmsWatcher extends EventEmitter<{
     this._queuePassiveBuild('build options updated');
   }
 
-  async updateConfig(config: OmsConfig) {
+  async updateConfig(config: OmsProjectConfig) {
     await this._taskQueue.queueTask({
       type: 'update-config',
       exec: async () => {
@@ -376,7 +380,7 @@ class OmsWatcher extends EventEmitter<{
 
     const outDir = join(opts.buildDir, 'oms');
 
-    const configWatcher = new OmsConfigWatcher({
+    const configWatcher = new OmsProjectConfigWatcher({
       projectPath: this._projectPath,
       once: true,
     });
@@ -422,7 +426,7 @@ class OmsWatcher extends EventEmitter<{
 
   private _projectPath: string;
   private _buildOptions: Readonly<BuildOptions>;
-  private _config: OmsConfig;
+  private _config: OmsProjectConfig;
 
   private _defaultProfile: BuildProfile;
   private _headlessProfile: BuildProfile | undefined;
@@ -440,6 +444,7 @@ class OmsWatcher extends EventEmitter<{
     domainId: string;
     sourceRoot: string;
   }> = [];
+  private _domainConfigWatchers: Record<string, OmsDomainConfigWatcher> = {};
 
   private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
   private _lastBuildExtras: BuildExtras | undefined;
@@ -450,9 +455,12 @@ class OmsWatcher extends EventEmitter<{
     'build-prod': () => void;
     'update-build-options': () => void;
     'update-config': () => void;
+    'update-domain-configs': () => void;
   }> = new TaskQueue();
 
   private async _updateDomains() {
+    await Promise.all(Object.values(this._domainConfigWatchers).map((watcher) => watcher.close()));
+    this._domainConfigWatchers = {};
     this._domains = {};
     this._domainSourceRootMap.length = 0;
     const domainPromises: Promise<void>[] = [];
@@ -482,16 +490,22 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private async _addDomain(domainId: string, domainRoot: string, preferredDomainSourceRoot: string) {
-    const domainPackageJson = await readDomainPackageJson(domainRoot);
-    const partitions = domainPackageJson?.oms?.partitions ?? [
-      { rootDir: preferredDomainSourceRoot },
-    ];
-    const domainExports = await readDomainExports(domainRoot, partitions, domainPackageJson);
+    const domainConfigWatcher = new OmsDomainConfigWatcher({
+      domainRoot,
+      preferredSourceRoot: preferredDomainSourceRoot,
+    });
+    this._domainConfigWatchers[domainId] = domainConfigWatcher;
+    const domainConfig = await domainConfigWatcher.ready();
+    domainConfigWatcher.on('configUpdated', () => {
+      this._queueDomainConfigUpdate(domainId).catch((err) => {
+        logger.error(`Failed to update OMS domain config for ${domainId}: %o`, err);
+      });
+    });
     const domain = this._domains[domainId] = new Domain(
       domainId,
       domainRoot,
-      partitions,
-      domainExports,
+      domainConfig.partitions,
+      domainConfig.exports,
       this._uuidManager,
       domainId === mainDomainId ? this._config.headless : undefined,
     );
@@ -508,13 +522,25 @@ class OmsWatcher extends EventEmitter<{
     }
   }
 
+  private async _queueDomainConfigUpdate(domainId: string) {
+    await this._taskQueue.queueTask({
+      type: 'update-domain-configs',
+      exec: async () => {
+        logger.debug(`Updating OMS domains because domain config changed: ${domainId}`);
+        await this._updateDomains();
+      },
+    });
+    this._queuePassiveBuild(`domain config updated: ${domainId}`);
+  }
+
   private async _makeEntries(opts: DomainEntryQueryOptions) {
-    const entries: Record<string, string> = {};
+    const entries: Record<string, InternalBuildEntry> = {};
     const autoRunInfos: Array<{
       entryId: string;
       bundleId: string;
       isEditorEntry: boolean;
     }> = [];
+    const exportEntries: Record<string, string> = {};
     for (const [domainId, domain] of Object.entries(this._domains)) {
       const domainEntrySpecs = domain.getEntrySpecs(opts);
       for (const [domainEntrySpecId, domainEntrySpec] of Object.entries(domainEntrySpecs)) {
@@ -530,11 +556,18 @@ class OmsWatcher extends EventEmitter<{
             isEditorEntry: domainEntrySpec.autoRun.isEditorEntry,
           });
         }
+        if (domainEntrySpec.exportId) {
+          if (domainEntrySpec.exportId in exportEntries) {
+            logger.warn(`Duplicate OMS export id: ${domainEntrySpec.exportId}`);
+          } else {
+            exportEntries[domainEntrySpec.exportId] = makeOmsEntryFileName(domainEntrySpecId);
+          }
+        }
       }
     }
 
     const metadataFileEntry = 'metadata';
-    const metadataFileContent = await this._renderMetadataFile(autoRunInfos);
+    const metadataFileContent = await this._renderMetadataFile(autoRunInfos, exportEntries);
     entries[metadataFileEntry] = metadataFileContent;
 
     return {
@@ -561,15 +594,22 @@ class OmsWatcher extends EventEmitter<{
         const state: BuildState = {
           fullPassive: passive,
         };
+        const applyMergeArgs = (mergeArgs: readonly unknown[]) => {
+          const [inputPassive] = mergeArgs;
+          if (inputPassive === false) {
+            state.fullPassive = false;
+          }
+        };
+        for (const mergeArgs of ctx.initialMergeArgs) {
+          applyMergeArgs(mergeArgs);
+        }
 
         let interruptedByAbort = false;
         for (; ;) {
           const timerInterruptController = new AbortController();
           let interruptedByMerge = false;
-          const onMerge = ([inputPassive]: [boolean]) => {
-            if (!inputPassive) {
-              state.fullPassive = false;
-            }
+          const onMerge = (mergeArgs: unknown[]) => {
+            applyMergeArgs(mergeArgs);
             interruptedByMerge = true;
             timerInterruptController.abort();
           };
@@ -606,7 +646,7 @@ class OmsWatcher extends EventEmitter<{
         ctx.acceptMerge = false;
 
         await this._fileWatcherReadyPromise?.promise;
-        return await this._execBuild({ fullPassive: passive });
+        return await this._execBuild(state);
       },
     });
   }
@@ -776,7 +816,7 @@ class OmsWatcher extends EventEmitter<{
     };
   }
 
-  private async _renderMetadataFile(autoRunInfos: AutoRunInfos) {
+  private async _renderMetadataFile(autoRunInfos: AutoRunInfos, exportEntries: Record<string, string>) {
     const template = await fs.readFile(join(helpersDir, 'meta.ts.ejs'), 'utf8');
     const source = Ejs.render(template, {
       entries: autoRunInfos.map(({ bundleId, isEditorEntry }) => {
@@ -785,6 +825,7 @@ class OmsWatcher extends EventEmitter<{
           isEditorEntry,
         };
       }),
+      exportEntries,
     });
     return source;
   }

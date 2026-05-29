@@ -69,10 +69,14 @@ export class SceneModuleSystem {
       throw new Error('Scripts not loaded or is being invalidated.');
     }
     const entry = this._omsMetadata.entries.find(([bundleId]) => bundleId === moduleId);
-    if (!entry) {
-      throw new Error(`'${moduleId}' is not a valid OMS entry module.`);
+    if (entry) {
+      return this._importOmsEntry(entry);
     }
-    return this._importOmsEntry(entry);
+    const exportEntryId = this._omsMetadata.exports?.[moduleId];
+    if (exportEntryId) {
+      return this._importOmsEntryById(exportEntryId);
+    }
+    throw new Error(`'${moduleId}' is not a valid OMS entry module.`);
   }
 
   private _systemJS: SystemJS;
@@ -283,10 +287,15 @@ export class SceneModuleSystem {
   private _importOmsEntry(entry: OMSMetadata['entries'][number]): Promise<unknown> {
     return this._systemJS.import(`${omsURLPrefix}bundle-${entry[0]}.js`);
   }
+
+  private _importOmsEntryById(entryId: string): Promise<unknown> {
+    return this._systemJS.import(`${omsURLPrefix}${entryId}.js`);
+  }
 }
 
 interface OMSMetadata {
   entries: Array<[bundleId: string, isEditorEntry: boolean]>;
+  exports?: Record<string, string>;
 }
 
 function saveRequiringFrames() {

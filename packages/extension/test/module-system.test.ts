@@ -93,9 +93,29 @@ describe('module system', () => {
     expect(r2).toBe(r3);
     await Promise.all([r2, r3]);
   });
+
+  it('imports public OMS exports', async () => {
+    vol.fromJSON({
+      'metadata.js': makeMetadataJs([
+        ['main', false],
+      ], {
+        'some-plugin:a': 'exports/some-plugin/a',
+      }),
+      'bundle-main.js': makeSimpleSystemJs(``),
+      'exports/some-plugin/a.js': makeSimpleSystemJs(`exports("value", 42)`),
+    }, '/__oms_test__/temp/oms/out/');
+    moduleSystem = new SceneModuleSystem();
+
+    await moduleSystem.reload();
+
+    await expect(moduleSystem.import('some-plugin:a')).resolves.toMatchObject({
+      value: 42,
+    });
+    await expect(moduleSystem.import('a')).rejects.toThrowError(`'a' is not a valid OMS entry module.`);
+  });
 });
 
-function makeMetadataJs(entries: Array<[bundle: string, editor: boolean]>) {
+function makeMetadataJs(entries: Array<[bundle: string, editor: boolean]>, exportEntries: Record<string, string> = {}) {
   return `
   System.register([], (function (exports) {
     'use strict';
@@ -103,6 +123,7 @@ function makeMetadataJs(entries: Array<[bundle: string, editor: boolean]>) {
       execute: (function () {
         var omsEntry_metadata = exports("default", {
           entries: ${JSON.stringify(entries)},
+          exports: ${JSON.stringify(exportEntries)},
         });
 
       })

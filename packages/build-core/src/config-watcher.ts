@@ -1,13 +1,13 @@
 import EventEmitter from 'node:events';
 import * as chokidar from 'chokidar';
-import { normalizeUserConfig, type OmsConfig, type OmsUserConfig } from './config.js';
+import { normalizeProjectUserConfig, type OmsProjectConfig, type OmsProjectUserConfig } from './config.js';
 import { promiseWithResolvers } from './utils/promise-with-resolvers.js';
 import { logger } from './logger.js';
 import { basename, relative, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isOmsConfigFileName, loadOmsConfigModule } from './config-loader.js';
 
-export class OmsConfigWatcher extends EventEmitter<{
-  configUpdated: [config: OmsConfig];
+export class OmsProjectConfigWatcher extends EventEmitter<{
+  configUpdated: [config: OmsProjectConfig];
 }> {
   constructor(options: {
     projectPath: string;
@@ -30,8 +30,7 @@ export class OmsConfigWatcher extends EventEmitter<{
         if (stats && !stats.isFile()) {
           return true;
         }
-        const name = basename(path);
-        return !/^oms\.config\.[cm]?js$/.test(name);
+        return !isOmsConfigFileName(basename(path));
       },
     });
     fsWatcher.on('ready', () => {
@@ -64,12 +63,12 @@ export class OmsConfigWatcher extends EventEmitter<{
     await this._fsWatcher.close();
   }
 
-  async ready(): Promise<OmsConfig> {
+  async ready(): Promise<OmsProjectConfig> {
     await this._readyPromise;
     return this._config;
   }
 
-  private _config: OmsConfig = normalizeUserConfig({});
+  private _config: OmsProjectConfig = normalizeProjectUserConfig({});
 
   private _rootDir: string;
   private _fsWatcher: chokidar.FSWatcher;
@@ -88,17 +87,17 @@ export class OmsConfigWatcher extends EventEmitter<{
   }
 
   private _onEffectiveConfigFileChange(callback?: () => void) {
+    if (!this._effectiveConfigFile) {
+      this._config = normalizeProjectUserConfig({});
+      this.emit('configUpdated', this._config);
+      callback?.();
+      return;
+    }
     const path = resolve(this._rootDir, this._effectiveConfigFile);
     (async () => {
-      const { default: config } = await import(pathToFileURL(path).href + '?timestamp=' + Date.now());
-      let useConfig: OmsUserConfig;
-      if (typeof config === 'function') {
-        useConfig = config();
-      } else {
-        useConfig = config;
-      }
+      const useConfig = await loadOmsConfigModule<OmsProjectUserConfig>(path);
       logger.debug('user config read: %o', useConfig);
-      this._config = normalizeUserConfig(useConfig);
+      this._config = normalizeProjectUserConfig(useConfig);
       logger.debug('config updated: %o', this._config);
       this.emit('configUpdated', this._config);
     })().catch((err) => {
@@ -108,3 +107,5 @@ export class OmsConfigWatcher extends EventEmitter<{
     });
   }
 }
+
+export { OmsProjectConfigWatcher as OmsConfigWatcher };

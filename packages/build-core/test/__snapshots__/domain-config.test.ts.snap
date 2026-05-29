@@ -1,0 +1,32 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`builds public export entries without adding a synthetic default export 1`] = `
+"System.register([], (function (exports) {
+	'use strict';
+	return {
+		execute: (function () {
+
+			const bakeTextFieldFont = exports("bakeTextFieldFont", 42);
+
+		})
+	};
+}));
+"
+`;
+
+exports[`preserves public export entry default exports 1`] = `
+"System.register([], (function (exports) {
+	'use strict';
+	return {
+		execute: (function () {
+
+			const bakeTextFieldFont = exports("bakeTextFieldFont", 42);
+			var font = exports("default", {
+			  bakeTextFieldFont
+			});
+
+		})
+	};
+}));
+"
+`;

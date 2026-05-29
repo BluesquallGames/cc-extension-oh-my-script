@@ -4,4 +4,9 @@ export default {
     ['<%= entry.bundleId %>', <%= entry.isEditorEntry %>],
 <% }); %>
   ],
+  exports: {
+<% Object.entries(exportEntries).forEach(([exportId, entryId]) => { -%>
+    <%- JSON.stringify(exportId) %>: <%- JSON.stringify(entryId) %>,
+<% }); -%>
+  },
 };

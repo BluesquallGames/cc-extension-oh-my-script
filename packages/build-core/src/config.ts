@@ -1,7 +1,7 @@
 import { platform } from 'node:process';
 import picomatch from 'picomatch';
 
-export interface OmsUserConfig {
+export interface OmsProjectUserConfig {
   resolve?: {
     alias?: Record<string, string>;
     maybeExternals?: string[];
@@ -17,7 +17,7 @@ export interface OmsUserConfig {
   };
 }
 
-export interface OmsConfig {
+export interface OmsProjectConfig {
   resolve: {
     alias?: Record<string, string>;
     maybeExternals: undefined | string[];
@@ -37,7 +37,7 @@ export interface ProfileBuildConfig {
   target: string | undefined;
 }
 
-export function normalizeUserConfig(userConfig: OmsUserConfig): OmsConfig {
+export function normalizeProjectUserConfig(userConfig: OmsProjectUserConfig): OmsProjectConfig {
   return {
     resolve: userConfig.resolve
       ? {
@@ -50,7 +50,12 @@ export function normalizeUserConfig(userConfig: OmsUserConfig): OmsConfig {
   };
 }
 
-function normalizeUserHeadlessConfig(headlessConfig: OmsUserConfig['headless']): HeadlessConfig {
+export type OmsUserConfig = OmsProjectUserConfig;
+export type OmsConfig = OmsProjectConfig;
+
+export const normalizeUserConfig = normalizeProjectUserConfig;
+
+function normalizeUserHeadlessConfig(headlessConfig: OmsProjectUserConfig['headless']): HeadlessConfig {
   const defaultHeadlessConfig: HeadlessConfig = {
     enabled: false,
     build: {

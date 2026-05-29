@@ -15,22 +15,28 @@ import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate
 import { rollupPluginDomain } from './features/rollup-plugin-domain.js';
 import { rollupPluginNodeBuiltinModules } from './features/rollup-plugin-node-builtin-modules.js';
 import rollupPluginAlias from '@rollup/plugin-alias';
-import type { OmsConfig, ProfileBuildConfig } from './config.js';
+import type { OmsProjectConfig, ProfileBuildConfig } from './config.js';
 import { logger } from './logger.js';
 import type { Domain } from './domain.js';
 import { join } from 'node:path';
 import { rollupPluginMaybeExternals } from './features/rollup-plugin-maybe-externals.js';
+import { makeOmsEntryFileName } from './utils/entry-id.js';
+import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
 const rollupPluginBabel = rollupPluginBabel_ as unknown as typeof rollupPluginBabel_.default;
 const rollupPluginJson = rollupPluginJson_ as unknown as typeof rollupPluginJson_.default;
 
+export type InternalBuildEntry = string | {
+  module: string;
+};
+
 export interface InternalBuildOptions {
-  entries: Record<string, string>;
+  entries: Record<string, InternalBuildEntry>;
   domains: Record<string, Domain>;
   uuidProvider: UUIDProvider | undefined;
-  config: OmsConfig;
+  config: OmsProjectConfig;
   profileBuildConfig: ProfileBuildConfig | undefined;
 }
 
@@ -76,7 +82,7 @@ export class BuildRecord {
     sourceMaps?: boolean | 'inline';
     debug?: boolean;
     ccEnvParams?: CCEnvParams;
-    config: OmsConfig;
+    config: OmsProjectConfig;
     headless: boolean;
     treeShake?: boolean;
   }) {
@@ -115,27 +121,7 @@ export class BuildRecord {
       return buildResult;
     } catch (error) {
       logger.debug(`${this._title} Build failed: %o`, error);
-      if (error instanceof Error) {
-        if (error instanceof Error && error.name === 'RollupError') {
-          return {
-            ok: false,
-            error: {
-              message: error.message,
-              stack: error.stack,
-            },
-          };
-        }
-        if (error instanceof SyntaxError) {
-          return {
-            ok: false,
-            error: {
-              message: error.message,
-              stack: error.stack,
-            },
-          };
-        }
-      }
-      throw new BuildError(`${this._title} Unexpected build error`, { cause: error });
+      return buildFailureResult(this._title, error);
     }
   }
 
@@ -178,8 +164,20 @@ export class BuildRecord {
     const ENTRY_MODULE_PREFIX = 'oms-entry\0';
 
     const rollupEntries: Record<string, string> = {};
+    const memoryEntryModules: Record<string, string> = {};
     for (const key of Object.keys(entries)) {
-      rollupEntries[key] = ENTRY_MODULE_PREFIX + key;
+      const rollupEntryName = makeOmsEntryFileName(key);
+      if (rollupEntryName in rollupEntries) {
+        logger.warn(`Duplicate entry file name ${rollupEntryName} for entry ${key}`);
+        continue;
+      }
+      const entry = entries[key];
+      if (typeof entry === 'string') {
+        rollupEntries[rollupEntryName] = ENTRY_MODULE_PREFIX + key;
+        memoryEntryModules[key] = entry;
+      } else {
+        rollupEntries[rollupEntryName] = makeFileSystemAbsoluteImportSpecifier(entry.module);
+      }
     }
 
     const memoryModules: Record<string, string> = {};
@@ -230,7 +228,7 @@ export class BuildRecord {
         load(id) {
           if (id.startsWith(ENTRY_MODULE_PREFIX)) {
             const entryModuleId = id.slice(ENTRY_MODULE_PREFIX.length);
-            const entryModuleSource = entries[entryModuleId];
+            const entryModuleSource = memoryEntryModules[entryModuleId];
             if (entryModuleSource === undefined) {
               this.error(`Unknown entry module ${entryModuleId}, where'd it import?`);
             } else {
@@ -333,7 +331,7 @@ export class BuildRecord {
     const outputOptions: rollup.OutputOptions = {
       dir: join(this._outDir),
       format: this._headless ? 'es' : 'systemjs',
-      entryFileNames: '[name].js',
+      entryFileNames: (chunkInfo) => `${makeOmsEntryFileName(chunkInfo.name)}.js`,
       chunkFileNames: '_chunks/[name]-[hash].js',
       assetFileNames: '_assets/[name]-[hash][extname]',
       sourcemap: this._sourceMaps,
@@ -413,21 +411,6 @@ export class BuildRecord {
 
 const ROLLUP_MODULE_CACHE_KEY_UUID = '__oms_uuid__';
 
-class BuildError extends Error { }
-
-class _RollupBuildError extends BuildError {
-  constructor(cause: rollup.RollupError) {
-    super(cause.message, { cause });
-    this._cause = cause;
-  }
-
-  override get cause() {
-    return this._cause;
-  }
-
-  private _cause: rollup.RollupError;
-}
-
 function toBabelEnvTarget(target: string | undefined): TargetsOptions {
   if (!target) {
     return {
@@ -442,4 +425,58 @@ function toBabelEnvTarget(target: string | undefined): TargetsOptions {
   return {
     [runtime]: version,
   };
+}
+
+function buildFailureResult(title: string, error: unknown): InternalBuildResult {
+  const message = errorToBuildMessage(error);
+  return {
+    ok: false,
+    error: {
+      message: `${title} failed: ${message}`,
+      stack: errorToBuildStack(error),
+    },
+  };
+}
+
+function errorToBuildMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (typeof error === 'symbol') {
+    return `Symbol [${error.description}]`;
+  }
+  if (typeof error === 'bigint') {
+    return `BigInt [${error}]`;
+  }
+  try {
+    return JSON.stringify(error) ?? String(error);
+  } catch {
+    return 'unknown build error';
+  }
+}
+
+function errorToBuildStack(error: unknown): string | undefined {
+  const stackParts = collectErrorStacks(error);
+  if (stackParts.length === 0) {
+    return undefined;
+  }
+  return stackParts.join('\nCaused by: ');
+}
+
+function collectErrorStacks(error: unknown): string[] {
+  if (!(error instanceof Error)) {
+    return [];
+  }
+  const parts = [
+    error.stack || error.message || error.name,
+  ];
+  const cause = error.cause;
+  if (cause) {
+    const causeStacks = collectErrorStacks(cause);
+    parts.push(...(causeStacks.length > 0 ? causeStacks : [errorToBuildMessage(cause)]));
+  }
+  return parts;
 }

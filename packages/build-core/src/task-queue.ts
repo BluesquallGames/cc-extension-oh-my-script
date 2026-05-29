@@ -7,6 +7,10 @@ export class TaskExecuteContext extends EventEmitter<{
   merge: [args: any];
   abort: [];
 }> {
+  constructor(public readonly initialMergeArgs: any[][] = []) {
+    super();
+  }
+
   acceptMerge = false;
 }
 
@@ -35,6 +39,9 @@ export class TaskQueue<TTaskMap extends {
     for (const pendingTask of this._pendingTasks) {
       if (pendingTask.type === task.type) {
         logger.debug(`Queuing task [${task.type}] merged with pending task ${pendingTask.id}[${pendingTask.type}].`);
+        if (task.mergeArgs !== undefined) {
+          pendingTask.initialMergeArgs.push(task.mergeArgs);
+        }
         return pendingTask.execPromiseWithResolvers.promise;
       }
     }
@@ -45,6 +52,7 @@ export class TaskQueue<TTaskMap extends {
       id: taskId,
       type: task.type,
       exec: task.exec,
+      initialMergeArgs: [],
       execPromiseWithResolvers: execPromiseWithResolvers,
     });
     logger.debug(`Task ${taskId}[${task.type}] queued, now pending.`);
@@ -71,6 +79,7 @@ export class TaskQueue<TTaskMap extends {
     id: number;
     type: string;
     exec: (ctx: TaskExecuteContext) => unknown;
+    initialMergeArgs: any[][];
     execPromiseWithResolvers: PromiseWithResolvers<any>;
   }> = [];
 
@@ -89,7 +98,7 @@ export class TaskQueue<TTaskMap extends {
     this._pendingTasks.length = 0;
     this._runningPromise = (async () => {
       for (const task of tasks) {
-        const ctx = new TaskExecuteContext();
+        const ctx = new TaskExecuteContext(task.initialMergeArgs);
         this._runningTask = {
           id: task.id,
           type: task.type,
