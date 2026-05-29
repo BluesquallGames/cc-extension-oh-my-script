@@ -9,5 +9,9 @@ export class SceneScriptManager {
     await this._moduleSystem.reload();
   }
 
+  async import(moduleId: string) {
+    return this._moduleSystem.import(moduleId);
+  }
+
   private _moduleSystem: SceneModuleSystem;
 }

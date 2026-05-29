@@ -43,6 +43,14 @@ export const methods = {
         logger.debug(`Run project scripts in asset-db`);
         const scriptManager = new SceneScriptManager();
         await scriptManager.reload();
+        Object.defineProperty(globalThis, '__oms_import__', {
+          value: (moduleId: string) => {
+            return scriptManager.import(moduleId);
+          },
+          writable: true,
+          enumerable: false,
+          configurable: true,
+        });
       } catch (err) {
         logger.error(`Failed to run project scripts in asset-db: %o`, err);
       }

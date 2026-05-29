@@ -64,6 +64,17 @@ export class SceneModuleSystem {
     });
   }
 
+  async import(moduleId: string) {
+    if (!this._omsMetadata) {
+      throw new Error('Scripts not loaded or is being invalidated.');
+    }
+    const entry = this._omsMetadata.entries.find(([bundleId]) => bundleId === moduleId);
+    if (!entry) {
+      throw new Error(`'${moduleId}' is not a valid OMS entry module.`);
+    }
+    return this._importOmsEntry(entry);
+  }
+
   private _systemJS: SystemJS;
   private _registryManagement: RegistryManagement;
   private _externalSystemJSModules: string[] = [];
@@ -82,6 +93,8 @@ export class SceneModuleSystem {
   private _controllerOnDispose = new AbortController();
 
   private _hotConsole = new HotConsole();
+
+  private _omsMetadata: OMSMetadata | undefined = undefined;
 
   private get _runningReloadingLogTag() {
     return `[reloading-${this._runningReloadState.seqId}] `;
@@ -104,6 +117,7 @@ export class SceneModuleSystem {
     this._invalidateHotModules();
 
     const disposeClassRegistrationContext = this._setupClassRegistrationContext();
+    this._omsMetadata = undefined;
     try {
       await this._reloadOmsModules();
     } finally {
@@ -253,19 +267,26 @@ export class SceneModuleSystem {
 
   private async _reloadOmsModules() {
     const { default: metadata } = (await this._systemJS.import(`${omsURLPrefix}metadata.js`, undefined)) as {
-      default: {
-        entries: Array<[bundleId: string, isEditorEntry: boolean]>;
-      };
+      default: OMSMetadata;
     };
-    for (const [bundleId] of metadata.entries) {
+    this._omsMetadata = metadata;
+    for (const entry of metadata.entries) {
       const restoreRequiringFrames = saveRequiringFrames();
       try {
-        await this._systemJS.import(`${omsURLPrefix}bundle-${bundleId}.js`);
+        await this._importOmsEntry(entry);
       } finally {
         restoreRequiringFrames();
       }
     }
   }
+
+  private _importOmsEntry(entry: OMSMetadata['entries'][number]): Promise<unknown> {
+    return this._systemJS.import(`${omsURLPrefix}bundle-${entry[0]}.js`);
+  }
+}
+
+interface OMSMetadata {
+  entries: Array<[bundleId: string, isEditorEntry: boolean]>;
 }
 
 function saveRequiringFrames() {
