@@ -106,9 +106,11 @@ export class OmsBuilder extends EventEmitter<{
 
     const config = await configWatcher.ready();
 
+    const rootOutDir = resolve(this._projectPath, 'temp', 'oms');
+
     const defaultProfile = {
-      outDir: resolve(this._projectPath, 'temp', 'oms', 'out'),
-      typingOutDir: resolve(this._projectPath, 'temp', 'oms', 'typing'),
+      outDir: resolve(rootOutDir, 'out'),
+      typingOutDir: resolve(rootOutDir, 'typing'),
     };
     await createProfileOutDirs(defaultProfile);
     await fs.outputJSON(join(defaultProfile.outDir, 'package.json'), {
@@ -120,8 +122,8 @@ export class OmsBuilder extends EventEmitter<{
     let headlessProfile: undefined | BuildProfile;
     if (config.headless.enabled) {
       headlessProfile = {
-        outDir: resolve(this._projectPath, 'temp', 'oms', 'out-headless'),
-        typingOutDir: resolve(this._projectPath, 'temp', 'oms', 'typing-headless'),
+        outDir: resolve(rootOutDir, 'out-headless'),
+        typingOutDir: resolve(rootOutDir, 'typing-headless'),
       };
       await createProfileOutDirs(headlessProfile);
       await fs.outputJSON(join(headlessProfile.outDir, 'package.json'), {
@@ -144,6 +146,7 @@ export class OmsBuilder extends EventEmitter<{
       ctx: this._ctx,
       buildOptions: this._buildOptions,
       config,
+      uuidMapOutPath: join(rootOutDir, 'uuids.json'),
     });
     this._watcher.on('passive-build-end', (buildResult) => {
       this.emit('passive-build-end', buildResult);
@@ -200,6 +203,7 @@ class OmsWatcher extends EventEmitter<{
     ctx: ServerContext;
     buildOptions: BuildOptions;
     config: OmsConfig;
+    uuidMapOutPath: string;
   }) {
     super();
     const {
@@ -249,7 +253,7 @@ class OmsWatcher extends EventEmitter<{
     }
     this._headlessBuildRecord = headlessBuildRecord;
 
-    const uuidManager = new UUIDManager(this._projectPath);
+    const uuidManager = new UUIDManager(this._projectPath, options.uuidMapOutPath);
     this._uuidManager = uuidManager;
 
     const uuidProvider = uuidManager.get.bind(uuidManager);
@@ -639,6 +643,8 @@ class OmsWatcher extends EventEmitter<{
 
   private async _doExecBuild() {
     const entryChanged = await this._executeFileQueue();
+
+    await this._uuidManager.emit();
 
     let defaultProfileBuildResult: InternalBuildResult;
     let headlessBuildResult: InternalBuildResult | undefined;

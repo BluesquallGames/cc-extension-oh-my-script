@@ -4,7 +4,7 @@ import { logger } from './logger.js';
 import { relative, resolve } from 'node:path';
 
 export class UUIDManager {
-  constructor(private _projectPath: string) {
+  constructor(private _projectPath: string, private _outputPath?: string) {
 
   }
 
@@ -25,6 +25,7 @@ export class UUIDManager {
         centralized: true,
       };
     }
+    this._shouldUpdateEmits = true;
   }
 
   async saveCentralized(path: string) {
@@ -64,7 +65,11 @@ export class UUIDManager {
   }
 
   delete(module: string) {
-    return delete this._map[module];
+    const ok = delete this._map[module];
+    if (ok) {
+      this._shouldUpdateEmits = true;
+    }
+    return ok;
   }
 
   async update(module: string, inlineUUID: string) {
@@ -77,18 +82,25 @@ export class UUIDManager {
       };
       this._map[pathKey] = record;
     }
+    let changed = false;
     if (!inlineUUID) {
       if (record.centralized) {
         if (!record.uuid) {
           record.uuid = this._generateUUID();
+          changed = true;
         }
       } else {
         record.centralized = true;
         record.uuid = this._generateUUID();
+        changed = true;
       }
     } else {
       record.centralized = false;
+      changed = record.uuid !== inlineUUID;
       record.uuid = inlineUUID;
+    }
+    if (changed) {
+      this._shouldUpdateEmits = true;
     }
   }
 
@@ -104,10 +116,29 @@ export class UUIDManager {
       });
   }
 
+  async emit() {
+    if (!this._outputPath) {
+      return;
+    }
+    if (!this._shouldUpdateEmits) {
+      return;
+    }
+    this._shouldUpdateEmits = false;
+    const output: Record<string, string> = {};
+    for (const [k, v] of Object.entries(this._map)) {
+      output[k] = v.uuid;
+    }
+    await fs.outputJSON(this._outputPath, output, {
+      spaces: 2,
+    });
+  }
+
   private _map: Record<string, {
     uuid: string;
     centralized: boolean;
   }> = {};
+
+  private _shouldUpdateEmits = false;
 
   private _generateUUID() {
     return randomUUID();
