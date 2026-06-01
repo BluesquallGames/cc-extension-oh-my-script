@@ -17,7 +17,10 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo watch build"
+    "dev": "turbo watch build",
+    "docs:dev": "pnpm --dir docs dev",
+    "docs:build": "pnpm --dir docs build",
+    "docs:preview": "pnpm --dir docs preview"
   },
   "devDependencies": {
     "@shrinktofit/eslint-plugin": "^0.0.9",
