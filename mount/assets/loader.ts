@@ -216,11 +216,12 @@ export async function loadBundleEntry(bundleId: string, parent: string) {
 
 export async function loadOMSExports(id: string, parent: string) {
   void parent;
-  if (!id.includes(':')) {
+  const entryFileName = makeOmsEntryFileName(id);
+  if (entryFileName === id) {
     throw new Error(`Invalid OMS exports id: ${id}`);
   }
   try {
-    return await import(`${omsURLPrefix}${makeOmsEntryFileName(id)}.js`);
+    return await import(`${omsURLPrefix}${entryFileName}.js`);
   } catch (err) {
     console.error(`Failed to load OMS exports: ${id}, did you installed OMS extension?`);
     throw err;
@@ -228,6 +229,13 @@ export async function loadOMSExports(id: string, parent: string) {
 }
 
 function makeOmsEntryFileName(entryId: string) {
+  const importSpecifierFileName = makeOmsImportSpecifierFileName(entryId);
+  if (importSpecifierFileName) {
+    return importSpecifierFileName;
+  }
+  if (entryId.includes('://')) {
+    return entryId;
+  }
   const iColon = entryId.indexOf(':');
   if (iColon < 0) {
     return entryId;
@@ -238,6 +246,22 @@ function makeOmsEntryFileName(entryId: string) {
     return entryId;
   }
   return `exports/${domainId}/${exportId === '.' ? 'index' : exportId}`;
+}
+
+function makeOmsImportSpecifierFileName(moduleId: string) {
+  const match = /^oms:\/\/([^/]+)(?:\/(.*))?$/.exec(moduleId);
+  if (!match) {
+    return undefined;
+  }
+  const exportId = normalizeExportId(match[2] || '.');
+  return `exports/${match[1]}/${exportId === '.' ? 'index' : exportId}`;
+}
+
+function normalizeExportId(exportId: string) {
+  if (exportId === '' || exportId === '.') {
+    return '.';
+  }
+  return exportId.replace(/^\.\//, '').replace(/^\/+/, '');
 }
 
 export function saveRequiringFrames() {

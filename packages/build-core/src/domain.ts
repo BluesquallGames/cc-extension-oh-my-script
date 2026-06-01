@@ -24,7 +24,10 @@ export class Domain {
     private _exports: Record<string, string>,
     uuidManager: UUIDManager,
     private _headlessConfig: HeadlessConfig | undefined,
+    exportPackageName?: string,
   ) {
+    this._exportPackageName = exportPackageName ?? _id;
+
     {
       const domainId = this._id;
 
@@ -45,6 +48,10 @@ export class Domain {
         this._bundles[headlessBundleId] = this._headlessBundle;
       }
     }
+  }
+
+  get exportPackageName() {
+    return this._exportPackageName;
   }
 
   get sourceRoots() {
@@ -82,7 +89,7 @@ export class Domain {
 
     if (opts.regular) {
       for (const [key, value] of Object.entries(this._exports)) {
-        const entryName = makeOmsExportEntryId(this._id, key);
+        const entryName = makeOmsExportEntryId(this._exportPackageName, key);
         entrySpecs[entryName] = {
           source: {
             module: join(this._domainRoot, value),
@@ -131,16 +138,17 @@ export class Domain {
     return join(this._domainRoot, subpath);
   }
 
-  generatePathMappings() {
-    return Object.fromEntries(Object.entries(this._exports).map(([exportId, exportValue]) => {
-      const path = exportId === '.' ? '' : `/${exportId}`;
-      return [
-        `${domainURLProtocol}://${this._id}${path}`,
-        [join(this._domainRoot, exportValue)],
-      ];
-    }));
+  generateTypingEntries(): DomainTypingEntry[] {
+    return Object.entries(this._exports).map(([exportId, exportValue]) => {
+      return {
+        moduleId: makeOmsImportSpecifier(this._exportPackageName, exportId),
+        packageName: makeOmsTypingPackageSpecifier(this._exportPackageName, exportId),
+        source: join(this._domainRoot, exportValue),
+      };
+    });
   }
 
+  private _exportPackageName: string;
   private _mainBundle: Bundle;
   private _editorBundle: Bundle;
   private _headlessBundle: Bundle | undefined;
@@ -198,12 +206,20 @@ export interface BundleEntrySpec {
   };
 }
 
+export interface DomainTypingEntry {
+  moduleId: string;
+  packageName: string;
+  source: string;
+}
+
 export interface OmsDomainUserConfig {
+  exportPackageName?: string;
   partitions?: PackageOmsPartitionConfig[];
   exports?: Record<string, string>;
 }
 
 export interface OmsDomainConfig {
+  exportPackageName?: string;
   partitions: PackageOmsPartitionConfig[];
   exports: Record<string, string>;
 }
@@ -224,12 +240,17 @@ export async function readOmsDomainConfig(domainRoot: string, options: {
     fileConfig.partitions ?? packageConfig.partitions ?? [{ rootDir: options.preferredSourceRoot }],
     domainRoot,
   );
+  const exportPackageName = normalizeExportPackageName(fileConfig.exportPackageName, `In ${configFile ?? 'oms.config.js'}`);
   const fileExports = normalizeDomainExports(fileConfig.exports ?? {}, `In ${configFile ?? 'oms.config.js'}`);
 
-  return {
+  const config: OmsDomainConfig = {
     partitions,
     exports: fileExports,
   };
+  if (exportPackageName !== undefined) {
+    config.exportPackageName = exportPackageName;
+  }
+  return config;
 }
 
 async function readLegacyPackageDomainConfig(domainRoot: string): Promise<Partial<OmsDomainConfig>> {
@@ -276,6 +297,21 @@ function normalizePartitions(partitions: PackageOmsPartitionConfig[], configDir:
   }).filter((partition): partition is PackageOmsPartitionConfig => partition !== undefined);
 }
 
+function normalizeExportPackageName(exportPackageName: unknown, logPrefix: string) {
+  if (exportPackageName === undefined) {
+    return undefined;
+  }
+  if (typeof exportPackageName !== 'string' || exportPackageName.length === 0) {
+    logger.error(`${logPrefix}, exportPackageName should be a non-empty string`);
+    return undefined;
+  }
+  if (/[/\\]/.test(exportPackageName)) {
+    logger.error(`${logPrefix}, exportPackageName should not contain slashes`);
+    return undefined;
+  }
+  return exportPackageName;
+}
+
 function normalizeDomainExports(exports: Record<string, string>, logPrefix: string) {
   const normalizedExports: Record<string, string> = {};
   for (const [rawKey, rawValue] of Object.entries(exports)) {
@@ -303,6 +339,22 @@ function normalizeExportId(exportId: string) {
     return '.';
   }
   return exportId.replace(/^\.\//, '').replace(/^\/+/, '');
+}
+
+function makeOmsImportSpecifier(exportPackageName: string, exportId: string) {
+  const path = exportId === '.' ? '' : `/${exportId}`;
+  return `${domainURLProtocol}://${exportPackageName}${path}`;
+}
+
+function makeOmsTypingPackageSpecifier(exportPackageName: string, exportId: string) {
+  const suffix = exportId === '.' ? '' : `__${sanitizeTypingPackageNameSegment(exportId)}`;
+  return `@oms-exports/${sanitizeTypingPackageNameSegment(exportPackageName)}${suffix}`;
+}
+
+function sanitizeTypingPackageNameSegment(segment: string) {
+  return segment.replace(/[^a-zA-Z0-9._-]/g, (ch) => {
+    return `_${ch.charCodeAt(0).toString(16)}_`;
+  });
 }
 
 export interface DomainPackageJson {

@@ -79,6 +79,110 @@ it('lets oms.config.js provide exports and override legacy package.json partitio
   });
 });
 
+it('normalizes npm-style oms.config.js export keys for package-like imports', async () => {
+  const domainRoot = await makeTempDir();
+  await fs.outputFile(join(domainRoot, 'oms.config.mjs'), [
+    'export default {',
+    '  exports: {',
+    '    ".": "./oms/src/index.ts",',
+    '    "./abc": "./oms/src/abc.ts",',
+    '  },',
+    '};',
+  ].join('\n'));
+
+  const config = await readOmsDomainConfig(domainRoot, {
+    preferredSourceRoot: 'oms/src',
+  });
+
+  expect(config.exports).toEqual({
+    '.': 'oms/src/index.ts',
+    abc: 'oms/src/abc.ts',
+  });
+
+  const domain = new Domain(
+    'some-plugin',
+    domainRoot,
+    config.partitions,
+    config.exports,
+    new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
+    undefined,
+  );
+
+  expect(domain.generateTypingEntries()).toEqual([
+    {
+      moduleId: 'oms://some-plugin',
+      packageName: '@oms-exports/some-plugin',
+      source: join(domainRoot, 'oms/src/index.ts'),
+    },
+    {
+      moduleId: 'oms://some-plugin/abc',
+      packageName: '@oms-exports/some-plugin__abc',
+      source: join(domainRoot, 'oms/src/abc.ts'),
+    },
+  ]);
+});
+
+it('uses exportPackageName as the public OMS package name', async () => {
+  const domainRoot = await makeTempDir();
+  await fs.outputFile(join(domainRoot, 'oms.config.mjs'), [
+    'export default {',
+    '  exportPackageName: "friendly-plugin",',
+    '  exports: {',
+    '    ".": "./oms/src/index.ts",',
+    '    "./abc": "./oms/src/abc.ts",',
+    '  },',
+    '};',
+  ].join('\n'));
+
+  const config = await readOmsDomainConfig(domainRoot, {
+    preferredSourceRoot: 'oms/src',
+  });
+
+  expect(config).toEqual({
+    exportPackageName: 'friendly-plugin',
+    partitions: [
+      { rootDir: join('oms', 'src') },
+    ],
+    exports: {
+      '.': 'oms/src/index.ts',
+      abc: 'oms/src/abc.ts',
+    },
+  });
+
+  const domain = new Domain(
+    'some-plugin',
+    domainRoot,
+    config.partitions,
+    config.exports,
+    new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
+    undefined,
+    config.exportPackageName,
+  );
+
+  expect(domain.exportPackageName).toBe('friendly-plugin');
+  expect(domain.generateTypingEntries()).toEqual([
+    {
+      moduleId: 'oms://friendly-plugin',
+      packageName: '@oms-exports/friendly-plugin',
+      source: join(domainRoot, 'oms/src/index.ts'),
+    },
+    {
+      moduleId: 'oms://friendly-plugin/abc',
+      packageName: '@oms-exports/friendly-plugin__abc',
+      source: join(domainRoot, 'oms/src/abc.ts'),
+    },
+  ]);
+
+  const entrySpecs = domain.getEntrySpecs({
+    regular: true,
+    editor: false,
+    headless: false,
+  });
+  expect(entrySpecs['friendly-plugin:.']?.exportId).toBe('friendly-plugin:.');
+  expect(entrySpecs['friendly-plugin:abc']?.exportId).toBe('friendly-plugin:abc');
+  expect(entrySpecs['some-plugin:.']).toBeUndefined();
+});
+
 it('creates public export entry specs for __oms_import__', async () => {
   const domainRoot = await makeTempDir();
   const domain = new Domain(
@@ -135,6 +239,57 @@ it('writes colon export entry ids under exports/domain', async () => {
   expect(result.ok).toBe(true);
   expect(await fs.pathExists(join(outDir, 'exports', 'some-plugin', 'a.js'))).toBe(true);
   expect(await fs.pathExists(join(outDir, 'some-plugin_a.js'))).toBe(false);
+});
+
+it('resolves npm-style OMS import specifiers in bundle sources', async () => {
+  const domainRoot = await makeTempDir();
+  const outDir = join(await makeTempDir(), 'out');
+  await fs.outputFile(join(domainRoot, 'oms', 'src', 'index.ts'), 'export const rootValue = 40;');
+  await fs.outputFile(join(domainRoot, 'oms', 'src', 'abc.ts'), 'export const abcValue = 2;');
+  const domain = new Domain(
+    'some-plugin',
+    domainRoot,
+    [{ rootDir: 'oms/src' }],
+    {
+      '.': 'oms/src/index.ts',
+      abc: 'oms/src/abc.ts',
+    },
+    new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
+    undefined,
+    'friendly-plugin',
+  );
+  const buildRecord = new BuildRecord({
+    title: 'test-build',
+    outDir,
+    sourceMaps: false,
+    config: normalizeProjectUserConfig({}),
+    headless: false,
+    treeShake: false,
+  });
+
+  const result = await buildRecord.rebuild({
+    entries: {
+      consumer: [
+        'import { rootValue } from "oms://friendly-plugin";',
+        'import { abcValue } from "oms://friendly-plugin/abc";',
+        'export const value = rootValue + abcValue;',
+      ].join('\n'),
+    },
+    domains: {
+      'some-plugin': domain,
+    },
+    uuidProvider: undefined,
+    config: normalizeProjectUserConfig({}),
+    profileBuildConfig: undefined,
+  });
+
+  expect(result.ok).toBe(true);
+  const outputFile = join(outDir, 'consumer.js');
+  expect(await fs.pathExists(outputFile)).toBe(true);
+  const output = await readSnapshotText(outputFile);
+  expect(output).toContain('const rootValue = 40;');
+  expect(output).toContain('const abcValue = 2;');
+  expect(output).toContain('const value = exports("value", rootValue + abcValue);');
 });
 
 it('builds public export entries without adding a synthetic default export', async () => {

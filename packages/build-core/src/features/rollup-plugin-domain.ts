@@ -17,9 +17,13 @@ export function rollupPluginDomain({
         return null;
       }
       const { domainId, exportSubpath } = parsed;
-      const domain = domains[domainId];
+      const matchingDomains = Object.values(domains).filter((domain) => domain.exportPackageName === domainId);
+      if (matchingDomains.length > 1) {
+        return this.error(`Duplicate OMS export package name: ${domainId}`);
+      }
+      const domain = matchingDomains[0];
       if (!domain) {
-        return this.error(`Domain ${domainId} not found`);
+        return this.error(`OMS export package ${domainId} not found`);
       }
       const exportPathResolved = domain.resolveExport(exportSubpath);
       if (!exportPathResolved) {

@@ -99,9 +99,11 @@ describe('module system', () => {
       'metadata.js': makeMetadataJs([
         ['main', false],
       ], {
+        'some-plugin:.': 'exports/some-plugin/index',
         'some-plugin:a': 'exports/some-plugin/a',
       }),
       'bundle-main.js': makeSimpleSystemJs(``),
+      'exports/some-plugin/index.js': makeSimpleSystemJs(`exports("value", 40)`),
       'exports/some-plugin/a.js': makeSimpleSystemJs(`exports("value", 42)`),
     }, '/__oms_test__/temp/oms/out/');
     moduleSystem = new SceneModuleSystem();
@@ -109,6 +111,12 @@ describe('module system', () => {
     await moduleSystem.reload();
 
     await expect(moduleSystem.import('some-plugin:a')).resolves.toMatchObject({
+      value: 42,
+    });
+    await expect(moduleSystem.import('oms://some-plugin')).resolves.toMatchObject({
+      value: 40,
+    });
+    await expect(moduleSystem.import('oms://some-plugin/a')).resolves.toMatchObject({
       value: 42,
     });
     await expect(moduleSystem.import('a')).rejects.toThrowError(`'a' is not a valid OMS entry module.`);

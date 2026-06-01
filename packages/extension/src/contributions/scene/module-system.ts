@@ -72,7 +72,7 @@ export class SceneModuleSystem {
     if (entry) {
       return this._importOmsEntry(entry);
     }
-    const exportEntryId = this._omsMetadata.exports?.[moduleId];
+    const exportEntryId = this._getExportEntryId(moduleId);
     if (exportEntryId) {
       return this._importOmsEntryById(exportEntryId);
     }
@@ -288,6 +288,14 @@ export class SceneModuleSystem {
     return this._systemJS.import(`${omsURLPrefix}bundle-${entry[0]}.js`);
   }
 
+  private _getExportEntryId(moduleId: string) {
+    const exportEntries = this._omsMetadata?.exports;
+    if (!exportEntries) {
+      return undefined;
+    }
+    return exportEntries[moduleId] ?? exportEntries[toLegacyOmsExportId(moduleId)];
+  }
+
   private _importOmsEntryById(entryId: string): Promise<unknown> {
     return this._systemJS.import(`${omsURLPrefix}${entryId}.js`);
   }
@@ -296,6 +304,32 @@ export class SceneModuleSystem {
 interface OMSMetadata {
   entries: Array<[bundleId: string, isEditorEntry: boolean]>;
   exports?: Record<string, string>;
+}
+
+function toLegacyOmsExportId(moduleId: string) {
+  const parsed = parseOmsImportSpecifier(moduleId);
+  if (!parsed) {
+    return moduleId;
+  }
+  return `${parsed.exportPackageName}:${parsed.exportId}`;
+}
+
+function parseOmsImportSpecifier(moduleId: string) {
+  const match = /^oms:\/\/([^/]+)(?:\/(.*))?$/.exec(moduleId);
+  if (!match) {
+    return undefined;
+  }
+  return {
+    exportPackageName: match[1],
+    exportId: normalizeExportId(match[2] || '.'),
+  };
+}
+
+function normalizeExportId(exportId: string) {
+  if (exportId === '' || exportId === '.') {
+    return '.';
+  }
+  return exportId.replace(/^\.\//, '').replace(/^\/+/, '');
 }
 
 function saveRequiringFrames() {
