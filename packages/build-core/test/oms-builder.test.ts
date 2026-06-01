@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
+import * as ts from 'typescript';
 import { OmsBuilder } from '../src/oms-builder.js';
 import { ServerContext } from '../src/server-context.js';
 
@@ -118,8 +119,111 @@ it('emits OMS export module declarations without a generated tsconfig paths file
   }
 });
 
+it('generates OMS typing proxies from the real export entry path', async () => {
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  const virtualStore = await makeTempDir();
+  const realExtensionRoot = join(virtualStore, 'node_modules', 'linked-extension');
+  const extensionRoot = join(project, 'extensions', 'linked-extension');
+  await fs.ensureDir(join(project, 'extensions'));
+  await fs.outputJson(join(realExtensionRoot, 'package.json'), {
+    name: 'linked-extension',
+    type: 'module',
+  });
+  await outputNodePackage(virtualStore, 'transitive-dep', 'export const X = 1;');
+  await fs.outputJson(join(virtualStore, 'node_modules', 'transitive-dep', 'package.json'), {
+    name: 'transitive-dep',
+    type: 'module',
+    main: './index.js',
+    types: './index.d.ts',
+  });
+  await fs.outputFile(join(virtualStore, 'node_modules', 'transitive-dep', 'index.d.ts'), 'export declare const X: 1;');
+  await fs.outputFile(join(realExtensionRoot, 'exports', 'lib', 'runtime', 'index.js'), 'export * from "transitive-dep";');
+  await fs.outputFile(join(realExtensionRoot, 'exports', 'lib', 'runtime', 'index.d.ts'), 'export * from "transitive-dep";');
+  await fs.outputFile(join(realExtensionRoot, 'oms.config.mjs'), [
+    'export default {',
+    '  exports: {',
+    '    ".": "./exports/lib/runtime/index.js",',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.ensureSymlink(realExtensionRoot, extensionRoot, 'junction');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [
+        {
+          name: 'linked-extension',
+          path: extensionRoot,
+        },
+      ],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const runtimePackagePath = join(project, 'temp', 'oms', 'typing', 'node_modules', '@oms-exports', 'linked-extension', 'index.d.ts');
+    const runtimePackage = (await fs.readFile(runtimePackagePath, 'utf8')).replace(/\\/g, '/');
+    expect(runtimePackage).not.toContain('/extensions/linked-extension/');
+
+    const consumer = join(project, 'src', 'index.ts');
+    await fs.outputFile(consumer, [
+      'import { X } from "oms://linked-extension";',
+      'const value: 1 = X;',
+      'void value;',
+      '',
+    ].join('\n'));
+    expect(typeCheck([consumer], {
+      types: [
+        join(project, 'temp', 'oms', 'typing'),
+      ],
+    })).toEqual([]);
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
 async function makeTempDir() {
   const dir = await fs.mkdtemp(join(tmpdir(), 'oms-builder-'));
   tempDirs.push(dir);
   return dir;
+}
+
+async function outputNodePackage(root: string, packageName: string, source: string, extraPackageJson: Record<string, unknown> = {}) {
+  const packageDir = join(root, 'node_modules', ...packageName.split('/'));
+  await fs.outputJson(join(packageDir, 'package.json'), {
+    name: packageName,
+    type: 'module',
+    main: './index.js',
+    ...extraPackageJson,
+  }, {
+    spaces: 2,
+  });
+  await fs.outputFile(join(packageDir, 'index.js'), source);
+}
+
+function typeCheck(rootNames: string[], overrides: ts.CompilerOptions = {}) {
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.Node16,
+    moduleResolution: ts.ModuleResolutionKind.Node16,
+    strict: true,
+    skipLibCheck: false,
+    noEmit: true,
+    ...overrides,
+  };
+  const program = ts.createProgram(rootNames, options);
+  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+    if (!diagnostic.file || diagnostic.start === undefined) {
+      return message;
+    }
+    const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+    return `${diagnostic.file.fileName}:${line + 1}:${character + 1} ${message}`;
+  });
 }
