@@ -9,7 +9,8 @@
   "author": "Bluesquall Team",
   "files": [
     "dist/**/*",
-    "mount/**/*"
+    "mount/**/*",
+    "types/**/*"
   ],
   "main": "packages/extension/dist/main.cjs",
   "creator": {

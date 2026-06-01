@@ -7,7 +7,7 @@ import type { BuildResult } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { broadcastInner, InnerPackageMessageId } from '../inner-package-messaging.js';
-import { selfExtensionName } from '../self-info.js';
+import { selfExtensionName, selfPackagePath } from '../self-info.js';
 import { SceneMethods } from '../contributions/scene/index.js';
 import { createInterface } from 'node:readline/promises';
 
@@ -181,7 +181,9 @@ export class OmsBuilderAgent extends EventEmitter<{
     const childProcess = cp.spawn('node', ['--inspect', main], {
       stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'],
       env: {
+        ...process.env,
         OMS_BUILDER_CORE_LOG_FD: `${workerLogFd}`,
+        OMS_PACKAGE_ROOT: selfPackagePath,
       },
     });
     if (childProcess.stdout) {
