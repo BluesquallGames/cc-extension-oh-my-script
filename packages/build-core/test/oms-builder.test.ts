@@ -188,6 +188,161 @@ it('generates OMS typing proxies from the real export entry path', async () => {
   }
 });
 
+it('resolves OMS peer imports from the project root', async () => {
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  resolve: {',
+    '    projectPeers: ["peer-pkg"],',
+    '  },',
+    '};',
+  ].join('\n'));
+  const extensionRoot = join(project, 'extensions', 'peer-extension');
+  await outputNodePackage(project, 'peer-pkg', 'export const origin = "project-peer-origin";');
+  await outputNodePackage(extensionRoot, 'peer-pkg', 'export const origin = "extension-peer-origin";');
+  await fs.outputFile(join(extensionRoot, 'exports', 'lib', 'runtime', 'index.js'), 'export { origin } from "#oms-peer:peer-pkg";');
+  await fs.outputFile(join(extensionRoot, 'oms.config.mjs'), [
+    'export default {',
+    '  exports: {',
+    '    ".": "./exports/lib/runtime/index.js",',
+    '  },',
+    '};',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [
+        {
+          name: 'peer-extension',
+          path: extensionRoot,
+        },
+      ],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'exports', 'peer-extension', 'index.js'), 'utf8');
+    expect(output).toContain('project-peer-origin');
+    expect(output).not.toContain('extension-peer-origin');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('resolves OMS peer imports from dependencies outside the extension root', async () => {
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  resolve: {',
+    '    projectPeers: ["peer-pkg"],',
+    '  },',
+    '};',
+  ].join('\n'));
+  const virtualPackageRoot = join(project, 'node_modules', '.pnpm', 'peer-extension@1');
+  const realExtensionRoot = join(virtualPackageRoot, 'node_modules', 'peer-extension');
+  const extensionRoot = join(project, 'extensions', 'peer-extension');
+  await fs.ensureDir(join(project, 'extensions'));
+  await fs.outputJson(join(realExtensionRoot, 'package.json'), {
+    name: 'peer-extension',
+    type: 'module',
+  });
+  await outputNodePackage(project, 'peer-pkg', 'export const origin = "project-peer-origin";');
+  await outputNodePackage(virtualPackageRoot, 'peer-pkg', 'export const origin = "extension-peer-origin";');
+  await outputNodePackage(virtualPackageRoot, 'owned-dep', 'export { origin } from "#oms-peer:peer-pkg";', {
+    peerDependencies: {
+      'peer-pkg': '*',
+    },
+  });
+  await fs.outputFile(join(realExtensionRoot, 'exports', 'lib', 'runtime', 'index.js'), 'export { origin } from "owned-dep";');
+  await fs.outputFile(join(realExtensionRoot, 'oms.config.mjs'), [
+    'export default {',
+    '  exports: {',
+    '    ".": "./exports/lib/runtime/index.js",',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.ensureSymlink(realExtensionRoot, extensionRoot, 'junction');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [
+        {
+          name: 'peer-extension',
+          path: extensionRoot,
+        },
+      ],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'exports', 'peer-extension', 'index.js'), 'utf8');
+    expect(output).toContain('project-peer-origin');
+    expect(output).not.toContain('extension-peer-origin');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('fails OMS peer imports when the project does not provide the peer package', async () => {
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  resolve: {',
+    '    projectPeers: ["peer-pkg"],',
+    '  },',
+    '};',
+  ].join('\n'));
+  const extensionRoot = join(project, 'extensions', 'peer-extension');
+  await outputNodePackage(extensionRoot, 'peer-pkg', 'export const origin = "extension-peer-origin";');
+  await fs.outputFile(join(extensionRoot, 'exports', 'lib', 'runtime', 'index.js'), 'export { origin } from "#oms-peer:peer-pkg";');
+  await fs.outputFile(join(extensionRoot, 'oms.config.mjs'), [
+    'export default {',
+    '  exports: {',
+    '    ".": "./exports/lib/runtime/index.js",',
+    '  },',
+    '};',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [
+        {
+          name: 'peer-extension',
+          path: extensionRoot,
+        },
+      ],
+    })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        message: expect.stringContaining('Failed to resolve OMS peer import #oms-peer:peer-pkg from the project root'),
+      },
+    });
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
 async function makeTempDir() {
   const dir = await fs.mkdtemp(join(tmpdir(), 'oms-builder-'));
   tempDirs.push(dir);

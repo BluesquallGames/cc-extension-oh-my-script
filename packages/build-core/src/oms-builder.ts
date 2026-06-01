@@ -473,6 +473,7 @@ class OmsWatcher extends EventEmitter<{
           entries,
           uuidProvider: this._uuidProvider,
           domains: this._domains,
+          projectRoot: this._projectPath,
           config: this._config,
           profileBuildConfig: undefined,
         });
@@ -767,6 +768,7 @@ class OmsWatcher extends EventEmitter<{
           entries: entries,
           uuidProvider: this._uuidProvider,
           domains: this._domains,
+          projectRoot: this._projectPath,
           config: this._config,
           profileBuildConfig: undefined,
         });
@@ -790,6 +792,7 @@ class OmsWatcher extends EventEmitter<{
           entries: entries,
           uuidProvider: this._uuidProvider,
           domains: this._domains,
+          projectRoot: this._projectPath,
           config: this._config,
           profileBuildConfig: this._config.headless.build,
         });

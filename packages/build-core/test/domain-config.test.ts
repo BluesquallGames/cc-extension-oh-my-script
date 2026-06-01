@@ -183,6 +183,19 @@ it('uses exportPackageName as the public OMS package name', async () => {
   expect(entrySpecs['some-plugin:.']).toBeUndefined();
 });
 
+it('normalizes project peer import package names from project config', () => {
+  const config = normalizeProjectUserConfig({
+    resolve: {
+      projectPeers: ['peer-pkg', '@scope/shared', 'peer-pkg', './invalid', '@scope/shared/runtime'],
+    },
+  });
+
+  expect(config.resolve.projectPeers).toEqual([
+    'peer-pkg',
+    '@scope/shared',
+  ]);
+});
+
 it('creates public export entry specs for __oms_import__', async () => {
   const domainRoot = await makeTempDir();
   const domain = new Domain(

@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { rollupPluginMaybeExternals } from './features/rollup-plugin-maybe-externals.js';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
+import { rollupPluginProjectPeerImports } from './features/rollup-plugin-project-peer-imports.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -35,6 +36,7 @@ export type InternalBuildEntry = string | {
 export interface InternalBuildOptions {
   entries: Record<string, InternalBuildEntry>;
   domains: Record<string, Domain>;
+  projectRoot?: string;
   uuidProvider: UUIDProvider | undefined;
   config: OmsProjectConfig;
   profileBuildConfig: ProfileBuildConfig | undefined;
@@ -272,6 +274,11 @@ export class BuildRecord {
 
       rollupPluginAlias({
         entries: this._buildOptions.config.resolve.alias,
+      }),
+
+      rollupPluginProjectPeerImports({
+        projectPeers: this._buildOptions.config.resolve.projectPeers,
+        projectRoot: options.projectRoot,
       }),
 
       rollupPluginNodeResolve({

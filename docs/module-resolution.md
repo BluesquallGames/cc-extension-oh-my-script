@@ -27,6 +27,43 @@ OMS 支持 pnpm workspace、软链接、junction 和包管理器生成的真实�
 
 如果扩展公开导出依赖了自己的传递依赖，OMS 生成的类型也会尽量保持在真实包上下文中解析，避免因为展示路径不同导致 IDE 看不到导出符号。
 
+## 项目 Peer 依赖
+
+有时候项目和扩展都依赖同一个包，而你希望最终运行时只使用项目根目录安装的那一份，避免同一个库在项目和扩展里各打进来一份。
+
+项目可以在根目录 `oms.config.*` 里声明 `resolve.projectPeers`：
+
+```js
+export default {
+  resolve: {
+    projectPeers: ['shared-runtime', '@scope/ui-kit'],
+  },
+};
+```
+
+扩展代码可以用 `#oms-peer:` 显式声明“这个包由项目提供”：
+
+```ts
+import { createSomething } from '#oms-peer:shared-runtime';
+import { Button } from '#oms-peer:@scope/ui-kit/button';
+```
+
+OMS 会去掉 `#oms-peer:` 前缀，然后从项目根目录解析真实包名。这个规则不关心 importer 在哪里，所以扩展依赖包、workspace link、pnpm store 里的文件也可以显式使用它。
+
+`#oms-peer:` 是强约束：项目必须安装并允许这个包。如果项目没有安装，OMS 会报错，而不是回退到扩展自己的依赖。
+
+`projectPeers` 只写包名，不写子路径：
+
+```js
+export default {
+  resolve: {
+    projectPeers: ['react', '@scope/shared'],
+  },
+};
+```
+
+上面的 `react` 会允许 `#oms-peer:react`、`#oms-peer:react/jsx-runtime` 这类 import；`@scope/shared` 会允许 `#oms-peer:@scope/shared` 及其子路径。
+
 ## alias
 
 项目可以在根目录 `oms.config.*` 中配置 alias：

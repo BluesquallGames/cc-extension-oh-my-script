@@ -18,6 +18,7 @@ export default {
       '@game': './src',
     },
     maybeExternals: ['some-editor-only-package'],
+    projectPeers: ['@scope/shared-runtime'],
   },
   headless: {
     enabled: true,
@@ -37,6 +38,29 @@ export default {
 ### resolve.maybeExternals
 
 `maybeExternals` 适合那些“项目运行时可能有、编辑器环境也可能有”的包。声明后，OMS 会尽量让不同运行环境使用合适的来源。普通项目通常不需要配置它。
+
+### resolve.projectPeers
+
+`projectPeers` 声明哪些包可以通过 `#oms-peer:` 从项目根目录解析。它适合项目和扩展都依赖同一个运行库，并且最终版本应该由项目统一决定的情况。
+
+```js
+export default {
+  resolve: {
+    projectPeers: ['shared-runtime', '@scope/ui-kit'],
+  },
+};
+```
+
+扩展或扩展依赖包里可以显式 import：
+
+```ts
+import { something } from '#oms-peer:shared-runtime';
+import { Button } from '#oms-peer:@scope/ui-kit/button';
+```
+
+OMS 会去掉 `#oms-peer:` 前缀，并从项目根目录解析真实包名。`#oms-peer:` 是显式声明：项目必须安装并允许这个包；如果项目根目录解析不到，构建会报错。
+
+每个条目必须是 bare package name，例如 `react` 或 `@scope/pkg`，不能写相对路径、绝对路径或子路径。`react` 会自动允许 `#oms-peer:react/jsx-runtime` 这类子路径 import。
 
 ### headless
 
@@ -110,18 +134,3 @@ export default {
   },
 };
 ```
-
-### projectPeerDependencies
-
-`projectPeerDependencies` 用来声明某些包应优先从项目根目录解析。它适合扩展依赖链里存在 peer dependency，而最终版本应该由项目决定的情况。
-
-```js
-export default {
-  projectPeerDependencies: ['@feb/core', '@feb/text-field'],
-  exports: {
-    '.': './exports/lib/runtime/index.js',
-  },
-};
-```
-
-每个条目必须是 bare package name，例如 `react` 或 `@scope/pkg`，不能写相对路径、绝对路径或子路径。

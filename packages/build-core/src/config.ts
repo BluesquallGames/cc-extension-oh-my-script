@@ -1,10 +1,13 @@
 import { platform } from 'node:process';
 import picomatch from 'picomatch';
+import { logger } from './logger.js';
+import { getBarePackageName } from './utils/package-name.js';
 
 export interface OmsProjectUserConfig {
   resolve?: {
     alias?: Record<string, string>;
     maybeExternals?: string[];
+    projectPeers?: string[];
   };
 
   headless?: boolean | {
@@ -21,6 +24,7 @@ export interface OmsProjectConfig {
   resolve: {
     alias?: Record<string, string>;
     maybeExternals: undefined | string[];
+    projectPeers: string[];
   };
 
   headless: HeadlessConfig;
@@ -43,11 +47,37 @@ export function normalizeProjectUserConfig(userConfig: OmsProjectUserConfig): Om
       ? {
         alias: userConfig.resolve.alias,
         maybeExternals: userConfig.resolve.maybeExternals,
+        projectPeers: normalizeProjectPeers(userConfig.resolve.projectPeers),
       }
-      : { alias: undefined, maybeExternals: undefined },
+      : { alias: undefined, maybeExternals: undefined, projectPeers: [] },
 
     headless: normalizeUserHeadlessConfig(userConfig.headless),
   };
+}
+
+function normalizeProjectPeers(projectPeers: unknown) {
+  if (projectPeers === undefined) {
+    return [];
+  }
+  if (!Array.isArray(projectPeers)) {
+    logger.error('resolve.projectPeers should be an array of package names');
+    return [];
+  }
+
+  const normalized = new Set<string>();
+  for (const peer of projectPeers) {
+    if (typeof peer !== 'string' || peer.length === 0) {
+      logger.error('resolve.projectPeers entries should be non-empty package names');
+      continue;
+    }
+    const packageName = getBarePackageName(peer);
+    if (packageName !== peer) {
+      logger.error(`resolve.projectPeers entry ${peer} should be a bare package name`);
+      continue;
+    }
+    normalized.add(packageName);
+  }
+  return [...normalized];
 }
 
 export type OmsUserConfig = OmsProjectUserConfig;
