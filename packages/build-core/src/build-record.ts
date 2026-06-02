@@ -19,7 +19,6 @@ import type { OmsProjectConfig, ProfileBuildConfig } from './config.js';
 import { logger } from './logger.js';
 import type { Domain } from './domain.js';
 import { join } from 'node:path';
-import { rollupPluginMaybeExternals } from './features/rollup-plugin-maybe-externals.js';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
 import { rollupPluginProjectPeerImports } from './features/rollup-plugin-project-peer-imports.js';
@@ -244,12 +243,6 @@ export class BuildRecord {
       rollupPluginMemoryModules({
         modules: memoryModules,
       }),
-
-      this._buildOptions.config.resolve.maybeExternals
-        ? rollupPluginMaybeExternals({
-          maybeExternals: this._buildOptions.config.resolve.maybeExternals ?? [],
-        })
-        : undefined,
 
       rollupPluginDomain({
         domains: options.domains,

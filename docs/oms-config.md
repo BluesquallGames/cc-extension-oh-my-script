@@ -17,7 +17,6 @@ export default {
     alias: {
       '@game': './src',
     },
-    maybeExternals: ['some-editor-only-package'],
     projectPeers: ['@scope/shared-runtime'],
   },
   headless: {
@@ -34,10 +33,6 @@ export default {
 ### resolve.alias
 
 `resolve.alias` 用来配置导入别名。适合给项目源码、共享目录或本地包起一个稳定名字。
-
-### resolve.maybeExternals
-
-`maybeExternals` 适合那些“项目运行时可能有、编辑器环境也可能有”的包。声明后，OMS 会尽量让不同运行环境使用合适的来源。普通项目通常不需要配置它。
 
 ### resolve.projectPeers
 

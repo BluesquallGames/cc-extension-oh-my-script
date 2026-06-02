@@ -107,17 +107,3 @@ import { createTextFieldInspector } from 'oms://text-field/editor';
 ```
 
 `oms://` 适合扩展对项目暴露稳定 API。用户代码不应该直接 import 扩展内部文件路径。
-
-## 编辑器环境里的包
-
-少数包在预览环境和编辑器环境来源不同，可以通过 `resolve.maybeExternals` 声明：
-
-```js
-export default {
-  resolve: {
-    maybeExternals: ['some-editor-package'],
-  },
-};
-```
-
-普通项目通常不需要配置它。

@@ -6,7 +6,6 @@ import { getBarePackageName } from './utils/package-name.js';
 export interface OmsProjectUserConfig {
   resolve?: {
     alias?: Record<string, string>;
-    maybeExternals?: string[];
     projectPeers?: string[];
   };
 
@@ -23,7 +22,6 @@ export interface OmsProjectUserConfig {
 export interface OmsProjectConfig {
   resolve: {
     alias?: Record<string, string>;
-    maybeExternals: undefined | string[];
     projectPeers: string[];
   };
 
@@ -46,10 +44,9 @@ export function normalizeProjectUserConfig(userConfig: OmsProjectUserConfig): Om
     resolve: userConfig.resolve
       ? {
         alias: userConfig.resolve.alias,
-        maybeExternals: userConfig.resolve.maybeExternals,
         projectPeers: normalizeProjectPeers(userConfig.resolve.projectPeers),
       }
-      : { alias: undefined, maybeExternals: undefined, projectPeers: [] },
+      : { alias: undefined, projectPeers: [] },
 
     headless: normalizeUserHeadlessConfig(userConfig.headless),
   };
