@@ -63,7 +63,7 @@ import { TextField } from 'oms://text-field';
 
 ## 运行时动态导入
 
-OMS 在 AssetDB 启动后会把 `__oms_import__` 挂到 `globalThis` 上。需要动态加载公开入口时，可以使用：
+启用 `globalImport` 的 OMS 运行环境会在脚本 reload 成功后把 `__oms_import__` 挂到 `globalThis` 上。目前 AssetDB 和 Scene 进程都会启用。需要动态加载公开入口时，可以使用：
 
 ```ts
 const { TextField } = await globalThis.__oms_import__('oms://text-field');

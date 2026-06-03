@@ -69,6 +69,7 @@ vi.hoisted(() => {
 
 beforeEach(() => {
   vol.reset();
+  Reflect.deleteProperty(globalThis, '__oms_import__');
 });
 
 describe('module system', () => {
@@ -120,6 +121,36 @@ describe('module system', () => {
       value: 42,
     });
     await expect(moduleSystem.import('a')).rejects.toThrowError(`'a' is not a valid OMS entry module.`);
+  });
+
+  it('does not install global import by default', async () => {
+    await moduleSystem.reload();
+
+    expect(globalThis).not.toHaveProperty('__oms_import__');
+  });
+
+  it('installs global import when enabled', async () => {
+    vol.fromJSON({
+      'metadata.js': makeMetadataJs([
+        ['main', false],
+      ], {
+        'some-plugin:.': 'exports/some-plugin/index',
+      }),
+      'bundle-main.js': makeSimpleSystemJs(``),
+      'exports/some-plugin/index.js': makeSimpleSystemJs(`exports("value", 40)`),
+    }, '/__oms_test__/temp/oms/out/');
+    moduleSystem = new SceneModuleSystem({
+      globalImport: true,
+    });
+
+    await moduleSystem.reload();
+
+    expect(globalThis).toHaveProperty('__oms_import__');
+    await expect((globalThis as unknown as {
+      __oms_import__: (moduleId: string) => Promise<unknown>;
+    }).__oms_import__('oms://some-plugin')).resolves.toMatchObject({
+      value: 40,
+    });
   });
 });
 

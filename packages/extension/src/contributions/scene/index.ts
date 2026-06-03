@@ -5,7 +5,9 @@ import { SceneScriptManager } from './scene-script-manager.js';
 let sceneScriptManager: SceneScriptManager | undefined;
 
 export async function load() {
-  sceneScriptManager = new SceneScriptManager();
+  sceneScriptManager = new SceneScriptManager({
+    globalImport: true,
+  });
 }
 
 declare global {

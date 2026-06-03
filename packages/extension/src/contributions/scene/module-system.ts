@@ -26,8 +26,13 @@ type ReloadTaskMap = {
   reload: () => Promise<void>;
 };
 
+export interface SceneModuleSystemOptions {
+  globalImport?: boolean;
+}
+
 export class SceneModuleSystem {
-  constructor() {
+  constructor(options: SceneModuleSystemOptions = {}) {
+    this._globalImport = options.globalImport ?? false;
     this._systemJS = new SystemJS();
     const vendorCreateContext = this._systemJS.createContext.bind(this._systemJS);
     this._systemJS.createContext = this._createContext.bind(this, vendorCreateContext);
@@ -56,6 +61,7 @@ export class SceneModuleSystem {
         logger.debug(`${this._runningReloadingLogTag}Started.`);
         try {
           await this._doReload();
+          this._installGlobalImport();
         } finally {
           this._runningReloadState.pending = false;
         }
@@ -81,6 +87,7 @@ export class SceneModuleSystem {
 
   private _systemJS: SystemJS;
   private _registryManagement: RegistryManagement;
+  private _globalImport: boolean;
   private _externalSystemJSModules: string[] = [];
   private _instantiatedHotModules: Set<string> = new Set();
   private _omsModuleDir: string;
@@ -127,6 +134,20 @@ export class SceneModuleSystem {
     } finally {
       disposeClassRegistrationContext();
     }
+  }
+
+  private _installGlobalImport() {
+    if (!this._globalImport) {
+      return;
+    }
+    Object.defineProperty(globalThis, '__oms_import__', {
+      value: (moduleId: string) => {
+        return this.import(moduleId);
+      },
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
   }
 
   private _createContext(vendorCreateContext: typeof this._systemJS.createContext, id: string) {

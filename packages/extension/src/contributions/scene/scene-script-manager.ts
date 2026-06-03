@@ -1,8 +1,14 @@
 import { SceneModuleSystem } from './module-system.js';
 
+export interface SceneScriptManagerOptions {
+  globalImport?: boolean;
+}
+
 export class SceneScriptManager {
-  constructor() {
-    this._moduleSystem = new SceneModuleSystem();
+  constructor(options: SceneScriptManagerOptions = {}) {
+    this._moduleSystem = new SceneModuleSystem({
+      globalImport: options.globalImport,
+    });
   }
 
   async reload() {
