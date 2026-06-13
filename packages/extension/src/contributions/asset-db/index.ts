@@ -16,6 +16,10 @@ enum AssetDBRuntimePhase {
   ready = 'ready',
 }
 
+const firstBuildSyncTaskName = `${selfExtensionName}:first-build`;
+const firstBuildSyncTaskMessage = `Building ${selfExtensionName} project scripts...`;
+const firstBuildSyncTaskDetail = 'Waiting for first build';
+
 export async function load() {
   firstBuildResult = undefined;
   runtimePhase = AssetDBRuntimePhase.starting;
@@ -53,6 +57,12 @@ export const methods = {
     void assetDBInfo;
     logger.debug(`Wait for ${selfExtensionName} first build...`);
     const timeoutSec = 1 * 60;
+    Editor.Task.__protected__.addSyncTask(firstBuildSyncTaskName, firstBuildSyncTaskMessage);
+    Editor.Task.__protected__.updateSyncTask(
+      firstBuildSyncTaskName,
+      firstBuildSyncTaskMessage,
+      firstBuildSyncTaskDetail,
+    );
     try {
       firstBuildResult = await Promise.race([
         requestSelfWorkerMessage('rebuild', {
@@ -66,6 +76,8 @@ export const methods = {
       logger.debug(`${selfExtensionName} first build done: %o`, firstBuildResult);
     } catch (err) {
       logger.error(`${selfExtensionName} first build failed: %o`, err);
+    } finally {
+      Editor.Task.__protected__.removeSyncTask(firstBuildSyncTaskName);
     }
   },
 

@@ -8,8 +8,15 @@ const mockState = vi.hoisted(() => {
     reloadWaiters: [] as Array<Promise<void>>,
     ensureReadyWaiters: [] as Array<Promise<void>>,
     requestCalls: [] as Array<{ messageId: string; args: unknown[] }>,
+    syncTaskCalls: [] as Array<{
+      type: 'add' | 'update' | 'remove';
+      name: string;
+      message?: string;
+      detail?: string;
+    }>,
     installGlobalImportCalls: 0,
     rebuildResult: { ok: true, beginningModules: ['src/index.ts'] } as BuildResult,
+    rebuildError: undefined as Error | undefined,
   };
 });
 
@@ -30,6 +37,9 @@ vi.mock(import('../src/utils/request-self.js'), () => {
         args,
       });
       if (messageId === 'rebuild') {
+        if (mockState.rebuildError) {
+          throw mockState.rebuildError;
+        }
         return mockState.rebuildResult;
       }
       if (messageId === 'ensure-runtime-build') {
@@ -74,20 +84,96 @@ vi.mock(import('../src/contributions/scene/oms-script-runtime.js'), () => {
 
 beforeEach(() => {
   vi.resetModules();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
   mockState.reloadCalls.length = 0;
   mockState.ensureReadyCalls.length = 0;
   mockState.reloadWaiters.length = 0;
   mockState.ensureReadyWaiters.length = 0;
   mockState.requestCalls.length = 0;
+  mockState.syncTaskCalls.length = 0;
   mockState.installGlobalImportCalls = 0;
   mockState.rebuildResult = {
     ok: true,
     beginningModules: ['src/index.ts'],
   };
+  mockState.rebuildError = undefined;
+  vi.stubGlobal('Editor', {
+    Task: {
+      __protected__: {
+        addSyncTask: vi.fn((name: string, message: string) => {
+          mockState.syncTaskCalls.push({
+            type: 'add',
+            name,
+            message,
+          });
+        }),
+        updateSyncTask: vi.fn((name: string, message: string, detail?: string) => {
+          mockState.syncTaskCalls.push({
+            type: 'update',
+            name,
+            message,
+            detail,
+          });
+        }),
+        removeSyncTask: vi.fn((name: string) => {
+          mockState.syncTaskCalls.push({
+            type: 'remove',
+            name,
+          });
+        }),
+      },
+    },
+  });
 });
 
 describe('asset-db OMS runtime startup', () => {
+  it('shows an OMS first-build sync task while waiting for startup build', async () => {
+    /// @case
+    /// 1. asset-db beforePreStart waits for the OMS first build.
+    /// 2. The build succeeds.
+    /// @expect
+    /// Vortex startup shows an independent OMS first-build task and removes it after the wait.
+    const assetDb = await import('../src/contributions/asset-db/index');
+
+    await assetDb.methods.beforePreStart({});
+
+    expect(mockState.syncTaskCalls).toEqual([
+      {
+        type: 'add',
+        name: 'oh-my-script:first-build',
+        message: 'Building oh-my-script project scripts...',
+      },
+      {
+        type: 'update',
+        name: 'oh-my-script:first-build',
+        message: 'Building oh-my-script project scripts...',
+        detail: 'Waiting for first build',
+      },
+      {
+        type: 'remove',
+        name: 'oh-my-script:first-build',
+      },
+    ]);
+  });
+
+  it('removes the OMS first-build sync task when startup build fails', async () => {
+    /// @case
+    /// 1. asset-db beforePreStart waits for the OMS first build.
+    /// 2. The build request throws.
+    /// @expect
+    /// The OMS first-build startup task is still removed so the homepage is not stuck.
+    mockState.rebuildError = new Error('worker unavailable');
+    const assetDb = await import('../src/contributions/asset-db/index');
+
+    await assetDb.methods.beforePreStart({});
+
+    expect(mockState.syncTaskCalls.at(-1)).toEqual({
+      type: 'remove',
+      name: 'oh-my-script:first-build',
+    });
+  });
+
   it('lets afterPreStart own the first asset-db reload and accepts build reloads only after startup', async () => {
     /// @case
     /// 1. asset-db loads OMS and starts its first build in beforePreStart.

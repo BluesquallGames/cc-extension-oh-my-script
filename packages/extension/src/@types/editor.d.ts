@@ -16,6 +16,14 @@ declare namespace Editor {
       function off(id: string, callback: (...args: any[]) => void): void;
     }
   }
+
+  namespace Task {
+    namespace __protected__ {
+      function addSyncTask(name: string, message: string): void;
+      function updateSyncTask(name: string, message: string, detail?: string): void;
+      function removeSyncTask(name: string): void;
+    }
+  }
 }
 
 declare module 'cc/editor/populate-internal-constants' {
