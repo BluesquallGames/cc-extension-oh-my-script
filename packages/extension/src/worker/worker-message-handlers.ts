@@ -7,8 +7,12 @@ omsBuilderAgent.addListener('setup', () => {
 });
 
 export const workerMessageHandlers = {
-  'rebuild': async () => {
-    return await omsBuilderAgent.rebuild();
+  'rebuild': async (opts) => {
+    return await omsBuilderAgent.rebuild(opts);
+  },
+
+  'ensure-runtime-build': async () => {
+    return await omsBuilderAgent.ensureRuntimeBuild();
   },
 
   'restart': async () => {

@@ -15,10 +15,20 @@ export type BuildResult = {
   beginningModules: string[];
 } | {
   ok: false;
+  error: {
+    message: string;
+    stack?: string;
+  };
 };
 
+export interface RebuildOptions {
+  reason?: string;
+  reloadAssetDbRuntime?: boolean;
+}
+
 export const workerMessageDescriptions = {
-  'rebuild': defineWorkerMessage<() => Promise<BuildResult>>(),
+  'rebuild': defineWorkerMessage<(opts?: RebuildOptions) => Promise<BuildResult>>(),
+  'ensure-runtime-build': defineWorkerMessage<() => Promise<BuildResult>>(),
   'restart': defineWorkerMessage<() => void>(),
   'inline-uuids': defineWorkerMessage<() => void>(),
   'build-prod': defineWorkerMessage<(opts: Parameters<OmsBuilderAgent['buildProd']>[0]) => void>(),

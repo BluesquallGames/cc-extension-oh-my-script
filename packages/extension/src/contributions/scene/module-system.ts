@@ -196,20 +196,9 @@ export class SceneModuleSystem {
   }
 
   private async _instantiateExternalSystemJSModule(id: string, parent?: string, meta?: ModuleRequestMeta): Promise<Registration> {
-    const m = await (globalThis as unknown as {
-      System: SystemJS;
-    }).System.import(id, parent, meta);
+    const m = await importBuiltinExternalModule(id);
     this._checkReloadState();
-    return [
-      [],
-      (_export) => {
-        return {
-          execute: () => {
-            _export(m);
-          },
-        };
-      },
-    ] as const;
+    return makeExternalModuleRegistration(m);
   }
 
   private async _instantiateSystemJSModuleFile(path: string) {
@@ -351,6 +340,50 @@ function normalizeExportId(exportId: string) {
     return '.';
   }
   return exportId.replace(/^\.\//, '').replace(/^\/+/, '');
+}
+
+async function importBuiltinExternalModule(id: string) {
+  switch (id) {
+  case 'cc':
+    return normalizeDynamicImportedModule(await import('cc'));
+  case 'cc/env':
+    return normalizeDynamicImportedModule(await import('cc/editor/populate-internal-constants'));
+  default:
+    throw new Error(`Unsupported OMS external module ${id}`);
+  }
+}
+
+function makeExternalModuleRegistration(moduleExports: Record<string, unknown>): Registration {
+  return [
+    [],
+    (_export) => {
+      return {
+        execute: () => {
+          _export(moduleExports);
+        },
+      };
+    },
+  ] as const;
+}
+
+function normalizeDynamicImportedModule(mod: unknown): Record<string, unknown> {
+  if (!isModuleRecord(mod)) {
+    throw new Error(`OMS external module did not provide an export object.`);
+  }
+
+  const keys = Object.keys(mod).filter((key) => key !== '__esModule');
+  if ('default' in mod) {
+    const defaultExport = mod.default;
+    if (keys.length === 1 && isModuleRecord(defaultExport)) {
+      return defaultExport;
+    }
+  }
+
+  return mod;
+}
+
+function isModuleRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object';
 }
 
 function saveRequiringFrames() {

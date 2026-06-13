@@ -17,3 +17,8 @@ declare namespace Editor {
     }
   }
 }
+
+declare module 'cc/editor/populate-internal-constants' {
+  const constants: Record<string, unknown>;
+  export default constants;
+}

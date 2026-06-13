@@ -3,7 +3,7 @@ import { logger } from '../logger.js';
 import { Ipc, type InvocationMessage, type ClientInvocationMethodId, type ServerInvocationMethodId, setLogger, type BuildOptions, type ExtensionBuildOptions, BuildResult as ProtocolBuildResult } from '@oms/build-core/protocol';
 import { addEditorBroadcastListener } from '../utils/editor/common.js';
 import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
-import type { BuildResult } from './worker-message-descriptions.js';
+import type { BuildResult, RebuildOptions } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { broadcastInner, InnerPackageMessageId } from '../inner-package-messaging.js';
@@ -63,7 +63,56 @@ export class OmsBuilderAgent extends EventEmitter<{
     }
   }
 
-  async rebuild(): Promise<BuildResult> {
+  async rebuild(opts: RebuildOptions = {}): Promise<BuildResult> {
+    const reason = opts.reason ?? 'rebuild()';
+    const t0 = Date.now();
+    const rebuildResult = await this._getOrStartBuild();
+    logger.debug(`${logTag}Rebuild ok in ${Date.now() - t0}ms, let's handle the result`);
+    await this._handleBuildResult(rebuildResult, reason, {
+      reloadAssetDbRuntime: opts.reloadAssetDbRuntime ?? true,
+    });
+    logger.debug(`${logTag}Rebuild done in ${Date.now() - t0}ms`);
+    return this._toWorkerBuildResult(rebuildResult);
+  }
+
+  async ensureRuntimeBuild(): Promise<BuildResult> {
+    const t0 = Date.now();
+    const rebuildResult = await this._ensureRuntimeBuildResult();
+    logger.debug(`${logTag}Runtime build ensured in ${Date.now() - t0}ms`);
+    return this._toWorkerBuildResult(rebuildResult);
+  }
+
+  private async _ensureRuntimeBuildResult(): Promise<ProtocolBuildResult> {
+    if (this._currentBuildPromise) {
+      return await this._currentBuildPromise;
+    }
+    if (this._lastBuildResult?.ok) {
+      return this._lastBuildResult;
+    }
+    return await this._getOrStartBuild();
+  }
+
+  private async _getOrStartBuild(): Promise<ProtocolBuildResult> {
+    if (this._currentBuildPromise) {
+      return await this._currentBuildPromise;
+    }
+    return await this._runTrackedRebuild();
+  }
+
+  private _runTrackedRebuild(): Promise<ProtocolBuildResult> {
+    const buildPromise = this._runRebuild().then((buildResult) => {
+      this._rememberBuildResult(buildResult);
+      return buildResult;
+    }).finally(() => {
+      if (this._currentBuildPromise === buildPromise) {
+        this._currentBuildPromise = undefined;
+      }
+    });
+    this._currentBuildPromise = buildPromise;
+    return buildPromise;
+  }
+
+  private async _runRebuild(): Promise<ProtocolBuildResult> {
     switch (this._state.type) {
     case StateType.closing:
       throw new Error(`${logTag} is closing`);
@@ -71,19 +120,8 @@ export class OmsBuilderAgent extends EventEmitter<{
 
     const serverAgent = await this._setup();
     const buildOptions = await this._makeBuildOptions();
-    const t0 = Date.now();
     logger.debug(`${logTag}Rebuild with options: %o`, buildOptions);
-    const rebuildResult = await serverAgent.ipc.invoke('rebuild', buildOptions);
-    logger.debug(`${logTag}Rebuild ok in ${Date.now() - t0}ms, let's handle the result`);
-    await this._handleBuildResult(rebuildResult, 'rebuild()');
-    logger.debug(`${logTag}Rebuild done in ${Date.now() - t0}ms`);
-    if (!rebuildResult.ok) {
-      return rebuildResult;
-    }
-    return {
-      ok: true,
-      beginningModules: rebuildResult.affectedFiles,
-    };
+    return await serverAgent.ipc.invoke('rebuild', buildOptions);
   }
 
   async restart() {
@@ -128,6 +166,8 @@ export class OmsBuilderAgent extends EventEmitter<{
     };
 
   private _setupPromise: Promise<ServerAgent> | undefined = undefined;
+  private _currentBuildPromise: Promise<ProtocolBuildResult> | undefined = undefined;
+  private _lastBuildResult: ProtocolBuildResult | undefined = undefined;
   private _pingPongDuration = 5;
   private _pongReceived = false;
 
@@ -262,6 +302,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     });
 
     ipc.listen('build-start', async (opts) => {
+      this._handleBuildStart();
       broadcastInner(InnerPackageMessageId.buildStart, {
         ...opts,
       });
@@ -297,6 +338,7 @@ export class OmsBuilderAgent extends EventEmitter<{
   }
 
   private async _updateBuildOptions() {
+    this._invalidateBuildResult();
     const buildOptions = await this._makeBuildOptions();
     const serverAgent = await this._setupPromise;
     if (!serverAgent) {
@@ -324,8 +366,14 @@ export class OmsBuilderAgent extends EventEmitter<{
     };
   }
 
-  private async _handleBuildResult(buildResult: ProtocolBuildResult, reason: string) {
+  private async _handleBuildResult(
+    buildResult: ProtocolBuildResult,
+    reason: string,
+    opts: HandleBuildResultOptions = {},
+  ) {
+    this._rememberBuildResult(buildResult);
     if (buildResult.ok) {
+      const reloadAssetDbRuntime = opts.reloadAssetDbRuntime ?? true;
       // 不要在这里 await，因为场景进程可能正在等待 db，而 db 又在等待我们，造成死循环。
       Editor.Message.request('scene', 'execute-scene-script', {
         name: selfExtensionName,
@@ -334,6 +382,15 @@ export class OmsBuilderAgent extends EventEmitter<{
       }).catch((err) => {
         logger.error(`execute-scene-script failed: ${err}`);
       });
+      if (reloadAssetDbRuntime) {
+        Editor.Message.request('asset-db', 'execute-script', {
+          name: selfExtensionName,
+          method: 'reloadRuntime',
+          args: [reason],
+        }).catch((err) => {
+          logger.error(`reload asset-db OMS runtime failed: ${err}`);
+        });
+      }
 
       for (const file of buildResult.affectedFiles) {
         logger.debug(`${logTag}Reimport asset: %s`, file);
@@ -343,11 +400,37 @@ export class OmsBuilderAgent extends EventEmitter<{
       logger.error(`${buildResult.error.message}`);
     }
   }
+
+  private _handleBuildStart() {
+    this._invalidateBuildResult();
+  }
+
+  private _rememberBuildResult(buildResult: ProtocolBuildResult) {
+    this._lastBuildResult = buildResult;
+  }
+
+  private _invalidateBuildResult() {
+    this._lastBuildResult = undefined;
+  }
+
+  private _toWorkerBuildResult(buildResult: ProtocolBuildResult): BuildResult {
+    if (!buildResult.ok) {
+      return buildResult;
+    }
+    return {
+      ok: true,
+      beginningModules: buildResult.affectedFiles,
+    };
+  }
 }
 
 interface ServerAgent {
   ipc: Ipc<ClientInvocationMethodId, ServerInvocationMethodId>;
   childProcess: cp.ChildProcess;
+}
+
+interface HandleBuildResultOptions {
+  reloadAssetDbRuntime?: boolean;
 }
 
 enum StateType {
