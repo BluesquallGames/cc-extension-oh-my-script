@@ -22,12 +22,26 @@ const logStream = (() => {
     return undefined;
   }
   try {
-    return createWriteStream('', { fd: logFd });
+    const stream = createWriteStream('', { fd: logFd });
+    stream.on('error', (err) => {
+      if (process.connected === false) {
+        return;
+      }
+      console.error(`OMS build-core log stream failed: ${err}`);
+    });
+    return stream;
   } catch (err) {
     console.error(`createWriteStream failed: ${err}`);
     return undefined;
   }
 })();
+
+const dropAfterIpcDisconnect = winston.format((info) => {
+  if (process.connected === false) {
+    return false;
+  }
+  return info;
+});
 
 const printf = () => winston.format.printf(({ level, message, timestamp }) => {
   let output = '';
@@ -40,6 +54,7 @@ const printf = () => winston.format.printf(({ level, message, timestamp }) => {
 
 export let logger = winston.createLogger({
   format: winston.format.combine(
+    dropAfterIpcDisconnect(),
     winston.format.errors({ stack: true }),
     winston.format.splat(),
   ),

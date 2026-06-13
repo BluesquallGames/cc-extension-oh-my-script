@@ -75,6 +75,19 @@ export class OmsBuilder extends EventEmitter<{
     });
   }
 
+  async close(options: CloseOptions = {}) {
+    const abortPromise = this._taskQueue.abort();
+    if (options.waitForTasks ?? true) {
+      await abortPromise;
+    } else {
+      abortPromise.catch((err) => {
+        logger.error(`Failed to abort OMS builder task queue: %o`, err);
+      });
+    }
+    await this._clean(options);
+    this.removeAllListeners();
+  }
+
   private _projectPath: string;
   private _configWatcher: OmsProjectConfigWatcher | undefined;
   private _watcher: OmsWatcher | undefined;
@@ -89,7 +102,7 @@ export class OmsBuilder extends EventEmitter<{
     buildProd: () => void;
   }>();
 
-  private async _clean() {
+  private async _clean(options: CloseOptions = {}) {
     const configWatcher = this._configWatcher;
     if (configWatcher) {
       this._configWatcher = undefined;
@@ -98,7 +111,7 @@ export class OmsBuilder extends EventEmitter<{
     const watcher = this._watcher;
     if (watcher) {
       this._watcher = undefined;
-      await watcher.close();
+      await watcher.close(options);
     }
   }
 
@@ -176,6 +189,10 @@ export class OmsBuilder extends EventEmitter<{
 interface BuildProfile {
   outDir: string;
   typingOutDir: string;
+}
+
+interface CloseOptions {
+  waitForTasks?: boolean;
 }
 
 async function createProfileOutDirs(profile: BuildProfile) {
@@ -403,11 +420,18 @@ class OmsWatcher extends EventEmitter<{
     await this._loadCentralizedUUIDs();
   }
 
-  async close() {
+  async close(options: CloseOptions = {}) {
+    const abortPromise = this._taskQueue.abort();
+    if (options.waitForTasks ?? true) {
+      await abortPromise;
+    } else {
+      abortPromise.catch((err) => {
+        logger.error(`Failed to abort OMS watcher task queue: %o`, err);
+      });
+    }
     await this._fileWatcher.close();
     await Promise.all(Object.values(this._domainConfigWatchers).map((watcher) => watcher.close()));
     this._domainConfigWatchers = {};
-    await this._taskQueue.abort();
   }
 
   async updateBuildOptions(options: BuildOptions) {

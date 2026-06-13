@@ -2,6 +2,10 @@ import assert from 'node:assert';
 import { OmsBuilder } from './oms-builder.js';
 import { ServerContext } from './server-context.js';
 
+export interface MessageHandlerRegistry {
+  close(): Promise<void>;
+}
+
 export function registerMessageHandlers(ctx: ServerContext) {
   let globalOmsBuilder: OmsBuilder | undefined = undefined;
 
@@ -33,6 +37,14 @@ export function registerMessageHandlers(ctx: ServerContext) {
   ctx.ipc.listen('ping', async () => {
     ctx.ipc.invoke('pong', undefined);
   });
+
+  return {
+    async close() {
+      const omsBuilder = globalOmsBuilder;
+      globalOmsBuilder = undefined;
+      await omsBuilder?.close({ waitForTasks: false });
+    },
+  } satisfies MessageHandlerRegistry;
 
   function ensureOmsBuilder() {
     assert(globalOmsBuilder, 'omsBuilder not setup');
