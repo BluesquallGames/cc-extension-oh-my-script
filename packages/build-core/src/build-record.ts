@@ -22,6 +22,8 @@ import { join } from 'node:path';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
 import { rollupPluginProjectPeerImports } from './features/rollup-plugin-project-peer-imports.js';
+import { createProjectDefine } from './env.js';
+import { rollupPluginDefine } from './features/rollup-plugin-define.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -86,6 +88,7 @@ export class BuildRecord {
     config: OmsProjectConfig;
     headless: boolean;
     treeShake?: boolean;
+    mode?: string;
   }) {
     this._title = options.title;
     this._outDir = options.outDir;
@@ -94,6 +97,7 @@ export class BuildRecord {
     this._debug = options.debug ?? true;
     this._ccEnvParams = options.ccEnvParams;
     this._treeShake = options.treeShake ?? true;
+    this._mode = options.mode;
     this._buildOptions = {
       entries: {},
       uuidProvider: undefined,
@@ -133,6 +137,7 @@ export class BuildRecord {
   private _sourceMaps: boolean | 'inline';
   private _debug: boolean;
   private _treeShake: boolean;
+  private _mode: string | undefined;
   private _suppressRollupWarningCodes = [
     'CIRCULAR_DEPENDENCY',
     'THIS_IS_UNDEFINED',
@@ -195,6 +200,13 @@ export class BuildRecord {
       externals.push('cc/env');
     }
 
+    const projectDefine = await createProjectDefine({
+      config: options.config,
+      projectRoot: options.projectRoot,
+      mode: this._mode,
+    });
+    const projectDefineSignature = JSON.stringify(projectDefine.define);
+
     const uuidProvider = options.uuidProvider;
     const inputPlugins: (rollup.Plugin | undefined)[] = [
       {
@@ -210,6 +222,20 @@ export class BuildRecord {
           if (uuid !== previousUUID) {
             logger.debug(`UUID of ${options.id} changed from ${previousUUID} to ${uuid}, invalidate its cache`);
             this.cache.set(cacheKey, uuid);
+            return true;
+          }
+          return undefined;
+        },
+      },
+
+      {
+        name: 'oms:define-cache',
+
+        shouldTransformCachedModule(options) {
+          const cacheKey = ROLLUP_MODULE_CACHE_KEY_DEFINE + ':' + options.id;
+          const previousSignature = this.cache.get(cacheKey);
+          if (previousSignature !== projectDefineSignature) {
+            this.cache.set(cacheKey, projectDefineSignature);
             return true;
           }
           return undefined;
@@ -291,6 +317,12 @@ export class BuildRecord {
       this._makeRollupBabelPlugin({
         uuidProvider: options.uuidProvider,
         decorators: true,
+      }),
+
+      rollupPluginDefine({
+        define: projectDefine.define,
+        watchFiles: projectDefine.watchFiles,
+        sourcemap: this._sourceMaps,
       }),
 
       {
@@ -410,6 +442,7 @@ export class BuildRecord {
 }
 
 const ROLLUP_MODULE_CACHE_KEY_UUID = '__oms_uuid__';
+const ROLLUP_MODULE_CACHE_KEY_DEFINE = '__oms_define__';
 
 function toBabelEnvTarget(target: string | undefined): TargetsOptions {
   if (!target) {

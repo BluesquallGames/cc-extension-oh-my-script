@@ -344,6 +344,438 @@ it('fails OMS peer imports when the project does not provide the peer package', 
   }
 });
 
+it('replaces project define expressions during build', async () => {
+  /// @case
+  /// 1. The project declares JavaScript expression replacements in oms.config.mjs.
+  /// 2. A source entry references those expressions and keeps the same token inside a string literal.
+  /// @expect
+  /// The emitted OMS bundle contains the configured expressions, while string literal text is untouched.
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  define: {',
+    '    __OMS_STRING__: JSON.stringify("defined-value"),',
+    '    __OMS_BOOL__: true,',
+    '    __OMS_OBJECT__: { nested: 1 },',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const values = [',
+    '  __OMS_STRING__,',
+    '  __OMS_BOOL__,',
+    '  __OMS_OBJECT__.nested,',
+    '  "__OMS_STRING__",',
+    '];',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('defined-value');
+    expect(output).toContain('true');
+    expect(output).toContain('nested');
+    expect(output).toContain('"__OMS_STRING__"');
+    expect(output).not.toContain('__OMS_BOOL__');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('loads OMS-prefixed dotenv files into import.meta.env', async () => {
+  /// @case
+  /// 1. The project declares staging mode and the default OMS_ env prefix.
+  /// 2. .env, .env.local, .env.staging, .env.staging.local, and process.env provide overlapping values.
+  /// @expect
+  /// import.meta.env uses Vite-like file priority, process env wins, unprefixed keys stay private, and unknown env reads become undefined.
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  mode: "staging",',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, '.env'), [
+    'OMS_BASE=base',
+    'OMS_SHARED=base',
+    'OMS_EXPAND=${OMS_BASE}-expanded',
+    'OMS_PROCESS=file',
+    'PRIVATE_SECRET=hidden',
+  ].join('\n'));
+  await fs.outputFile(join(project, '.env.local'), [
+    'OMS_SHARED=local',
+  ].join('\n'));
+  await fs.outputFile(join(project, '.env.staging'), [
+    'OMS_SHARED=staging',
+  ].join('\n'));
+  await fs.outputFile(join(project, '.env.staging.local'), [
+    'OMS_SHARED=staging-local',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const values = [',
+    '  import.meta.env.OMS_SHARED,',
+    '  import.meta.env.OMS_EXPAND,',
+    '  import.meta.env.OMS_PROCESS,',
+    '  import.meta.env.PRIVATE_SECRET,',
+    '  import.meta.env.MODE,',
+    '  import.meta.env.DEV,',
+    '  import.meta.env.PROD,',
+    '  import.meta.env.UNKNOWN,',
+    '  import.meta.env,',
+    '];',
+  ].join('\n'));
+  const previousProcessValue = process.env.OMS_PROCESS;
+  process.env.OMS_PROCESS = 'from-process';
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('staging-local');
+    expect(output).toContain('base-expanded');
+    expect(output).toContain('from-process');
+    expect(output).toContain('staging');
+    expect(output).toContain('MODE');
+    expect(output).not.toContain('PRIVATE_SECRET');
+    expect(output).not.toContain('hidden');
+    expect(output).not.toContain('import.meta.env');
+  } finally {
+    if (previousProcessValue === undefined) {
+      delete process.env.OMS_PROCESS;
+    } else {
+      process.env.OMS_PROCESS = previousProcessValue;
+    }
+    await (builder as any)._clean();
+  }
+});
+
+it('loads dotenv files from envDir during build', async () => {
+  /// @case
+  /// 1. The project points envDir to a custom directory and uses a non-default mode.
+  /// 2. The source entry reads an OMS_ variable from that directory's mode-specific local file.
+  /// @expect
+  /// The emitted OMS bundle uses envDir and Vite-like mode file priority.
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  mode: "qa",',
+    '  envDir: "config-env",',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'config-env', '.env'), 'OMS_FROM_DIR=base\n');
+  await fs.outputFile(join(project, 'config-env', '.env.qa.local'), 'OMS_FROM_DIR=qa-local\n');
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const value = import.meta.env.OMS_FROM_DIR;',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('qa-local');
+    expect(output).not.toContain('base');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('respects custom envPrefix during build', async () => {
+  /// @case
+  /// 1. The project expands envPrefix to include PUBLIC_ alongside the default OMS_ prefix.
+  /// 2. The env file also contains an unprefixed private value.
+  /// @expect
+  /// PUBLIC_ and OMS_ variables are exposed to import.meta.env, while unprefixed values stay out of the bundle.
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  envPrefix: ["OMS_", "PUBLIC_"],',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, '.env'), [
+    'OMS_VALUE=oms-value',
+    'PUBLIC_VALUE=public-value',
+    'PRIVATE_SECRET=hidden',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const values = [',
+    '  import.meta.env.OMS_VALUE,',
+    '  import.meta.env.PUBLIC_VALUE,',
+    '  import.meta.env.PRIVATE_SECRET,',
+    '];',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('oms-value');
+    expect(output).toContain('public-value');
+    expect(output).not.toContain('PRIVATE_SECRET');
+    expect(output).not.toContain('hidden');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('lets define override import.meta.env values', async () => {
+  /// @case
+  /// 1. The env file and project define both provide import.meta.env.OMS_OVERRIDE.
+  /// 2. The source reads that value directly and from bare import.meta.env.
+  /// @expect
+  /// The define expression wins over the dotenv value in both replacement forms.
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  define: {',
+    '    "import.meta.env.OMS_OVERRIDE": JSON.stringify("defined-value"),',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, '.env'), 'OMS_OVERRIDE=env-value\n');
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const direct = import.meta.env.OMS_OVERRIDE;',
+    'export const envObject = import.meta.env;',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('defined-value');
+    expect(output).not.toContain('env-value');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('emits bare import.meta.env as an object with only public env keys', async () => {
+  /// @case
+  /// 1. A project source exports bare import.meta.env.
+  /// 2. The env file contains both OMS_ public values and unprefixed private values.
+  /// @expect
+  /// The replacement object includes built-in metadata and public env values, but excludes private values.
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, '.env'), [
+    'OMS_OBJECT=value-from-env',
+    'PRIVATE_SECRET=hidden',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const envObject = import.meta.env;',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('OMS_OBJECT');
+    expect(output).toContain('value-from-env');
+    expect(output).toContain('MODE');
+    expect(output).toContain('DEV');
+    expect(output).not.toContain('PRIVATE_SECRET');
+    expect(output).not.toContain('hidden');
+    expect(output).not.toContain('import.meta.env');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('fails build when project mode is local', async () => {
+  /// @case
+  /// 1. A project config sets mode to local.
+  /// 2. The build tries to load dotenv files.
+  /// @expect
+  /// The build fails with a clear error because .local suffixes are reserved for env files.
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  mode: "local",',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const value = import.meta.env.MODE;',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        message: expect.stringContaining('"local" cannot be used as OMS mode'),
+      },
+    });
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('uses production mode for prod builds', async () => {
+  /// @case
+  /// 1. A project entry branches on import.meta.env.PROD.
+  /// 2. The regular watcher build initializes domains, then buildProd emits a production bundle.
+  /// @expect
+  /// The prod bundle sees import.meta.env.PROD as true and import.meta.env.DEV as false.
+  const project = await makeTempDir();
+  const buildDir = join(await makeTempDir(), 'build');
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const value = import.meta.env.PROD && !import.meta.env.DEV ? "prod-branch" : "dev-branch";',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+    await builder.buildProd({
+      buildDir,
+      debug: false,
+      sourceMaps: false,
+      platform: 'web',
+      headless: false,
+    });
+
+    const output = await fs.readFile(join(buildDir, 'oms', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('prod-branch');
+    expect(output).not.toContain('dev-branch');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('rebuilds when a dotenv file changes', async () => {
+  /// @case
+  /// 1. A project entry reads import.meta.env.OMS_VALUE from .env.
+  /// 2. The .env file changes after the initial build.
+  /// @expect
+  /// The existing OMS watcher treats .env as a build dependency and emits a passive rebuild with the updated value.
+  const project = await makeTempDir();
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, '.env'), 'OMS_VALUE=one\n');
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'export const value = import.meta.env.OMS_VALUE;',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).resolves.toContain('one');
+
+    const passiveBuildEnd = new Promise((resolve, reject) => {
+      const timeout = globalThis.setTimeout(() => {
+        builder.off('passive-build-end', onEnd);
+        reject(new Error('Timed out waiting for passive build end'));
+      }, 5000);
+      const onEnd = (info: unknown) => {
+        globalThis.clearTimeout(timeout);
+        resolve(info);
+      };
+      builder.once('passive-build-end', onEnd);
+    });
+    await fs.outputFile(join(project, '.env'), 'OMS_VALUE=two\n');
+
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      result: {
+        ok: true,
+      },
+    });
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('two');
+    expect(output).not.toContain('one');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
 async function makeTempDir() {
   const dir = await fs.mkdtemp(join(tmpdir(), 'oms-builder-'));
   tempDirs.push(dir);

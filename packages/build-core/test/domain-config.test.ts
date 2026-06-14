@@ -196,6 +196,35 @@ it('normalizes project peer import package names from project config', () => {
   ]);
 });
 
+it('normalizes project define and env options', () => {
+  /// @case
+  /// 1. A project config declares Vite-like define values and env loading options.
+  /// 2. The env prefix includes a duplicate, an empty prefix, and a non-string value.
+  /// @expect
+  /// Define values are converted to JavaScript expressions and env options keep only usable prefixes.
+  const config = normalizeProjectUserConfig({
+    mode: 'staging',
+    envDir: 'config-env',
+    envPrefix: ['OMS_', 'PUBLIC_', 'OMS_', '', 1],
+    define: {
+      __OMS_STRING__: JSON.stringify('value'),
+      __OMS_BOOL__: true,
+      __OMS_OBJECT__: { nested: 1 },
+      __OMS_UNDEFINED__: undefined,
+    },
+  });
+
+  expect(config.mode).toBe('staging');
+  expect(config.envDir).toBe('config-env');
+  expect(config.envPrefix).toEqual(['OMS_', 'PUBLIC_']);
+  expect(config.define).toEqual({
+    __OMS_STRING__: '"value"',
+    __OMS_BOOL__: 'true',
+    __OMS_OBJECT__: '{"nested":1}',
+    __OMS_UNDEFINED__: 'undefined',
+  });
+});
+
 it('creates public export entry specs for __oms_import__', async () => {
   const domainRoot = await makeTempDir();
   const domain = new Domain(

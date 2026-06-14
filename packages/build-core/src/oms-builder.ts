@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import fs from 'fs-extra';
 import { logger } from './logger.js';
 import { ServerContext } from './server-context.js';
@@ -361,6 +361,9 @@ class OmsWatcher extends EventEmitter<{
           if (lowercase.endsWith('.d.ts')) {
             return true;
           }
+          if (/^\.env(?:\..*)?$/.test(basename(path))) {
+            return false;
+          }
           if (/\.[mc]?[jt]sx?$/.test(lowercase)) {
             return false;
           }
@@ -502,6 +505,7 @@ class OmsWatcher extends EventEmitter<{
       config,
       headless,
       treeShake: true,
+      mode: 'production',
     });
 
     await this._taskQueue.queueTask({
@@ -518,7 +522,7 @@ class OmsWatcher extends EventEmitter<{
           uuidProvider: this._uuidProvider,
           domains: this._domains,
           projectRoot: this._projectPath,
-          config: this._config,
+          config,
           profileBuildConfig: undefined,
         });
       },

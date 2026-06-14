@@ -9,6 +9,11 @@ export interface OmsProjectUserConfig {
     projectPeers?: string[];
   };
 
+  define?: Record<string, unknown>;
+  mode?: string;
+  envDir?: string;
+  envPrefix?: string | unknown[];
+
   headless?: boolean | {
     enabled?: boolean;
     include?: string[];
@@ -24,6 +29,11 @@ export interface OmsProjectConfig {
     alias?: Record<string, string>;
     projectPeers: string[];
   };
+
+  define: Record<string, string>;
+  mode: string;
+  envDir: string | undefined;
+  envPrefix: string[];
 
   headless: HeadlessConfig;
 }
@@ -48,8 +58,86 @@ export function normalizeProjectUserConfig(userConfig: OmsProjectUserConfig): Om
       }
       : { alias: undefined, projectPeers: [] },
 
+    define: normalizeDefine(userConfig.define),
+    mode: normalizeMode(userConfig.mode),
+    envDir: normalizeEnvDir(userConfig.envDir),
+    envPrefix: normalizeEnvPrefix(userConfig.envPrefix),
     headless: normalizeUserHeadlessConfig(userConfig.headless),
   };
+}
+
+function normalizeDefine(define: unknown) {
+  if (define === undefined) {
+    return {};
+  }
+  if (!define || typeof define !== 'object' || Array.isArray(define)) {
+    logger.error('define should be an object');
+    return {};
+  }
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(define)) {
+    if (!key) {
+      logger.error('define entries should have non-empty keys');
+      continue;
+    }
+    if (value === undefined) {
+      normalized[key] = 'undefined';
+      continue;
+    }
+    if (typeof value === 'string') {
+      normalized[key] = value;
+      continue;
+    }
+    const expression = JSON.stringify(value);
+    if (expression === undefined) {
+      logger.error(`define entry ${key} should be JSON serializable or a JavaScript expression string`);
+      continue;
+    }
+    normalized[key] = expression;
+  }
+  return normalized;
+}
+
+function normalizeMode(mode: unknown) {
+  if (mode === undefined) {
+    return 'development';
+  }
+  if (typeof mode !== 'string' || mode.length === 0) {
+    logger.error('mode should be a non-empty string');
+    return 'development';
+  }
+  return mode;
+}
+
+function normalizeEnvDir(envDir: unknown) {
+  if (envDir === undefined) {
+    return undefined;
+  }
+  if (typeof envDir !== 'string' || envDir.length === 0) {
+    logger.error('envDir should be a non-empty string');
+    return undefined;
+  }
+  return envDir;
+}
+
+function normalizeEnvPrefix(envPrefix: unknown) {
+  if (envPrefix === undefined) {
+    return ['OMS_'];
+  }
+  const prefixes = Array.isArray(envPrefix) ? envPrefix : [envPrefix];
+  const normalized = new Set<string>();
+  for (const prefix of prefixes) {
+    if (typeof prefix !== 'string' || prefix.length === 0) {
+      logger.error('envPrefix entries should be non-empty strings');
+      continue;
+    }
+    normalized.add(prefix);
+  }
+  if (normalized.size === 0) {
+    logger.error('envPrefix should include at least one non-empty string');
+    return ['OMS_'];
+  }
+  return [...normalized];
 }
 
 function normalizeProjectPeers(projectPeers: unknown) {
