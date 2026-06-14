@@ -13,8 +13,9 @@
     "./protocol": "./lib/protocol.js"
   },
   "scripts": {
-    "prepublishOnly": "vite build --mode=production",
-    "build": "vite build --mode=development",
+    "prepublishOnly": "tsc -b --noEmit && vite build --mode=production",
+    "build": "tsc -b --noEmit && vite build --mode=development",
+    "typecheck": "tsc -b --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
