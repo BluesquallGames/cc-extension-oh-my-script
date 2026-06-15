@@ -55,7 +55,8 @@ let pendingReadyReloadReason: string | undefined = undefined;
 export const methods = {
   async beforePreStart(assetDBInfo: AssetDBInfo) {
     void assetDBInfo;
-    logger.debug(`Wait for ${selfExtensionName} first build...`);
+    const t0 = Date.now();
+    logger.info(`Wait for ${selfExtensionName} first build...`);
     const timeoutSec = 1 * 60;
     Editor.Task.__protected__.addSyncTask(firstBuildSyncTaskName, firstBuildSyncTaskMessage);
     Editor.Task.__protected__.updateSyncTask(
@@ -64,7 +65,7 @@ export const methods = {
       firstBuildSyncTaskDetail,
     );
     try {
-      firstBuildResult = await Promise.race([
+      const result = await Promise.race([
         requestSelfWorkerMessage('rebuild', {
           reason: 'asset-db startup build',
           reloadAssetDbRuntime: false,
@@ -73,9 +74,16 @@ export const methods = {
           throw new Error(`${selfExtensionName} first build timeout after ${timeoutSec}s`);
         }),
       ]);
-      logger.debug(`${selfExtensionName} first build done: %o`, firstBuildResult);
+      firstBuildResult = result;
+      const elapsedMs = Date.now() - t0;
+      if (result.ok) {
+        logger.info(`${selfExtensionName} first build done in ${elapsedMs}ms`);
+      } else {
+        logger.error(`${selfExtensionName} first build failed in ${elapsedMs}ms: ${result.error.message}`);
+      }
+      logger.debug(`${selfExtensionName} first build result: %o`, result);
     } catch (err) {
-      logger.error(`${selfExtensionName} first build failed: %o`, err);
+      logger.error(`${selfExtensionName} first build failed in ${Date.now() - t0}ms: %o`, err);
     } finally {
       Editor.Task.__protected__.removeSyncTask(firstBuildSyncTaskName);
     }
@@ -86,7 +94,7 @@ export const methods = {
     runtimePhase = AssetDBRuntimePhase.startupReloading;
     try {
       if (firstBuildResult?.ok) {
-        logger.debug(`Run project scripts in asset-db`);
+        logger.info(`Run project scripts in asset-db`);
         await globalScriptRuntime.ensure().ensureReady('asset-db afterPreStart');
       }
     } catch (err) {

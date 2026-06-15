@@ -71,14 +71,14 @@ export class OmsBuilderAgent extends EventEmitter<{
     await this._handleBuildResult(rebuildResult, reason, {
       reloadAssetDbRuntime: opts.reloadAssetDbRuntime ?? true,
     });
-    logger.debug(`${logTag}Rebuild done in ${Date.now() - t0}ms`);
+    logger.info(`${logTag}Rebuild done in ${Date.now() - t0}ms`);
     return this._toWorkerBuildResult(rebuildResult);
   }
 
   async ensureRuntimeBuild(): Promise<BuildResult> {
     const t0 = Date.now();
     const rebuildResult = await this._ensureRuntimeBuildResult();
-    logger.debug(`${logTag}Runtime build ensured in ${Date.now() - t0}ms`);
+    logger.info(`${logTag}Runtime build ensured in ${Date.now() - t0}ms`);
     return this._toWorkerBuildResult(rebuildResult);
   }
 
@@ -229,7 +229,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     if (childProcess.stdout) {
       (async () => {
         for await (const line of createInterface(childProcess.stdout as NodeJS.ReadableStream)) {
-          logger.info('[worker-console] ' + line);
+          logger.debug('[worker-console] ' + line);
         }
       })().catch((err) => {
         logger.error(err);
@@ -238,6 +238,10 @@ export class OmsBuilderAgent extends EventEmitter<{
     if (childProcess.stderr) {
       (async () => {
         for await (const line of createInterface(childProcess.stderr as NodeJS.ReadableStream)) {
+          if (isNodeInspectorBanner(line)) {
+            logger.debug('[worker-console] ' + line);
+            continue;
+          }
           logger.error('[worker-console] ' + line);
         }
       })().catch((err) => {
@@ -431,6 +435,13 @@ interface ServerAgent {
 
 interface HandleBuildResultOptions {
   reloadAssetDbRuntime?: boolean;
+}
+
+function isNodeInspectorBanner(line: string) {
+  return line.startsWith('Debugger listening on ')
+    || line.startsWith('Debugger attached.')
+    || line.startsWith('Waiting for the debugger to disconnect...')
+    || line.startsWith('For help, see: https://nodejs.org/en/docs/inspector');
 }
 
 enum StateType {

@@ -41,7 +41,7 @@ export function rollupPluginProjectPeerImports({
         skipSelf: true,
       });
       if (resolved && !resolved.external && resolved.id !== projectPeerSource) {
-        logger.verbose(`Resolved OMS peer import ${source} from project root: ${resolved.id}`);
+        logger.debug(`Resolved OMS peer import ${source} from project root: ${resolved.id}`);
         return resolved;
       }
 

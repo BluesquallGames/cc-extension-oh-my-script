@@ -19,6 +19,8 @@ const printf = (withEntry: boolean) => winston.format.printf(({ level, message, 
 const logFile = join(Editor.Project.tmpDir, 'logs', `${selfExtensionName}-${selfPackageJson.version}.log`);
 ensureDirSync(dirname(logFile));
 
+const logLevel = process.env.OMS_VERBOSE === '1' ? 'debug' : 'info';
+
 export function createLogFile() {
   outputFileSync(logFile, '');
 }
@@ -32,20 +34,20 @@ class EditorTransport extends Transport {
 }
 
 export const logger = winston.createLogger({
-  level: 'debug',
+  level: logLevel,
   format: winston.format.combine(
     winston.format.errors({ stack: true }),
     winston.format.splat(),
   ),
   transports: [
     new EditorTransport({
-      level: 'debug',
+      level: logLevel,
       format: winston.format.combine(
         printf(false),
       ),
     }),
     new winston.transports.File({
-      level: 'debug',
+      level: logLevel,
       filename: logFile,
       // options: { flags: 'w' },
       format: winston.format.combine(

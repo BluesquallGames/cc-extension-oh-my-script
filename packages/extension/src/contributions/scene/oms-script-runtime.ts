@@ -88,12 +88,12 @@ export class OmsScriptRuntime {
 
   reload(reason?: string) {
     const logReason = reason ? ` (${reason})` : '';
-    logger.debug(`[${this._label}] Reloading OMS runtime${logReason}`);
+    logger.info(`[${this._label}] Reloading OMS runtime${logReason}`);
     this._ready = false;
     const reloadPromise = this._moduleSystem.reload().then(() => {
       this._ready = true;
       this._lastError = undefined;
-      logger.debug(`[${this._label}] OMS runtime reloaded`);
+      logger.info(`[${this._label}] OMS runtime reloaded`);
     }).catch((err: unknown) => {
       this._ready = false;
       this._lastError = err;

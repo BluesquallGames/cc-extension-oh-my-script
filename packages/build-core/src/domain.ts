@@ -99,7 +99,7 @@ export class Domain {
       }
     }
 
-    logger.verbose(`Entry specs for domain ${this._id}: ${JSON.stringify(entrySpecs, undefined, 2)}`);
+    logger.debug(`Entry specs for domain ${this._id}: ${JSON.stringify(entrySpecs, undefined, 2)}`);
 
     return entrySpecs;
   }

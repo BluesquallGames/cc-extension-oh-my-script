@@ -344,11 +344,16 @@ export class BuildRecord {
         return false;
       },
       plugins: inputPlugins,
-      onwarn: (warning, warn) => {
+      onwarn: (warning) => {
         if (warning.code && this._suppressRollupWarningCodes.includes(warning.code)) {
           return;
         }
-        warn(warning);
+        const message = warning.message || String(warning);
+        if (warning.code === 'SOURCEMAP_ERROR') {
+          logger.debug(`${this._title} Rollup warning [${warning.code}]: ${message}`);
+          return;
+        }
+        logger.warn(`${this._title} Rollup warning${warning.code ? ` [${warning.code}]` : ''}: ${message}`);
       },
       perf: true,
       treeshake: this._treeShake,

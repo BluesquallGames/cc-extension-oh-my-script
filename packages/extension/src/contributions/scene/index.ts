@@ -41,9 +41,9 @@ let iReload = 0;
 
 export const methods = {
   async reloadScripts(reason?: string) {
-    logger.debug(`Reloading scene scripts...${iReload++}. Reason: ${reason}`);
+    logger.info(`Reloading scene scripts...${iReload++}. Reason: ${reason}`);
     globalScriptRuntime.get()?.reload(reason).then(() => {
-      logger.debug('Scene scripts reloaded successfully.');
+      logger.info('Scene scripts reloaded successfully.');
       cce.Script.emit(cce.Script.EXECUTION_FINISHED);
     }).catch((err) => {
       if (err instanceof ReloadInterruptError) {

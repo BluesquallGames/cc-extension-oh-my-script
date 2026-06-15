@@ -756,7 +756,7 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private _queueBuild(reason: string, passive: boolean) {
-    logger.verbose(`Will queue build. Reason: ${reason}`);
+    logger.debug(`Will queue build. Reason: ${reason}`);
     this._fileQueueConsumerScheduled = true;
     return this._taskQueue.queueTask({
       type: 'build',
@@ -792,14 +792,14 @@ class OmsWatcher extends EventEmitter<{
           };
           ctx.once('abort', onAbort);
           try {
-            logger.verbose(`Waiting for further merge signal...`);
+            logger.debug(`Waiting for further merge signal...`);
             await setTimeout(100, undefined, {
               signal: timerInterruptController.signal,
             });
           } catch (err) {
             if (typeof err === 'object' && err !== null && 'name' in err && err.name === 'AbortError') {
               if (interruptedByMerge) {
-                logger.verbose(`Build merged.`);
+                logger.debug(`Build merged.`);
                 continue;
               }
             }
@@ -814,7 +814,7 @@ class OmsWatcher extends EventEmitter<{
           throw new Error('Build aborted by user');
         }
 
-        logger.verbose(`Build started.`);
+        logger.info(`Build started. Reason: ${reason}`);
         ctx.acceptMerge = false;
 
         return await this._execBuild(state);
@@ -852,6 +852,12 @@ class OmsWatcher extends EventEmitter<{
     });
 
     const publicBuildResult = await this._onBuildEnd(buildResult, buildExtras);
+    const elapsedMs = Date.now() - startState.time;
+    if (publicBuildResult.ok) {
+      logger.info(`Build done in ${elapsedMs}ms`);
+    } else {
+      logger.error(`Build failed in ${elapsedMs}ms: ${publicBuildResult.error.message}`);
+    }
     if (state.fullPassive) {
       this.emit('passive-build-end', { result: publicBuildResult });
     }

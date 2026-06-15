@@ -52,7 +52,10 @@ const printf = () => winston.format.printf(({ level, message, timestamp }) => {
   return output;
 });
 
+const logLevel = process.env.OMS_VERBOSE === '1' ? 'debug' : 'info';
+
 export let logger = winston.createLogger({
+  level: logLevel,
   format: winston.format.combine(
     dropAfterIpcDisconnect(),
     winston.format.errors({ stack: true }),
@@ -61,7 +64,7 @@ export let logger = winston.createLogger({
   transports: [
     logStream
       ? new winston.transports.Stream({
-        level: 'debug',
+        level: logLevel,
         format: winston.format.combine(
           winston.format.errors({ stack: true }),
           winston.format.json(),
@@ -69,7 +72,7 @@ export let logger = winston.createLogger({
         stream: logStream,
       })
       : new winston.transports.Console({
-        level: 'debug',
+        level: logLevel,
         format: winston.format.combine(
           winston.format.errors({ stack: true }),
           printf(),
