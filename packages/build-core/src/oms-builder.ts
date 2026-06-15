@@ -1,4 +1,5 @@
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import type { Dirent, Stats } from 'node:fs';
 import fs from 'fs-extra';
 import { logger } from './logger.js';
 import { ServerContext } from './server-context.js';
@@ -7,7 +8,7 @@ import { type UUIDProvider } from './features/babel-plugin-cc-component.js';
 import assert from 'node:assert';
 import { UUIDManager, writeInlineUUID } from './uuid-manager.js';
 import type { BuildOptions, BuildResult, InvocationParams, PassiveBuildEndInfo } from './protocol.js';
-import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
+import { promiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
 import { Domain, type DomainEntryQueryOptions } from './domain.js';
@@ -288,6 +289,12 @@ interface BuildState {
   fullPassive: boolean;
 }
 
+enum FileWatcherPhase {
+  Starting = 'starting',
+  Ready = 'ready',
+  Closed = 'closed',
+}
+
 class OmsWatcher extends EventEmitter<{
   'passive-build-end': [PassiveBuildEndInfo];
 }> {
@@ -353,74 +360,14 @@ class OmsWatcher extends EventEmitter<{
 
     const uuidProvider = uuidManager.get.bind(uuidManager);
     this._uuidProvider = uuidProvider;
-
-    const watcher = chokidar.watch([], {
-      ignored: (path, stats) => {
-        if (stats?.isFile()) {
-          const lowercase = path.toLocaleLowerCase();
-          if (lowercase.endsWith('.d.ts')) {
-            return true;
-          }
-          if (/^\.env(?:\..*)?$/.test(basename(path))) {
-            return false;
-          }
-          if (/\.[mc]?[jt]sx?$/.test(lowercase)) {
-            return false;
-          }
-          if (/.jsonc?$/.test(lowercase)) {
-            return false;
-          }
-          return true;
-        }
-        return false;
-      },
-      persistent: true,
-    });
-    this._fileWatcher = watcher;
-    watcher
-      .on('ready', () => {
-        logger.debug('Watcher ready');
-        this._fileWatcherReadyPromise?.resolve();
-        this._fileWatcherReadyPromise = undefined;
-      })
-      .on('error', (error) => {
-        logger.error('Watcher error: %s', error);
-      })
-      .on('all', (event, path) => {
-        logger.debug('Watcher event: %s, Path: %s', event, path);
-      })
-      .on('add', (path) => {
-        if (this._passiveWatchedFiles.has(path)) {
-          return;
-        }
-        this._fileQueue[path] = 'add';
-        this._queuePassiveBuild('file added');
-      })
-      .on('change', (path) => {
-        switch (this._fileQueue[path]) {
-        case 'add':
-        case 'delete':
-          return;
-        }
-        this._fileQueue[path] = 'change';
-        this._queuePassiveBuild('file changed');
-      })
-      .on('unlink', (path) => {
-        this._fileQueue[path] = 'delete';
-        this._queuePassiveBuild('file deleted');
-      })
-      .on('addDir', (path) => {
-        void path;
-      })
-      .on('unlinkDir', (path) => {
-        void path;
-      })
-    ;
   }
 
   async start() {
     await this._updateDomains();
     await this._loadCentralizedUUIDs();
+    this._fileQueueConsumerScheduled = true;
+    await this._restartFileWatcher();
+    await this._collectInitialSourceFiles();
   }
 
   async close(options: CloseOptions = {}) {
@@ -432,7 +379,7 @@ class OmsWatcher extends EventEmitter<{
         logger.error(`Failed to abort OMS watcher task queue: %o`, err);
       });
     }
-    await this._fileWatcher.close();
+    await this._closeFileWatcher();
     await Promise.all(Object.values(this._domainConfigWatchers).map((watcher) => watcher.close()));
     this._domainConfigWatchers = {};
   }
@@ -442,7 +389,7 @@ class OmsWatcher extends EventEmitter<{
       type: 'update-build-options',
       exec: async () => {
         this._buildOptions = options;
-        await this._updateDomains();
+        await this._reloadDomainsAndFileWatcher();
       },
     });
     this._queuePassiveBuild('build options updated');
@@ -453,7 +400,7 @@ class OmsWatcher extends EventEmitter<{
       type: 'update-config',
       exec: async () => {
         this._config = config;
-        await this._updateDomains();
+        await this._reloadDomainsAndFileWatcher();
       },
     });
     this._queuePassiveBuild('config updated');
@@ -540,8 +487,10 @@ class OmsWatcher extends EventEmitter<{
   private _uuidProvider: UUIDProvider;
   private _buildRecord: BuildRecord;
   private _headlessBuildRecord: BuildRecord | undefined;
-  private _fileWatcher: chokidar.FSWatcher;
-  private _fileWatcherReadyPromise: PromiseWithResolvers<void> | undefined = promiseWithResolvers();
+  private _fileWatcher: chokidar.FSWatcher | undefined;
+  private _fileWatcherPhase = FileWatcherPhase.Closed;
+  private _fileQueueConsumerScheduled = false;
+  private _sourceFiles = new Set<string>();
   private _passiveWatchedFiles = new Set<string>();
   private _nBuildEnds = 0;
   private _domains: Record<string, Domain> = {};
@@ -586,6 +535,17 @@ class OmsWatcher extends EventEmitter<{
     }
   }
 
+  private async _reloadDomainsAndFileWatcher() {
+    this._fileWatcherPhase = FileWatcherPhase.Starting;
+    this._fileQueueConsumerScheduled = true;
+    this._fileQueue = {};
+    await this._closeFileWatcher();
+    await this._updateDomains();
+    await this._restartFileWatcher();
+    await this._collectInitialSourceFiles();
+    this._fileQueueConsumerScheduled = false;
+  }
+
   private async _addDomain(domainId: string, domainRoot: string, preferredDomainSourceRoot: string) {
     const domainConfigWatcher = new OmsDomainConfigWatcher({
       domainRoot,
@@ -615,9 +575,6 @@ class OmsWatcher extends EventEmitter<{
       });
     }
     this._domainSourceRootMap.sort((a, b) => b.sourceRoot.length - a.sourceRoot.length);
-    for (const sourceRoot of sourceRoots) {
-      this._fileWatcher.add(sourceRoot);
-    }
   }
 
   private async _queueDomainConfigUpdate(domainId: string) {
@@ -625,10 +582,126 @@ class OmsWatcher extends EventEmitter<{
       type: 'update-domain-configs',
       exec: async () => {
         logger.debug(`Updating OMS domains because domain config changed: ${domainId}`);
-        await this._updateDomains();
+        await this._reloadDomainsAndFileWatcher();
       },
     });
     this._queuePassiveBuild(`domain config updated: ${domainId}`);
+  }
+
+  private async _restartFileWatcher() {
+    await this._closeFileWatcher();
+    this._fileWatcherPhase = FileWatcherPhase.Starting;
+
+    const readyPromiseWithResolvers = promiseWithResolvers<void>();
+    let ready = false;
+    const sourceRoots = this._domainSourceRootMap.map(({ sourceRoot }) => sourceRoot);
+    const watcher = this._fileWatcher = chokidar.watch(sourceRoots, {
+      ignoreInitial: true,
+      ignored: (path, stats) => shouldIgnoreWatchedPath(path, stats),
+      persistent: true,
+    });
+    watcher
+      .on('ready', () => {
+        ready = true;
+        logger.debug('Watcher ready');
+        this._fileWatcherPhase = FileWatcherPhase.Ready;
+        readyPromiseWithResolvers.resolve();
+      })
+      .on('error', (error) => {
+        logger.error('Watcher error: %s', error);
+        if (!ready) {
+          readyPromiseWithResolvers.reject(error);
+        }
+      })
+      .on('all', (event, path) => {
+        logger.debug('Watcher event: %s, Path: %s', event, path);
+      })
+      .on('add', (path) => {
+        if (this._queueFileAdd(path)) {
+          this._queuePassiveBuild('file added');
+        }
+      })
+      .on('change', (path) => {
+        if (this._passiveWatchedFiles.has(path)) {
+          this._queuePassiveBuild('file changed');
+          return;
+        }
+        if (!this._getDomainId(path)) {
+          return;
+        }
+        switch (this._fileQueue[path]) {
+        case 'add':
+        case 'delete':
+          return;
+        }
+        this._fileQueue[path] = 'change';
+        this._queuePassiveBuild('file changed');
+      })
+      .on('unlink', (path) => {
+        if (this._passiveWatchedFiles.has(path)) {
+          this._queuePassiveBuild('file deleted');
+          return;
+        }
+        if (!this._getDomainId(path)) {
+          return;
+        }
+        this._sourceFiles.delete(path);
+        this._fileQueue[path] = 'delete';
+        this._queuePassiveBuild('file deleted');
+      })
+      .on('addDir', (path) => {
+        void path;
+      })
+      .on('unlinkDir', (path) => {
+        void path;
+      })
+    ;
+
+    await readyPromiseWithResolvers.promise;
+  }
+
+  private async _collectInitialSourceFiles() {
+    const sourceRoots = new Set(this._domainSourceRootMap.map(({ sourceRoot }) => sourceRoot));
+    for (const sourceRoot of sourceRoots) {
+      for await (const file of walkWatchableFiles(sourceRoot)) {
+        this._queueFileAdd(file);
+      }
+    }
+  }
+
+  private _queueFileAdd(path: string) {
+    if (this._passiveWatchedFiles.has(path)) {
+      return false;
+    }
+    if (!this._getDomainId(path)) {
+      return false;
+    }
+    if (this._fileQueue[path] === 'delete') {
+      this._sourceFiles.add(path);
+      this._fileQueue[path] = 'add';
+      return true;
+    }
+    if (this._sourceFiles.has(path)) {
+      return false;
+    }
+    this._sourceFiles.add(path);
+    this._fileQueue[path] = 'add';
+    return true;
+  }
+
+  private async _closeFileWatcher() {
+    if (!this._fileWatcher) {
+      this._passiveWatchedFiles.clear();
+      this._sourceFiles.clear();
+      this._fileWatcherPhase = FileWatcherPhase.Closed;
+      return;
+    }
+    const watcher = this._fileWatcher;
+    this._fileWatcher = undefined;
+    await watcher.close();
+    this._passiveWatchedFiles.clear();
+    this._sourceFiles.clear();
+    this._fileWatcherPhase = FileWatcherPhase.Closed;
   }
 
   private async _makeEntries(opts: DomainEntryQueryOptions) {
@@ -684,6 +757,7 @@ class OmsWatcher extends EventEmitter<{
 
   private _queueBuild(reason: string, passive: boolean) {
     logger.verbose(`Will queue build. Reason: ${reason}`);
+    this._fileQueueConsumerScheduled = true;
     return this._taskQueue.queueTask({
       type: 'build',
       mergeArgs: [passive],
@@ -743,13 +817,18 @@ class OmsWatcher extends EventEmitter<{
         logger.verbose(`Build started.`);
         ctx.acceptMerge = false;
 
-        await this._fileWatcherReadyPromise?.promise;
         return await this._execBuild(state);
       },
     });
   }
 
   private _queuePassiveBuild(reason: string) {
+    if (this._fileWatcherPhase !== FileWatcherPhase.Ready) {
+      return;
+    }
+    if (this._fileQueueConsumerScheduled) {
+      return;
+    }
     this._queueBuild(reason, true).catch((err) => {
       if (err instanceof MergedTaskExecError) {
         logger.debug(`Ignored merged task exec error: ${err}`);
@@ -890,6 +969,7 @@ class OmsWatcher extends EventEmitter<{
     logger.debug(`[Build x ${this._nBuildEnds}] Build end, inferred files: %s`, buildResult.inferredFiles);
     const passiveWatchedFiles = this._passiveWatchedFiles;
     const watcher = this._fileWatcher;
+    assert.ok(watcher, 'OMS file watcher is not started');
     for (const file of passiveWatchedFiles) {
       if (!buildResult.inferredFiles.includes(file)) {
         logger.debug('Unwatch file: %s', file);
@@ -961,6 +1041,7 @@ class OmsWatcher extends EventEmitter<{
   private async _executeFileQueue() {
     const fileQueue = this._fileQueue;
     this._fileQueue = {};
+    this._fileQueueConsumerScheduled = false;
     let entryChanged = false;
     for (const [file, operation] of Object.entries(fileQueue)) {
       if (operation === 'add') {
@@ -1039,13 +1120,47 @@ async function promiseSequential<T extends readonly unknown[] | []>(promises: T)
   return result;
 }
 
-function* listEntries(sourceRoot: string) {
-  if (!fs.existsSync(sourceRoot)) {
-    return;
+function shouldIgnoreWatchedPath(path: string, stats?: Stats) {
+  if (stats?.isFile()) {
+    return !shouldWatchFile(path);
   }
-  for (const entry of readDirRecurse(sourceRoot)) {
-    if (/\.[cm]?[jt]s$/.test(entry)) {
-      yield join(sourceRoot, entry);
+  return false;
+}
+
+function shouldWatchFile(path: string) {
+  const lowercase = path.toLocaleLowerCase();
+  if (lowercase.endsWith('.d.ts')) {
+    return false;
+  }
+  if (/^\.env(?:\..*)?$/.test(basename(path))) {
+    return true;
+  }
+  if (/\.[mc]?[jt]sx?$/.test(lowercase)) {
+    return true;
+  }
+  if (/.jsonc?$/.test(lowercase)) {
+    return true;
+  }
+  return false;
+}
+
+async function* walkWatchableFiles(root: string): AsyncGenerator<string> {
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      return;
+    }
+    throw err;
+  }
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      yield * walkWatchableFiles(path);
+    } else if (entry.isFile() && shouldWatchFile(path)) {
+      yield path;
     }
   }
 }
@@ -1059,15 +1174,3 @@ type AutoRunInfos = Array<{
   bundleId: string;
   isEditorEntry: boolean;
 }>;
-
-function* readDirRecurse(root: string, current: string = ''): Generator<string> {
-  const path = resolve(root, current);
-  const stat = fs.statSync(path);
-  if (stat.isDirectory()) {
-    for (const entry of fs.readdirSync(path)) {
-      yield * readDirRecurse(root, join(current, entry));
-    }
-  } else {
-    yield current;
-  }
-}

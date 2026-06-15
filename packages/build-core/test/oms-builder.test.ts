@@ -64,6 +64,225 @@ it('does not emit passive-build-end when a pending passive build is claimed by a
   }
 });
 
+it('does not run a second default build from initial source discovery', async () => {
+  /// @case
+  /// 1. A fresh project contains many OMS extension domains before the first OMS rebuild.
+  /// 2. Domain source roots are discovered during watcher startup and feed the initial source queue.
+  /// @expect
+  /// The initial source discovery is owned by that first rebuild and does not schedule a second build.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const main = 1;');
+  const extensionBuildOptions: Array<{ name: string; path: string }> = [];
+  const linkedExtensionTarget = join(project, 'linked-extension-target');
+  await fs.outputJSON(join(linkedExtensionTarget, 'package.json'), {
+    oms: {
+      partitions: [
+        {
+          rootDir: 'src',
+        },
+      ],
+    },
+  });
+  await fs.outputFile(join(linkedExtensionTarget, 'src', 'main.ts'), 'export const linkedMain = 1;');
+  await fs.outputFile(join(linkedExtensionTarget, 'src', 'nested', 'late.component.ts'), 'export class LateComponent {}');
+  await fs.ensureDir(join(project, 'extensions'));
+  const linkedExtensionRoot = join(project, 'extensions', 'linked-extension');
+  await fs.ensureSymlink(linkedExtensionTarget, linkedExtensionRoot, process.platform === 'win32' ? 'junction' : 'dir');
+  extensionBuildOptions.push({
+    name: 'linked-extension',
+    path: linkedExtensionRoot,
+  });
+  for (let extensionIndex = 0; extensionIndex < 10; extensionIndex++) {
+    const extensionRoot = join(project, 'extensions', `extension-${extensionIndex}`);
+    extensionBuildOptions.push({
+      name: `extension-${extensionIndex}`,
+      path: extensionRoot,
+    });
+    if (extensionIndex === 0) {
+      await fs.outputFile(join(extensionRoot, 'oms.config.mjs'), [
+        'await new Promise((resolve) => setTimeout(resolve, 250));',
+        'export default {};',
+      ].join('\n'));
+    }
+    await fs.outputFile(join(extensionRoot, 'oms', 'src', 'index.ts'), `export const extension${extensionIndex} = ${extensionIndex};`);
+    const moduleCount = extensionIndex === 0 ? 500 : 20;
+    for (let moduleIndex = 0; moduleIndex < moduleCount; moduleIndex++) {
+      await fs.outputFile(
+        join(extensionRoot, 'oms', 'src', 'bulk', `module-${moduleIndex}.ts`),
+        `export const value${extensionIndex}_${moduleIndex} = ${extensionIndex + moduleIndex};`,
+      );
+    }
+  }
+
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions,
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+    await setTimeout(1000);
+
+    expect(buildStartCount).toBe(1);
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('ignores late files outside OMS domain source roots', async () => {
+  /// @case
+  /// 1. An enabled extension has no OMS source directory and only creates ordinary extension source files later.
+  /// 2. Chokidar reports those ordinary extension files after the first OMS build.
+  /// @expect
+  /// Files outside OMS domain source roots are ignored before they can schedule a passive build.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const main = 1;');
+  const extensionRoot = join(project, 'extensions', 'plain-extension');
+  await fs.outputJSON(join(extensionRoot, 'package.json'), {
+    name: 'plain-extension',
+  });
+
+  let buildStartCount = 0;
+  let passiveBuildEndCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+  builder.on('passive-build-end', () => {
+    passiveBuildEndCount++;
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [
+        {
+          name: 'plain-extension',
+          path: extensionRoot,
+        },
+      ],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(buildStartCount).toBe(1);
+
+    await fs.outputFile(join(extensionRoot, 'src', 'constants.ts'), 'export const ignored = true;');
+    await setTimeout(1000);
+
+    expect(passiveBuildEndCount).toBe(0);
+    expect(buildStartCount).toBe(1);
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('coalesces a queued source delete with a same-path add', async () => {
+  /// @case
+  /// 1. A source file delete has been queued but the passive build has not consumed it yet.
+  /// 2. The same source path is added again before that passive build runs.
+  /// @expect
+  /// The queued final operation keeps the source file present instead of consuming only the stale delete.
+  const project = await makeTempDir();
+  const component = join(project, 'src', 'recreated.component.ts');
+  await fs.outputFile(component, 'export class RecreatedComponent {}');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const watcher = (builder as any)._watcher;
+    watcher._sourceFiles.delete(component);
+    watcher._fileQueue[component] = 'delete';
+
+    expect(watcher._queueFileAdd(component)).toBe(true);
+    expect(watcher._sourceFiles.has(component)).toBe(true);
+    expect(watcher._fileQueue[component]).toBe('add');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('rebuilds when domain source files are added, changed, and deleted', async () => {
+  /// @case
+  /// 1. The watcher is running after an initial OMS build.
+  /// 2. A component source file is added, changed, and then deleted under a configured domain source root.
+  /// @expect
+  /// Domain source changes trigger passive builds and the generated bundle follows the final file state.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const main = 1;');
+  const component = join(project, 'src', 'late.component.ts');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    let passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(component, '(globalThis as any).__omsDomainSourceMarker = "domain-source-added";');
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      result: {
+        ok: true,
+      },
+    });
+    await expect(fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).resolves.toContain('domain-source-added');
+
+    passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(component, '(globalThis as any).__omsDomainSourceMarker = "domain-source-changed";');
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      result: {
+        ok: true,
+      },
+    });
+    const changedOutput = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(changedOutput).toContain('domain-source-changed');
+    expect(changedOutput).not.toContain('domain-source-added');
+
+    passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.remove(component);
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      result: {
+        ok: true,
+      },
+    });
+    await expect(fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).resolves.not.toContain('domain-source-changed');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
 it('emits OMS export module declarations without a generated tsconfig paths file', async () => {
   const project = await makeTempDir();
   await fs.ensureDir(join(project, 'src'));
@@ -750,17 +969,7 @@ it('rebuilds when a dotenv file changes', async () => {
     });
     await expect(fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).resolves.toContain('one');
 
-    const passiveBuildEnd = new Promise((resolve, reject) => {
-      const timeout = globalThis.setTimeout(() => {
-        builder.off('passive-build-end', onEnd);
-        reject(new Error('Timed out waiting for passive build end'));
-      }, 5000);
-      const onEnd = (info: unknown) => {
-        globalThis.clearTimeout(timeout);
-        resolve(info);
-      };
-      builder.once('passive-build-end', onEnd);
-    });
+    const passiveBuildEnd = waitForPassiveBuildEnd(builder);
     await fs.outputFile(join(project, '.env'), 'OMS_VALUE=two\n');
 
     await expect(passiveBuildEnd).resolves.toMatchObject({
@@ -776,10 +985,73 @@ it('rebuilds when a dotenv file changes', async () => {
   }
 });
 
+it('keeps a source file when it is recreated before the passive rebuild runs', async () => {
+  /// @case
+  /// 1. A component source file participates in the initial OMS build.
+  /// 2. The file is deleted and recreated at the same path before the passive rebuild runs.
+  /// @expect
+  /// The passive rebuild treats the final file state as present and keeps the recreated source in the bundle.
+  const project = await makeTempDir();
+  const component = join(project, 'src', 'recreated.component.ts');
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(component, [
+    '(globalThis as any).__omsRecreatedMarker = "before-recreate-marker";',
+    '',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).resolves.toContain('before-recreate-marker');
+
+    const passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.remove(component);
+    await setTimeout(20);
+    await fs.outputFile(component, [
+      '(globalThis as any).__omsRecreatedMarker = "after-recreate-marker";',
+      '',
+    ].join('\n'));
+
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      result: {
+        ok: true,
+      },
+    });
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('after-recreate-marker');
+    expect(output).not.toContain('before-recreate-marker');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
 async function makeTempDir() {
   const dir = await fs.mkdtemp(join(tmpdir(), 'oms-builder-'));
   tempDirs.push(dir);
   return dir;
+}
+
+function waitForPassiveBuildEnd(builder: OmsBuilder) {
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      builder.off('passive-build-end', onEnd);
+      reject(new Error('Timed out waiting for passive build end'));
+    }, 5000);
+    const onEnd = (info: unknown) => {
+      globalThis.clearTimeout(timeout);
+      resolve(info);
+    };
+    builder.once('passive-build-end', onEnd);
+  });
 }
 
 async function outputNodePackage(root: string, packageName: string, source: string, extraPackageJson: Record<string, unknown> = {}) {
