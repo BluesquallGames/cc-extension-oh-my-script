@@ -1,27 +1,15 @@
 {
-  "name": "oh-my-script",
+  "name": "oms-home",
   "private": true,
-  "version": "0.0.1-alpha.1",
-  "extensionName": "oh-my-script",
   "type": "module",
-  "package_version": 2,
-  "editor": ">=3.8.5",
-  "author": "Bluesquall Team",
-  "files": [
-    "dist/**/*",
-    "mount/**/*",
-    "types/**/*"
-  ],
-  "main": "packages/extension/dist/main.cjs",
-  "creator": {
-    "hookScript": "packages/extension/dist/hooks.cjs"
-  },
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo watch build",
     "docs:dev": "pnpm --dir docs dev",
     "docs:build": "pnpm --dir docs build",
-    "docs:preview": "pnpm --dir docs preview"
+    "docs:preview": "pnpm --dir docs preview",
+    "deploy": "exm deploy @oms/extension",
+    "publish": "exm publish @oms/extension"
   },
   "devDependencies": {
     "@shrinktofit/eslint-plugin": "^0.0.9",

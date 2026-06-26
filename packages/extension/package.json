@@ -1,14 +1,32 @@
 {
   "name": "@oms/extension",
+  "private": true,
   "version": "0.0.1-alpha.1",
-  "extensionName": "oh-my-script",
+  "package_version": 2,
+  "editor": ">=3.8.5",
+  "author": "Bluesquall Team",
+  "vortex": {
+    "extensionName": "oh-my-script"
+  },
   "type": "module",
+  "main": "./dist/main.cjs",
+  "files": [
+    "dist",
+    "!dist/**/*.map",
+    "mount",
+    "types"
+  ],
+  "creator": {
+    "hookScript": "./dist/hooks.cjs"
+  },
   "scripts": {
     "prepublishOnly": "vite build --mode=production",
     "build": "vue-tsc -b --noEmit && vite build --mode=development",
-    "deploy": "npm run pack:build-core && pnpm --node-linker=hoisted --filter=\"oh-my-script\" deploy --legacy --prod .deploy && cd .deploy && bestzip ../oh-my-script.zip *",
     "pack:build-core": "cd packages/build-core && npm run prepublishOnly",
     "test": "vitest run"
+  },
+  "exm": {
+    "registry": "http://nexus.bluesquall.local/repository/exm-registry/"
   },
   "devDependencies": {
     "@cocos/creator-types": "^3.8.5",
@@ -30,7 +48,6 @@
     "@oms/task-queue": "workspace:*",
     "dayjs": "^1.11.20",
     "fs-extra": "^11.3.0",
-    "primevue": "^4.3.1",
     "vue": "^3.5.13",
     "winston": "^3.17.0",
     "winston-transport": "*",

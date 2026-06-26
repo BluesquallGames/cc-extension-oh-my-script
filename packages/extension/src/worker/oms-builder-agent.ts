@@ -7,7 +7,7 @@ import type { BuildResult, RebuildOptions } from './worker-message-descriptions.
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { broadcastInner, InnerPackageMessageId } from '../inner-package-messaging.js';
-import { selfExtensionName, selfPackagePath } from '../self-info.js';
+import { selfExtensionName, selfPackageName, selfPackagePath } from '../self-info.js';
 import { SceneMethods } from '../contributions/scene/index.js';
 import { createInterface } from 'node:readline/promises';
 
@@ -380,7 +380,7 @@ export class OmsBuilderAgent extends EventEmitter<{
       const reloadAssetDbRuntime = opts.reloadAssetDbRuntime ?? true;
       // 不要在这里 await，因为场景进程可能正在等待 db，而 db 又在等待我们，造成死循环。
       Editor.Message.request('scene', 'execute-scene-script', {
-        name: selfExtensionName,
+        name: selfPackageName,
         method: 'reloadScripts' satisfies keyof SceneMethods,
         args: [reason] as Parameters<SceneMethods['reloadScripts']>,
       }).catch((err) => {
@@ -388,7 +388,7 @@ export class OmsBuilderAgent extends EventEmitter<{
       });
       if (reloadAssetDbRuntime) {
         Editor.Message.request('asset-db', 'execute-script', {
-          name: selfExtensionName,
+          name: selfPackageName,
           method: 'reloadRuntime',
           args: [reason],
         }).catch((err) => {

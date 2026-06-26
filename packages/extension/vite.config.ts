@@ -78,7 +78,6 @@ export default defineConfig(({ mode }) => {
           'winston-transport',
           'yaml',
           'vue',
-          'primevue',
         ],
       },
     },
