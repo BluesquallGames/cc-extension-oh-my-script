@@ -218,7 +218,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     logger.debug(`${logTag}Setup OMS builder`);
     const main = require.resolve('@oms/build-core/main');
     const workerLogFd = 3;
-    const childProcess = cp.spawn('node', ['--inspect', main], {
+    const childProcess = cp.spawn('node', ['--inspect-publish-uid=http', '--inspect', main], {
       stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'],
       env: {
         ...process.env,
@@ -238,10 +238,6 @@ export class OmsBuilderAgent extends EventEmitter<{
     if (childProcess.stderr) {
       (async () => {
         for await (const line of createInterface(childProcess.stderr as NodeJS.ReadableStream)) {
-          if (isNodeInspectorBanner(line)) {
-            logger.debug('[worker-console] ' + line);
-            continue;
-          }
           logger.error('[worker-console] ' + line);
         }
       })().catch((err) => {
@@ -435,13 +431,6 @@ interface ServerAgent {
 
 interface HandleBuildResultOptions {
   reloadAssetDbRuntime?: boolean;
-}
-
-function isNodeInspectorBanner(line: string) {
-  return line.startsWith('Debugger listening on ')
-    || line.startsWith('Debugger attached.')
-    || line.startsWith('Waiting for the debugger to disconnect...')
-    || line.startsWith('For help, see: https://nodejs.org/en/docs/inspector');
 }
 
 enum StateType {
