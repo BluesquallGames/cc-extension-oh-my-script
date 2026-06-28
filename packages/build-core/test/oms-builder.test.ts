@@ -903,15 +903,17 @@ it('fails build when project mode is local', async () => {
 
 it('uses production mode for prod builds', async () => {
   /// @case
-  /// 1. A project entry branches on import.meta.env.PROD.
+  /// 1. A project entry branches on import.meta.env.PROD and cc/env BUILD.
   /// 2. The regular watcher build initializes domains, then buildProd emits a production bundle.
   /// @expect
-  /// The prod bundle sees import.meta.env.PROD as true and import.meta.env.DEV as false.
+  /// The prod bundle sees import.meta.env.PROD as true, import.meta.env.DEV as false, and cc/env BUILD as true.
   const project = await makeTempDir();
   const buildDir = join(await makeTempDir(), 'build');
   await fs.ensureDir(join(project, 'src'));
   await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'import { BUILD } from "cc/env";',
     'export const value = import.meta.env.PROD && !import.meta.env.DEV ? "prod-branch" : "dev-branch";',
+    'export const buildValue = BUILD ? "build-mode" : "not-build-mode";',
   ].join('\n'));
   const ctx = new ServerContext({
     invoke: async () => undefined,
@@ -937,11 +939,66 @@ it('uses production mode for prod builds', async () => {
     const output = await fs.readFile(join(buildDir, 'oms', 'bundle-main.js'), 'utf8');
     expect(output).toContain('prod-branch');
     expect(output).not.toContain('dev-branch');
+    expect(output).toContain('build-mode');
+    expect(output).not.toContain('not-build-mode');
   } finally {
     await (builder as any)._clean();
   }
 });
 
+it('replaces process.env.NODE_ENV in production dependencies', async () => {
+  /// @case
+  /// 1. A production build imports a dependency that branches on process.env.NODE_ENV.
+  /// 2. The project does not explicitly define process.env.NODE_ENV.
+  /// @expect
+  /// OMS applies the default production NODE_ENV define, so browser output does not retain a process reference.
+  const project = await makeTempDir();
+  const buildDir = join(await makeTempDir(), 'build');
+  await fs.ensureDir(join(project, 'src'));
+  await fs.ensureDir(join(project, 'node_modules', 'tiny-node-env'));
+  await fs.outputJSON(join(project, 'node_modules', 'tiny-node-env', 'package.json'), {
+    name: 'tiny-node-env',
+    version: '1.0.0',
+    type: 'module',
+    exports: './index.js',
+  });
+  await fs.outputFile(join(project, 'node_modules', 'tiny-node-env', 'index.js'), [
+    'export const value = process.env.NODE_ENV === "production" ? "prod-branch" : "dev-branch";',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'import { value } from "tiny-node-env";',
+    'export const result = value;',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+    await builder.buildProd({
+      buildDir,
+      debug: false,
+      sourceMaps: false,
+      platform: 'web',
+      headless: false,
+    });
+
+    const output = await fs.readFile(join(buildDir, 'oms', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('prod-branch');
+    expect(output).not.toContain('dev-branch');
+    expect(output).not.toContain('process.env.NODE_ENV');
+    expect(output).not.toContain('process');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
 it('rebuilds when a dotenv file changes', async () => {
   /// @case
   /// 1. A project entry reads import.meta.env.OMS_VALUE from .env.

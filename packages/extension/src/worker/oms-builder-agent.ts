@@ -145,6 +145,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     debug: boolean;
     sourceMaps: boolean | 'inline';
     platform: string;
+    headless?: boolean;
   }) {
     switch (this._state.type) {
     case StateType.closing:
@@ -153,7 +154,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     }
 
     const serverAgent = await this._setup();
-    await serverAgent.ipc.invoke('build-prod', { ...opts, headless: true });
+    await serverAgent.ipc.invoke('build-prod', { ...opts, headless: opts.headless ?? false });
   }
 
   private _state: {

@@ -27,6 +27,10 @@ export async function createProjectDefine(options: {
     prefixes: config.envPrefix,
   });
 
+  const processEnvDefine: Record<string, string> = {
+    'process.env.NODE_ENV': JSON.stringify(mode === 'production' ? 'production' : 'development'),
+  };
+
   const importMetaEnvDefine: Record<string, string> = {
     'import.meta.env.MODE': JSON.stringify(mode),
     'import.meta.env.DEV': String(mode !== 'production'),
@@ -38,6 +42,7 @@ export async function createProjectDefine(options: {
   }
 
   const define = {
+    ...processEnvDefine,
     ...importMetaEnvDefine,
     ...config.define,
   };

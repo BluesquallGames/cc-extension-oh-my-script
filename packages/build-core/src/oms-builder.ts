@@ -446,7 +446,7 @@ class OmsWatcher extends EventEmitter<{
       debug: opts.debug,
       ccEnvParams: {
         platform: opts.platform,
-        mode: 'BUILD',
+        mode: 'build',
         debug: opts.debug,
       },
       config,
