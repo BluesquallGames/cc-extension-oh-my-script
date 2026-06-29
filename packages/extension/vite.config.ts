@@ -4,8 +4,8 @@ import { builtinModules } from 'node:module';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import useEditorModules from '@feb/cc-extension-utils/vite/plugin-use-editor-modules';
-import { contributionModules } from '@feb/cc-extension-utils/vite/plugin-contribution-modules';
+import useEditorModules from '@cyclonium/cc-extension-utils/vite-plugins/use-editor-modules';
+import { contributionModules } from '@cyclonium/cc-extension-utils/vite-plugins/contribution-modules';
 
 const readDirEntries = (() => {
   async function* r(root: string, currentDir: string = ''): AsyncGenerator<string> {

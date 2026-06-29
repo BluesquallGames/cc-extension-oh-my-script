@@ -1,8 +1,8 @@
-/// <reference types="@feb/cc-extension-utils/types/contribution-modules" />
+/// <reference types="@cyclonium/cc-extension-utils/types/vite-plugins/contribution-modules" />
 
 import { logger } from './logger.js';
 import { workerMessageDescriptions } from './worker/worker-message-descriptions.js';
-import { ExtensionContributions, mergeContributions } from '@feb/cc-extension-utils/extension';
+import { ExtensionContributions, mergeContributions } from '@cyclonium/cc-extension-utils/extension';
 import sceneContributionScript from './contributions/scene/index.ts?contribution-script';
 import serverContributionScript from './contributions/server.ts?contribution-script';
 import footerContributionScript from './contributions/footer/right.ts?contribution-script';

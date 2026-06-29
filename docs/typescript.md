@@ -71,7 +71,7 @@ declare module "oms://text-field/editor" {
 优先检查扩展导出入口自己的 `.d.ts` 是否能表达正确导出。例如入口 JS 是：
 
 ```js
-export * from '@feb/text-field';
+export * from '@cyclonium/text-field';
 ```
 
-对应类型入口也应能让 TypeScript 解析到 `@feb/text-field`。如果扩展是通过 symlink 或 pnpm virtual store 挂载，OMS 生成的代理应指向真实入口路径，而不是项目里的展示路径。
+对应类型入口也应能让 TypeScript 解析到 `@cyclonium/text-field`。如果扩展是通过 symlink 或 pnpm virtual store 挂载，OMS 生成的代理应指向真实入口路径，而不是项目里的展示路径。

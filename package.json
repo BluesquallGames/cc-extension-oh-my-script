@@ -8,8 +8,8 @@
     "docs:dev": "pnpm --dir docs dev",
     "docs:build": "pnpm --dir docs build",
     "docs:preview": "pnpm --dir docs preview",
-    "deploy": "exm deploy @oms/extension",
-    "publish": "exm publish @oms/extension"
+    "deploy": "exm deploy oh-my-script",
+    "publish": "exm publish oh-my-script"
   },
   "devDependencies": {
     "@shrinktofit/eslint-plugin": "^0.0.9",

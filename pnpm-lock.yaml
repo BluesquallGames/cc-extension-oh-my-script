@@ -4,6 +4,21 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@types/node':
+      specifier: 25.6.0
+      version: 25.6.0
+    typescript:
+      specifier: ^6.0.3
+      version: 6.0.3
+    vite:
+      specifier: ^6.2.2
+      version: 6.3.5
+    vitest:
+      specifier: ^3.0.8
+      version: 3.2.4
+
 importers:
 
   .:
@@ -129,9 +144,9 @@ importers:
 
   packages/extension:
     dependencies:
-      '@feb/cc-extension-utils':
-        specifier: ^0.0.10
-        version: 0.0.10
+      '@cyclonium/cc-extension-utils':
+        specifier: ^0.0.102
+        version: 0.0.102
       '@oms/build-core':
         specifier: workspace:*
         version: link:../build-core
@@ -834,6 +849,9 @@ packages:
     resolution: {integrity: sha512-Ir+AOibqzrIsL6ajt3Rz3LskB7OiMVHqltZmspbW/TJuTVuyOMirVqAkjfY6JISiLHgyNqicAC8AyHHGzNd/dA==}
     engines: {node: '>=0.1.90'}
 
+  '@cyclonium/cc-extension-utils@0.0.102':
+    resolution: {integrity: sha512-C2qsTsT+CQ3NcQveaiwWERbOvgYHBGruRJ4jM1bC6AmJGeJaQILmN8KRVqadhAkW6FsVrhTFS1VTra/6QfXBPA==}
+
   '@dabh/diagnostics@2.0.3':
     resolution: {integrity: sha512-hrlQOIi7hAfzsMqlGSFyVucrx38O+j6wiGOf//H2ecvIEqYN4ADBSS2iLMh5UFyDunCNniUIPk/q3riFv45xRA==}
 
@@ -1212,9 +1230,6 @@ packages:
   '@eslint/plugin-kit@0.3.5':
     resolution: {integrity: sha512-Z5kJ+wU3oA7MMIqVR9tyZRtjYPr4OC004Q4Rw7pgOKUOKkJfZ3O24nz3WYfGRpMDNmcOi3TwQOmgm7B7Tpii0w==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
-
-  '@feb/cc-extension-utils@0.0.10':
-    resolution: {integrity: sha512-8Dg7e4TksqZHETM+5/7ACzit3ln5yDI/57YziBOtGTp2LVOq5b2eCjggON7CcCfx63NJG227erRLij87kFsKbA==}
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -4743,6 +4758,12 @@ snapshots:
 
   '@colors/colors@1.6.0': {}
 
+  '@cyclonium/cc-extension-utils@0.0.102':
+    dependencies:
+      fs-extra: 11.3.0
+      winston: 3.17.0
+      winston-transport: 4.9.0
+
   '@dabh/diagnostics@2.0.3':
     dependencies:
       colorspace: 1.1.4
@@ -4990,12 +5011,6 @@ snapshots:
     dependencies:
       '@eslint/core': 0.15.2
       levn: 0.4.1
-
-  '@feb/cc-extension-utils@0.0.10':
-    dependencies:
-      fs-extra: 11.3.0
-      winston: 3.17.0
-      winston-transport: 4.9.0
 
   '@humanfs/core@0.19.1': {}
 
