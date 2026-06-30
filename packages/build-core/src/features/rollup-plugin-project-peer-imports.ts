@@ -18,21 +18,22 @@ export function rollupPluginProjectPeerImports({
   return {
     name: 'oms:project-peer-imports',
 
-    async resolveId(source, _importer, options) {
+    async resolveId(source, importer, options) {
       if (!source.startsWith(OMS_PEER_IMPORT_PREFIX)) {
         return null;
       }
+      const importerText = importer ?? '<entry>';
       if (!projectRoot) {
-        this.error(`OMS peer import ${source} requires a project root`);
+        this.error(`OMS peer import ${source} from ${importerText} requires a project root`);
       }
 
       const projectPeerSource = source.slice(OMS_PEER_IMPORT_PREFIX.length);
       const packageName = getBarePackageName(projectPeerSource);
       if (!packageName) {
-        this.error(`OMS peer import ${source} should reference a bare package specifier`);
+        this.error(`OMS peer import ${source} from ${importerText} should reference a bare package specifier`);
       }
       if (!projectPeerSet.has(packageName)) {
-        this.error(`OMS peer import ${source} is not allowed. Add ${packageName} to resolve.projectPeers in the project oms.config.*`);
+        this.error(`OMS peer import ${source} from ${importerText} is not allowed. Add ${packageName} to resolve.projectPeers in the project oms.config.*`);
       }
 
       const projectImporter = join(projectRoot, PROJECT_PEER_IMPORTER);
@@ -41,11 +42,11 @@ export function rollupPluginProjectPeerImports({
         skipSelf: true,
       });
       if (resolved && !resolved.external && resolved.id !== projectPeerSource) {
-        logger.debug(`Resolved OMS peer import ${source} from project root: ${resolved.id}`);
+        logger.debug(`Resolved OMS peer import ${source} from ${importerText} via project root: ${resolved.id}`);
         return resolved;
       }
 
-      this.error(`Failed to resolve OMS peer import ${source} from the project root. Install ${packageName} in the project or remove it from resolve.projectPeers`);
+      this.error(`Failed to resolve OMS peer import ${source} from ${importerText} via the project root. Install ${packageName} in the project or remove it from resolve.projectPeers`);
     },
   };
 }

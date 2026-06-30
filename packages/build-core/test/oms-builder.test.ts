@@ -528,8 +528,9 @@ it('fails OMS peer imports when the project does not provide the peer package', 
     '};',
   ].join('\n'));
   const extensionRoot = join(project, 'extensions', 'peer-extension');
+  const runtimeEntry = join(extensionRoot, 'exports', 'lib', 'runtime', 'index.js');
   await outputNodePackage(extensionRoot, 'peer-pkg', 'export const origin = "extension-peer-origin";');
-  await fs.outputFile(join(extensionRoot, 'exports', 'lib', 'runtime', 'index.js'), 'export { origin } from "#oms-peer:peer-pkg";');
+  await fs.outputFile(runtimeEntry, 'export { origin } from "#oms-peer:peer-pkg";');
   await fs.outputFile(join(extensionRoot, 'oms.config.mjs'), [
     'export default {',
     '  exports: {',
@@ -555,7 +556,7 @@ it('fails OMS peer imports when the project does not provide the peer package', 
     })).resolves.toMatchObject({
       ok: false,
       error: {
-        message: expect.stringContaining('Failed to resolve OMS peer import #oms-peer:peer-pkg from the project root'),
+        message: expect.stringContaining(`Failed to resolve OMS peer import #oms-peer:peer-pkg from ${runtimeEntry} via the project root`),
       },
     });
   } finally {
