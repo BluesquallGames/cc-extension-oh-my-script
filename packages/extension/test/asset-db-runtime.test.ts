@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuildResult } from '../src/worker/worker-message-descriptions';
 
 const mockState = vi.hoisted(() => {
@@ -8,6 +8,7 @@ const mockState = vi.hoisted(() => {
     reloadWaiters: [] as Array<Promise<void>>,
     ensureReadyWaiters: [] as Array<Promise<void>>,
     requestCalls: [] as Array<{ messageId: string; args: unknown[] }>,
+    loggerErrorCalls: [] as unknown[][],
     syncTaskCalls: [] as Array<{
       type: 'add' | 'update' | 'remove';
       name: string;
@@ -16,6 +17,7 @@ const mockState = vi.hoisted(() => {
     }>,
     installGlobalImportCalls: 0,
     rebuildResult: { ok: true, beginningModules: ['src/index.ts'] } as BuildResult,
+    rebuildPromise: undefined as Promise<BuildResult> | undefined,
     rebuildError: undefined as Error | undefined,
   };
 });
@@ -24,7 +26,20 @@ vi.mock(import('../src/logger.js'), () => {
   return {
     logger: {
       debug: vi.fn(),
-      error: vi.fn(),
+      info: vi.fn(),
+      error: vi.fn((...args: unknown[]) => {
+        mockState.loggerErrorCalls.push(args);
+      }),
+    },
+  };
+});
+
+vi.mock('node:timers/promises', () => {
+  return {
+    setTimeout: (delay: number) => {
+      return new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, delay);
+      });
     },
   };
 });
@@ -39,6 +54,9 @@ vi.mock(import('../src/utils/request-self.js'), () => {
       if (messageId === 'rebuild') {
         if (mockState.rebuildError) {
           throw mockState.rebuildError;
+        }
+        if (mockState.rebuildPromise) {
+          return await mockState.rebuildPromise;
         }
         return mockState.rebuildResult;
       }
@@ -91,12 +109,14 @@ beforeEach(() => {
   mockState.reloadWaiters.length = 0;
   mockState.ensureReadyWaiters.length = 0;
   mockState.requestCalls.length = 0;
+  mockState.loggerErrorCalls.length = 0;
   mockState.syncTaskCalls.length = 0;
   mockState.installGlobalImportCalls = 0;
   mockState.rebuildResult = {
     ok: true,
     beginningModules: ['src/index.ts'],
   };
+  mockState.rebuildPromise = undefined;
   mockState.rebuildError = undefined;
   vi.stubGlobal('Editor', {
     Task: {
@@ -125,6 +145,10 @@ beforeEach(() => {
       },
     },
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('asset-db OMS runtime startup', () => {
@@ -171,6 +195,39 @@ describe('asset-db OMS runtime startup', () => {
     expect(mockState.syncTaskCalls.at(-1)).toEqual({
       type: 'remove',
       name: 'oh-my-script:first-build',
+    });
+  });
+
+  it('times out the OMS first-build wait after 120 seconds', async () => {
+    /// @case
+    /// 1. asset-db beforePreStart starts the OMS first build.
+    /// 2. The worker rebuild request remains pending.
+    /// @expect
+    /// The startup task remains visible before 120 seconds and is removed after the 120-second timeout.
+    vi.useFakeTimers();
+    mockState.rebuildPromise = new Promise(() => undefined);
+    const assetDb = await import('../src/contributions/asset-db/index');
+
+    const beforePreStartPromise = assetDb.methods.beforePreStart({});
+    await vi.advanceTimersByTimeAsync(119_999);
+
+    expect(mockState.syncTaskCalls.at(-1)).toEqual({
+      type: 'update',
+      name: 'oh-my-script:first-build',
+      message: 'Building oh-my-script project scripts...',
+      detail: 'Waiting for first build',
+    });
+    expect(mockState.loggerErrorCalls).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await beforePreStartPromise;
+
+    expect(mockState.syncTaskCalls.at(-1)).toEqual({
+      type: 'remove',
+      name: 'oh-my-script:first-build',
+    });
+    expect(mockState.loggerErrorCalls[0]?.[1]).toMatchObject({
+      message: 'oh-my-script first build timeout after 120s',
     });
   });
 

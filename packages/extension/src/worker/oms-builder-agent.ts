@@ -216,9 +216,11 @@ export class OmsBuilderAgent extends EventEmitter<{
   }
 
   private async _doSetup(): Promise<ServerAgent> {
+    const setupStart = Date.now();
     logger.debug(`${logTag}Setup OMS builder`);
     const main = require.resolve('@oms/build-core/main');
     const workerLogFd = 3;
+    const spawnStart = Date.now();
     const childProcess = cp.spawn('node', ['--inspect-publish-uid=http', '--inspect', main], {
       stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'],
       env: {
@@ -287,9 +289,12 @@ export class OmsBuilderAgent extends EventEmitter<{
     const bootstrapPromise = new Promise<void>((resolve, reject) => {
       ipc.listen('bootstrapped', async () => {
         logger.debug(`${logTag}OMS builder has bootstrapped`);
+        logger.info(`${logTag}Worker bootstrapped in ${Date.now() - spawnStart}ms`);
+        const setupIpcStart = Date.now();
         await ipc.invoke('setup', {
           project: Editor.Project.path,
         });
+        logger.info(`${logTag}Worker setup IPC done in ${Date.now() - setupIpcStart}ms`);
         resolve();
       });
     });
@@ -317,6 +322,7 @@ export class OmsBuilderAgent extends EventEmitter<{
 
     await bootstrapPromise;
 
+    logger.info(`${logTag}Builder setup done in ${Date.now() - setupStart}ms`);
     logger.debug(`${logTag}Builder has setup`);
 
     return {

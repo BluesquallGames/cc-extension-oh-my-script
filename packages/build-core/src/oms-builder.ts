@@ -865,19 +865,38 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private async _doExecBuild() {
+    const prepareStart = Date.now();
     const entryChanged = await this._executeFileQueue();
 
     await this._uuidManager.emit();
+    logger.info(`Build prepare done in ${Date.now() - prepareStart}ms`);
 
     let defaultProfileBuildResult: InternalBuildResult;
     let headlessBuildResult: InternalBuildResult | undefined;
+    const profileBuildStart = Date.now();
+    const runProfileBuild = async <T extends InternalBuildResult | undefined>(title: string, action: () => Promise<T>) => {
+      const start = Date.now();
+      try {
+        return await action();
+      } finally {
+        logger.info(`${title} done in ${Date.now() - start}ms`);
+      }
+    };
     if (this._lastBuildExtras && !entryChanged) {
+      const defaultProfileBuildPromise = runProfileBuild(
+        'default profile build',
+        async () => await this._buildRecord.build(),
+      );
+      const headlessBuildRecord = this._headlessBuildRecord;
+      const headlessProfileBuildPromise = headlessBuildRecord
+        ? runProfileBuild('headless profile build', async () => await headlessBuildRecord.build())
+        : undefined;
       ([
         defaultProfileBuildResult,
         headlessBuildResult,
       ] = await promiseSequential([
-        this._buildRecord.build(),
-        this._headlessBuildRecord?.build(),
+        defaultProfileBuildPromise,
+        headlessProfileBuildPromise,
       ]));
     } else {
       this._lastBuildExtras = undefined;
@@ -886,7 +905,7 @@ class OmsWatcher extends EventEmitter<{
         entryFiles: new Set(),
       };
 
-      const defaultProfileBuildPromise = (async () => {
+      const defaultProfileBuildPromise = runProfileBuild('default profile rebuild', async () => {
         const { entries } = await this._makeEntries({
           regular: true,
           editor: true,
@@ -905,31 +924,31 @@ class OmsWatcher extends EventEmitter<{
           config: this._config,
           profileBuildConfig: undefined,
         });
-      })();
+      });
 
-      const headlessBuildPromise = (async () => {
-        if (!this._headlessBuildRecord) {
-          return undefined;
-        }
-        const { entries } = await this._makeEntries({
-          regular: false,
-          editor: false,
-          headless: true,
-        });
-        for (const domain of Object.values(this._domains)) {
-          for (const implicitEntry of domain.getImplicitEntries()) {
-            buildExtras.entryFiles.add(implicitEntry);
+      const headlessBuildRecord = this._headlessBuildRecord;
+      const headlessBuildPromise = headlessBuildRecord
+        ? runProfileBuild('headless profile rebuild', async () => {
+          const { entries } = await this._makeEntries({
+            regular: false,
+            editor: false,
+            headless: true,
+          });
+          for (const domain of Object.values(this._domains)) {
+            for (const implicitEntry of domain.getImplicitEntries()) {
+              buildExtras.entryFiles.add(implicitEntry);
+            }
           }
-        }
-        return this._headlessBuildRecord.rebuild({
-          entries: entries,
-          uuidProvider: this._uuidProvider,
-          domains: this._domains,
-          projectRoot: this._projectPath,
-          config: this._config,
-          profileBuildConfig: this._config.headless.build,
-        });
-      })();
+          return await headlessBuildRecord.rebuild({
+            entries: entries,
+            uuidProvider: this._uuidProvider,
+            domains: this._domains,
+            projectRoot: this._projectPath,
+            config: this._config,
+            profileBuildConfig: this._config.headless.build,
+          });
+        })
+        : undefined;
 
       ([
         defaultProfileBuildResult,
@@ -941,6 +960,7 @@ class OmsWatcher extends EventEmitter<{
 
       this._lastBuildExtras = buildExtras;
     }
+    logger.info(`Profile builds done in ${Date.now() - profileBuildStart}ms`);
 
     const mergedBuildResult = headlessBuildResult ? mergeBuildResults(defaultProfileBuildResult, headlessBuildResult) : defaultProfileBuildResult;
     return [mergedBuildResult, this._lastBuildExtras] as const;

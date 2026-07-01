@@ -19,6 +19,7 @@ import type { OmsProjectConfig, ProfileBuildConfig } from './config.js';
 import { logger } from './logger.js';
 import type { Domain } from './domain.js';
 import { join } from 'node:path';
+import fs from 'fs-extra';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
 import { rollupPluginProjectPeerImports } from './features/rollup-plugin-project-peer-imports.js';
@@ -334,6 +335,7 @@ export class BuildRecord {
       },
     ];
 
+    const rollupStart = Date.now();
     const rollupBuild = await rollup.rollup({
       cache: this._cache,
       input: rollupEntries,
@@ -358,6 +360,7 @@ export class BuildRecord {
       perf: true,
       treeshake: this._treeShake,
     });
+    logger.info(`${this._title} Rollup build done in ${Date.now() - rollupStart}ms`);
 
     this._cache = rollupBuild.cache;
 
@@ -385,7 +388,10 @@ export class BuildRecord {
       preserveModules: !!this._headless,
     };
 
+    const writeStart = Date.now();
     await rollupBuild.write(outputOptions);
+    const outputSummary = await summarizeOutputDir(this._outDir);
+    logger.info(`${this._title} Rollup write done in ${Date.now() - writeStart}ms (${outputSummary.files} files, ${formatBytes(outputSummary.bytes)})`);
     if (rollupBuild.getTimings) {
       logger.debug(`${this._title} Rollup timings: %o`, rollupBuild.getTimings());
     }
@@ -444,6 +450,40 @@ export class BuildRecord {
       ],
     });
   }
+}
+
+async function summarizeOutputDir(dir: string) {
+  let files = 0;
+  let bytes = 0;
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const childSummary = await summarizeOutputDir(path);
+      files += childSummary.files;
+      bytes += childSummary.bytes;
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+    files += 1;
+    bytes += (await fs.stat(path)).size;
+  }
+  return {
+    files,
+    bytes,
+  };
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
 const ROLLUP_MODULE_CACHE_KEY_UUID = '__oms_uuid__';

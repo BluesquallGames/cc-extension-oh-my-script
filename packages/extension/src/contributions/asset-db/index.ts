@@ -19,6 +19,7 @@ enum AssetDBRuntimePhase {
 const firstBuildSyncTaskName = `${selfExtensionName}:first-build`;
 const firstBuildSyncTaskMessage = `Building ${selfExtensionName} project scripts...`;
 const firstBuildSyncTaskDetail = 'Waiting for first build';
+const firstBuildTimeoutSec = 2 * 60;
 
 export async function load() {
   firstBuildResult = undefined;
@@ -57,7 +58,6 @@ export const methods = {
     void assetDBInfo;
     const t0 = Date.now();
     logger.info(`Wait for ${selfExtensionName} first build...`);
-    const timeoutSec = 1 * 60;
     Editor.Task.__protected__.addSyncTask(firstBuildSyncTaskName, firstBuildSyncTaskMessage);
     Editor.Task.__protected__.updateSyncTask(
       firstBuildSyncTaskName,
@@ -70,8 +70,8 @@ export const methods = {
           reason: 'asset-db startup build',
           reloadAssetDbRuntime: false,
         }),
-        setTimeout(timeoutSec * 1000).then(() => {
-          throw new Error(`${selfExtensionName} first build timeout after ${timeoutSec}s`);
+        setTimeout(firstBuildTimeoutSec * 1000).then(() => {
+          throw new Error(`${selfExtensionName} first build timeout after ${firstBuildTimeoutSec}s`);
         }),
       ]);
       firstBuildResult = result;
