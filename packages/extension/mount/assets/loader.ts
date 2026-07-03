@@ -159,7 +159,7 @@ if (EDITOR) {
 
   let omsHostBaseURLPrefix = '';
   if (HTML5) {
-    omsHostBaseURLPrefix = new globalThis.URL('./oms/', window.location.href).href;
+    omsHostBaseURLPrefix = new globalThis.URL('./oms/', document.baseURI).href;
   } else if (NATIVE) {
     omsHostBaseURLPrefix = `no-schema:/oms/`;
   } else {
