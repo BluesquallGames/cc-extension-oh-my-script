@@ -1,19 +1,27 @@
 import assert from 'node:assert';
-import { Bundle, BundleUsage } from './bundle.js';
-import type { UUIDManager } from './uuid-manager.js';
+import { Bundle } from './bundle.js';
+import { extractInlineUUID, UUIDManager } from './uuid-manager.js';
 import fs from 'fs-extra';
 import { dirname, join, relative, resolve } from 'node:path';
 import { logger } from './logger.js';
 import { domainURLProtocol } from './constants.js';
-import type { HeadlessConfig } from './config.js';
 import { isOmsConfigFileName, loadOmsConfigModule } from './config-loader.js';
 import { makeOmsExportEntryId } from './utils/entry-id.js';
 import type { InternalBuildEntry } from './build-record.js';
 
-export interface DomainEntryQueryOptions {
-  regular: boolean;
-  editor: boolean;
-  headless: boolean;
+export interface DomainProfile {
+  id: string;
+  sourceMatcher: (relativePath: string) => boolean;
+  bundle: {
+    idSuffix: string;
+    indexPreStem: string;
+    indexPostStem: string;
+  };
+}
+
+export interface ProfileBuildOptions {
+  editor?: boolean;
+  dynamicExports?: boolean;
 }
 
 export class Domain {
@@ -22,31 +30,31 @@ export class Domain {
     private _domainRoot: string,
     private _partitions: PackageOmsPartitionConfig[],
     private _exports: Record<string, string>,
-    uuidManager: UUIDManager,
-    private _headlessConfig: HeadlessConfig | undefined,
+    private _uuidManager: UUIDManager,
+    profiles: DomainProfile[],
     exportPackageName?: string,
   ) {
     this._exportPackageName = exportPackageName ?? _id;
 
-    {
-      const domainId = this._id;
-
-      const mainBundleId = domainId;
-      this._mainBundle = new Bundle(mainBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, BundleUsage.regular);
-      this._bundles[mainBundleId] = this._mainBundle;
-      for (const partition of _partitions) {
-        this._bundleSourceRootMap.push({ sourceRoot: join(this._domainRoot, partition.rootDir), bundleId: mainBundleId });
-      }
-
-      const editorBundleId = `${domainId}.editor`;
-      this._editorBundle = new Bundle(editorBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, BundleUsage.editor);
-      this._bundles[editorBundleId] = this._editorBundle;
-
-      if (this._headlessConfig && this._headlessConfig.enabled) {
-        const headlessBundleId = `${domainId}.headless`;
-        this._headlessBundle = new Bundle(headlessBundleId, _partitions.map((p) => join(this._domainRoot, p.rootDir)), uuidManager, BundleUsage.headless);
-        this._bundles[headlessBundleId] = this._headlessBundle;
-      }
+    const indexModuleDirs = this.sourceRoots;
+    for (const profile of profiles) {
+      assert.ok(!this._profileStates[profile.id], `Duplicate profile ${profile.id} in domain ${this._id}`);
+      const bundleId = `${this._id}${profile.bundle.idSuffix}`;
+      this._profileStates[profile.id] = {
+        sourceMatcher: profile.sourceMatcher,
+        bundle: new Bundle({
+          id: bundleId,
+          indexModuleDirs,
+          indexPreStem: profile.bundle.indexPreStem,
+          indexPostStem: profile.bundle.indexPostStem,
+        }),
+        editorBundle: new Bundle({
+          id: `${bundleId}.editor`,
+          indexModuleDirs,
+          indexPreStem: `${profile.bundle.indexPreStem}.editor`,
+          indexPostStem: `${profile.bundle.indexPostStem}.editor`,
+        }),
+      };
     }
   }
 
@@ -58,36 +66,32 @@ export class Domain {
     return this._partitions.map((p) => join(this._domainRoot, p.rootDir));
   }
 
-  getEntrySpecs(opts: DomainEntryQueryOptions): Record<string, BundleEntrySpec> {
+  getEntrySpecs(profileId: string, opts: ProfileBuildOptions = {}): Record<string, BundleEntrySpec> {
     const entrySpecs: Record<string, BundleEntrySpec> = {};
 
-    for (const [bundleId, bundle] of Object.entries(this._bundles)) {
-      if (bundle === this._editorBundle) {
-        if (!opts.editor) {
-          continue;
-        }
-      } else if (bundle === this._headlessBundle) {
-        if (!opts.headless) {
-          continue;
-        }
-      } else {
-        if (!opts.regular) {
-          continue;
-        }
+    const profileState = this._profileStates[profileId];
+    if (!profileState) {
+      return entrySpecs;
+    }
+    const bundles = [profileState.bundle, opts.editor ? profileState.editorBundle : undefined];
+    for (const bundle of bundles) {
+      if (!bundle) {
+        continue;
       }
       if (bundle.empty) {
         continue;
       }
+      const bundleId = bundle.id;
       entrySpecs[`bundle-${bundleId}`] = {
         source: bundle.entrySource,
         autoRun: {
           bundleId,
-          isEditorEntry: bundle === this._editorBundle,
+          isEditorEntry: bundle === profileState.editorBundle,
         },
       };
     }
 
-    if (opts.regular) {
+    if (opts.dynamicExports !== false) {
       for (const [key, value] of Object.entries(this._exports)) {
         const entryName = makeOmsExportEntryId(this._exportPackageName, key);
         entrySpecs[entryName] = {
@@ -104,9 +108,17 @@ export class Domain {
     return entrySpecs;
   }
 
-  getImplicitEntries(): string[] {
+  getImplicitEntries(profileId: string, opts: ProfileBuildOptions = {}): string[] {
+    const profileState = this._profileStates[profileId];
+    if (!profileState) {
+      return [];
+    }
     const implicitEntries = new Set<string>();
-    for (const bundle of Object.values(this._bundles)) {
+    const bundles = [profileState.bundle, opts.editor ? profileState.editorBundle : undefined];
+    for (const bundle of bundles) {
+      if (!bundle) {
+        continue;
+      }
       for (const implicitEntry of bundle.getImplicitEntries()) {
         implicitEntries.add(implicitEntry);
       }
@@ -115,18 +127,33 @@ export class Domain {
   }
 
   async addSourceFile(path: string) {
-    const bundle = this._getBundle(path);
-    return bundle.addSourceFile(path);
+    const bundles = this._getSourceFileBundles(path);
+    if (this._isComponentModule(path)) {
+      await this._ensureUUID(path);
+    }
+    let shouldRebuildBundle = false;
+    for (const bundle of bundles) {
+      shouldRebuildBundle = bundle.addSourceFile(path) || shouldRebuildBundle;
+    }
+    return shouldRebuildBundle;
   }
 
-  async removeSourceFile(path: string) {
-    const bundle = this._getBundle(path);
-    return bundle.removeSourceFile(path);
+  removeSourceFile(path: string) {
+    const bundles = this._getSourceFileBundles(path);
+    if (this._isComponentModule(path)) {
+      this._uuidManager.delete(path);
+    }
+    let shouldRebuildBundle = false;
+    for (const bundle of bundles) {
+      shouldRebuildBundle = bundle.removeSourceFile(path) || shouldRebuildBundle;
+    }
+    return shouldRebuildBundle;
   }
 
   async updateSourceFile(path: string) {
-    const bundle = this._getBundle(path);
-    return bundle.updateSourceFile(path);
+    if (this._isComponentModule(path)) {
+      await this._ensureUUID(path);
+    }
   }
 
   resolveExport(exportSubpath: string): string | undefined {
@@ -149,51 +176,43 @@ export class Domain {
   }
 
   private _exportPackageName: string;
-  private _mainBundle: Bundle;
-  private _editorBundle: Bundle;
-  private _headlessBundle: Bundle | undefined;
-  private _bundles: Record<string, Bundle> = {};
-  private _bundleSourceRootMap: Array<{
-    sourceRoot: string;
-    bundleId: string;
-  }> = [];
+  private _profileStates: Record<string, {
+    sourceMatcher: DomainProfile['sourceMatcher'];
+    bundle: Bundle;
+    editorBundle: Bundle;
+  }> = {};
 
-  private _getBundle(path: string) {
-    if (/\.editor\.\w+$/.test(path)) {
-      return this._editorBundle;
+  private _getSourceFileBundles(path: string): Bundle[] {
+    const sourceRoots = this.sourceRoots;
+    if (!sourceRoots.some((sourceRoot) => path.startsWith(sourceRoot))) {
+      throw new Error(`Bundle for ${path} not found in domain ${this._id}, root dirs: ${sourceRoots.join(', ')}`);
     }
-    if (this._headlessBundle && this._testHeadlessModule(path)) {
-      return this._headlessBundle;
+
+    const bundles: Bundle[] = [];
+    const isEditorModule = /\.editor\.\w+$/.test(path);
+    const relativePath = relative(this._domainRoot, path);
+    for (const profileState of Object.values(this._profileStates)) {
+      const bundle = isEditorModule ? profileState.editorBundle : profileState.bundle;
+      if (bundle.isIndexModule(path)
+        || (bundle.isComponentModule(path) && profileState.sourceMatcher(relativePath))) {
+        bundles.push(bundle);
+      }
     }
-    const bundleId = this._bundleSourceRootMap.find(({ sourceRoot }) => path.startsWith(sourceRoot))?.bundleId;
-    if (!bundleId) {
-      throw new Error(`Bundle for ${path} not found in domain ${this._id}, root dirs: ${this._bundleSourceRootMap.map(({ sourceRoot }) => sourceRoot).join(', ')}`);
-    }
-    const bundle = this._bundles[bundleId];
-    assert.ok(bundle, `Bundle for ${path} not found in domain ${this._id}`);
-    return bundle;
+    return bundles;
   }
 
-  private _testHeadlessModule(path: string): boolean {
-    const headlessConfig = this._headlessConfig;
-    if (!headlessConfig || !headlessConfig.enabled) {
-      return false;
+  private _isComponentModule(path: string) {
+    return Object.values(this._profileStates).some(({ bundle }) => bundle.isComponentModule(path));
+  }
+
+  private async _ensureUUID(sourceFile: string) {
+    try {
+      const code = await fs.readFile(sourceFile, 'utf8');
+      const inlineUUID = extractInlineUUID(code) ?? '';
+      await this._uuidManager.update(sourceFile, inlineUUID);
+    } catch (err) {
+      logger.error(`Failed to assign UUID for ${sourceFile}: %o`, err);
     }
-    if (this._headlessBundle?.isHeadlessModule(path)) {
-      return true;
-    }
-    const relativePath = relative(this._domainRoot, path);
-    if (headlessConfig.include) {
-      if (!headlessConfig.include(relativePath)) {
-        return false;
-      }
-    }
-    if (headlessConfig.exclude) {
-      if (headlessConfig.exclude(relativePath)) {
-        return false;
-      }
-    }
-    return true;
   }
 }
 

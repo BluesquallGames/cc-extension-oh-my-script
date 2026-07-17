@@ -1,31 +1,19 @@
 import { parse } from 'node:path';
-import { extractInlineUUID, UUIDManager } from './uuid-manager.js';
-import { logger } from './logger.js';
-import fs from 'fs-extra';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
 
-export enum BundleUsage {
-  regular = 'regular',
-  editor = 'editor',
-  headless = 'headless',
+export interface BundleOptions {
+  id: string;
+  indexModuleDirs: string[];
+  indexPreStem: string;
+  indexPostStem: string;
 }
 
 export class Bundle {
-  constructor(private _id: string, private _indexModuleDirs: string[], private _uuidManager: UUIDManager, private _usage: BundleUsage) {
-    switch (_usage) {
-    case BundleUsage.regular:
-      this._desiredIndexModuleFileStemPre = 'index-pre';
-      this._desiredIndexModuleFileStemPost = 'index';
-      break;
-    case BundleUsage.editor:
-      this._desiredIndexModuleFileStemPre = 'index-pre.editor';
-      this._desiredIndexModuleFileStemPost = 'index.editor';
-      break;
-    case BundleUsage.headless:
-      this._desiredIndexModuleFileStemPre = 'index-pre.headless';
-      this._desiredIndexModuleFileStemPost = 'index.headless';
-      break;
-    }
+  constructor(options: BundleOptions) {
+    this._id = options.id;
+    this._indexModuleDirs = options.indexModuleDirs;
+    this._desiredIndexModuleFileStemPre = options.indexPreStem;
+    this._desiredIndexModuleFileStemPost = options.indexPostStem;
   }
 
   get empty() {
@@ -56,24 +44,20 @@ export class Bundle {
     return implicitEntries;
   }
 
-  isHeadlessModule(path: string) {
-    if (this._usage !== BundleUsage.headless) {
-      return false;
-    }
+  isIndexModule(path: string) {
     const fileType = this._classifySourceFile(path);
     return fileType === SourceFileType.indexPost || fileType === SourceFileType.indexPre;
   }
 
-  async addSourceFile(path: string) {
+  isComponentModule(path: string) {
+    return this._classifySourceFile(path) === SourceFileType.component;
+  }
+
+  addSourceFile(path: string) {
     let shouldRebuildBundle = false;
     const fileType = this._classifySourceFile(path);
     switch (fileType) {
     case SourceFileType.component: {
-      try {
-        await this._ensureUUID(path);
-      } catch (err) {
-        logger.error(`Failed to assign UUID for ${path}: %o`, err);
-      }
       shouldRebuildBundle = this._addComponentModule(path) || shouldRebuildBundle;
       break;
     }
@@ -105,7 +89,6 @@ export class Bundle {
     const fileType = this._classifySourceFile(path);
     switch (fileType) {
     case SourceFileType.component: {
-      this._uuidManager.delete(path);
       shouldRebuildBundle = this._deleteComponentModule(path) || shouldRebuildBundle;
       break;
     }
@@ -132,30 +115,15 @@ export class Bundle {
     return shouldRebuildBundle;
   }
 
-  async updateSourceFile(path: string) {
-    const fileType = this._classifySourceFile(path);
-    switch (fileType) {
-    case SourceFileType.component: {
-      try {
-        await this._ensureUUID(path);
-      } catch (err) {
-        logger.error(`Failed to assign UUID for ${path}: %o`, err);
-      }
-      break;
-    }
-    default: {
-      break;
-    }
-    }
-  }
-
   private _indexPreModule = '';
   private _indexPostModule = '';
   private _componentModules: string[] = [];
   private _entryDirty = true;
   private _entrySource = '';
-  private _desiredIndexModuleFileStemPre = '';
-  private _desiredIndexModuleFileStemPost = '';
+  private _id: string;
+  private _indexModuleDirs: string[];
+  private _desiredIndexModuleFileStemPre: string;
+  private _desiredIndexModuleFileStemPost: string;
 
   private _invalidateEntry() {
     this._entryDirty = true;
@@ -246,11 +214,6 @@ export class Bundle {
     return true;
   }
 
-  private async _ensureUUID(sourceFile: string) {
-    const code = await fs.readFile(sourceFile, 'utf8');
-    const inlineUUID = extractInlineUUID(code) ?? '';
-    await this._uuidManager.update(sourceFile, inlineUUID);
-  }
 }
 
 enum SourceFileType {

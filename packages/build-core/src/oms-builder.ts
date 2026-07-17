@@ -11,18 +11,51 @@ import type { BuildOptions, BuildResult, InvocationParams, PassiveBuildEndInfo }
 import { promiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
-import { Domain, type DomainEntryQueryOptions } from './domain.js';
+import { Domain, type DomainProfile, type ProfileBuildOptions } from './domain.js';
 import { MergedTaskExecError, TaskQueue } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { OmsProjectConfigWatcher } from './config-watcher.js';
-import type { OmsProjectConfig } from './config.js';
+import type { OmsProjectConfig, ProfileConfig } from './config.js';
 import { BuildRecord, mergeBuildResults, type InternalBuildEntry, type InternalBuildResult } from './build-record.js';
 import { OmsDomainConfigWatcher } from './domain-config-watcher.js';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
 
 const mainDomainId = 'main';
 const omsPackageRootEnvName = 'OMS_PACKAGE_ROOT';
+const defaultProfileId = 'default';
+const headlessProfileId = 'headless';
+
+function makeDefaultDomainProfile(profileConfig: ProfileConfig | undefined): DomainProfile {
+  return {
+    id: defaultProfileId,
+    sourceMatcher: makeProfileSourceMatcher(profileConfig),
+    bundle: {
+      idSuffix: '',
+      indexPreStem: 'index-pre',
+      indexPostStem: 'index',
+    },
+  };
+}
+
+function makeHeadlessDomainProfile(profileConfig: ProfileConfig | undefined): DomainProfile {
+  return {
+    id: headlessProfileId,
+    sourceMatcher: makeProfileSourceMatcher(profileConfig),
+    bundle: {
+      idSuffix: '.headless',
+      indexPreStem: 'index-pre.headless',
+      indexPostStem: 'index.headless',
+    },
+  };
+}
+
+function makeProfileSourceMatcher(profileConfig: ProfileConfig | undefined) {
+  return (relativePath: string) => {
+    return (!profileConfig?.include || profileConfig.include(relativePath))
+      && (!profileConfig?.exclude || !profileConfig.exclude(relativePath));
+  };
+}
 
 export class OmsBuilder extends EventEmitter<{
   'passive-build-end': [PassiveBuildEndInfo];
@@ -136,23 +169,12 @@ export class OmsBuilder extends EventEmitter<{
       spaces: 2,
     });
 
-    let headlessProfile: undefined | BuildProfile;
-    if (config.headless.enabled) {
-      headlessProfile = {
-        outDir: resolve(rootOutDir, 'out-headless'),
-        typingOutDir: resolve(rootOutDir, 'typing-headless'),
-      };
-      await createProfileOutDirs(headlessProfile);
-      await fs.outputJSON(join(headlessProfile.outDir, 'package.json'), {
-        type: 'module',
-      }, {
-        spaces: 2,
-      });
-      await fs.outputJSON(join(defaultProfile.outDir, 'package.json'), {
-        type: 'module',
-      }, {
-        spaces: 2,
-      });
+    const headlessProfile: BuildProfile = {
+      outDir: resolve(rootOutDir, 'out-headless'),
+      typingOutDir: resolve(rootOutDir, 'typing-headless'),
+    };
+    if (config.profiles.headless) {
+      await initializeHeadlessProfile(headlessProfile);
     }
 
     assert(!this._watcher);
@@ -199,6 +221,15 @@ interface CloseOptions {
 async function createProfileOutDirs(profile: BuildProfile) {
   await ensureEmptyDirSafe(profile.outDir);
   await ensureEmptyDirSafe(profile.typingOutDir);
+}
+
+async function initializeHeadlessProfile(profile: BuildProfile) {
+  await createProfileOutDirs(profile);
+  await fs.outputJSON(join(profile.outDir, 'package.json'), {
+    type: 'module',
+  }, {
+    spaces: 2,
+  });
 }
 
 async function writeOmsTypingDeclarations(typingOutDir: string, domains: Record<string, Domain>) {
@@ -301,7 +332,7 @@ class OmsWatcher extends EventEmitter<{
   constructor(options: {
     projectPath: string;
     defaultProfile: BuildProfile;
-    headlessProfile: BuildProfile | undefined;
+    headlessProfile: BuildProfile;
     ctx: ServerContext;
     buildOptions: BuildOptions;
     config: OmsProjectConfig;
@@ -338,22 +369,9 @@ class OmsWatcher extends EventEmitter<{
     });
     this._buildRecord = buildRecord;
 
-    let headlessBuildRecord: undefined | BuildRecord;
-    if (headlessProfile) {
-      headlessBuildRecord = new BuildRecord({
-        title: `headless-build`,
-        outDir: headlessProfile.outDir,
-        config,
-        treeShake,
-        headless: true,
-        ccEnvParams: {
-          platform: 'nodejs',
-          debug: true,
-          headless: true,
-        },
-      });
-    }
-    this._headlessBuildRecord = headlessBuildRecord;
+    this._headlessBuildRecord = config.profiles.headless
+      ? this._createHeadlessBuildRecord(config)
+      : undefined;
 
     const uuidManager = new UUIDManager(this._projectPath, options.uuidMapOutPath);
     this._uuidManager = uuidManager;
@@ -400,6 +418,7 @@ class OmsWatcher extends EventEmitter<{
       type: 'update-config',
       exec: async () => {
         this._config = config;
+        await this._syncHeadlessProfile(config);
         await this._reloadDomainsAndFileWatcher();
       },
     });
@@ -459,18 +478,17 @@ class OmsWatcher extends EventEmitter<{
       type: 'build-prod',
 
       exec: async () => {
-        const { entries } = await this._makeEntries({
-          regular: !headless,
-          editor: false,
-          headless: headless,
-        });
+        const { entries } = await this._makeEntries(
+          headless ? headlessProfileId : defaultProfileId,
+          headless ? { dynamicExports: false } : undefined,
+        );
         await buildRecord.rebuild({
           entries,
           uuidProvider: this._uuidProvider,
           domains: this._domains,
           projectRoot: this._projectPath,
           config,
-          profileBuildConfig: undefined,
+          profileBuildConfig: headless ? config.profiles.headless?.build : undefined,
         });
       },
     });
@@ -481,7 +499,7 @@ class OmsWatcher extends EventEmitter<{
   private _config: OmsProjectConfig;
 
   private _defaultProfile: BuildProfile;
-  private _headlessProfile: BuildProfile | undefined;
+  private _headlessProfile: BuildProfile;
   private _ctx: ServerContext;
   private _uuidManager: UUIDManager;
   private _uuidProvider: UUIDProvider;
@@ -512,6 +530,39 @@ class OmsWatcher extends EventEmitter<{
     'update-domain-configs': () => void;
   }> = new TaskQueue();
 
+  private _createHeadlessBuildRecord(config: OmsProjectConfig) {
+    return new BuildRecord({
+      title: `headless-build`,
+      outDir: this._headlessProfile.outDir,
+      config,
+      treeShake: false,
+      headless: true,
+      ccEnvParams: {
+        platform: 'nodejs',
+        debug: true,
+        headless: true,
+      },
+    });
+  }
+
+  private async _syncHeadlessProfile(config: OmsProjectConfig) {
+    if (config.profiles.headless) {
+      if (!this._headlessBuildRecord) {
+        await initializeHeadlessProfile(this._headlessProfile);
+        this._headlessBuildRecord = this._createHeadlessBuildRecord(config);
+      }
+      return;
+    }
+    if (!this._headlessBuildRecord) {
+      return;
+    }
+    this._headlessBuildRecord = undefined;
+    await Promise.all([
+      fs.remove(this._headlessProfile.outDir),
+      fs.remove(this._headlessProfile.typingOutDir),
+    ]);
+  }
+
   private async _updateDomains() {
     await Promise.all(Object.values(this._domainConfigWatchers).map((watcher) => watcher.close()));
     this._domainConfigWatchers = {};
@@ -530,7 +581,7 @@ class OmsWatcher extends EventEmitter<{
     }
     await Promise.all(domainPromises);
     await writeOmsTypingDeclarations(this._defaultProfile.typingOutDir, this._domains);
-    if (this._headlessProfile) {
+    if (this._headlessBuildRecord) {
       await writeOmsTypingDeclarations(this._headlessProfile.typingOutDir, this._domains);
     }
   }
@@ -558,13 +609,21 @@ class OmsWatcher extends EventEmitter<{
         logger.error(`Failed to update OMS domain config for ${domainId}: %o`, err);
       });
     });
+    const domainProfiles = domainId === mainDomainId
+      ? [
+        makeDefaultDomainProfile(this._config.profiles.default),
+        ...(this._config.profiles.headless
+          ? [makeHeadlessDomainProfile(this._config.profiles.headless)]
+          : []),
+      ]
+      : [makeDefaultDomainProfile(undefined)];
     const domain = this._domains[domainId] = new Domain(
       domainId,
       domainRoot,
       domainConfig.partitions,
       domainConfig.exports,
       this._uuidManager,
-      domainId === mainDomainId ? this._config.headless : undefined,
+      domainProfiles,
       domainConfig.exportPackageName,
     );
     const sourceRoots = domain.sourceRoots;
@@ -704,7 +763,7 @@ class OmsWatcher extends EventEmitter<{
     this._fileWatcherPhase = FileWatcherPhase.Closed;
   }
 
-  private async _makeEntries(opts: DomainEntryQueryOptions) {
+  private async _makeEntries(profileId: string, opts: ProfileBuildOptions = {}) {
     const entries: Record<string, InternalBuildEntry> = {};
     const autoRunInfos: Array<{
       entryId: string;
@@ -713,7 +772,7 @@ class OmsWatcher extends EventEmitter<{
     }> = [];
     const exportEntries: Record<string, string> = {};
     for (const [domainId, domain] of Object.entries(this._domains)) {
-      const domainEntrySpecs = domain.getEntrySpecs(opts);
+      const domainEntrySpecs = domain.getEntrySpecs(profileId, opts);
       for (const [domainEntrySpecId, domainEntrySpec] of Object.entries(domainEntrySpecs)) {
         if (domainEntrySpecId in entries) {
           logger.warn(`Duplicate entry spec id: ${domainEntrySpecId}`);
@@ -906,13 +965,10 @@ class OmsWatcher extends EventEmitter<{
       };
 
       const defaultProfileBuildPromise = runProfileBuild('default profile rebuild', async () => {
-        const { entries } = await this._makeEntries({
-          regular: true,
-          editor: true,
-          headless: true,
-        });
+        const profileBuildOptions = { editor: true };
+        const { entries } = await this._makeEntries(defaultProfileId, profileBuildOptions);
         for (const domain of Object.values(this._domains)) {
-          for (const implicitEntry of domain.getImplicitEntries()) {
+          for (const implicitEntry of domain.getImplicitEntries(defaultProfileId, profileBuildOptions)) {
             buildExtras.entryFiles.add(implicitEntry);
           }
         }
@@ -929,13 +985,10 @@ class OmsWatcher extends EventEmitter<{
       const headlessBuildRecord = this._headlessBuildRecord;
       const headlessBuildPromise = headlessBuildRecord
         ? runProfileBuild('headless profile rebuild', async () => {
-          const { entries } = await this._makeEntries({
-            regular: false,
-            editor: false,
-            headless: true,
-          });
+          const profileBuildOptions = { dynamicExports: false };
+          const { entries } = await this._makeEntries(headlessProfileId, profileBuildOptions);
           for (const domain of Object.values(this._domains)) {
-            for (const implicitEntry of domain.getImplicitEntries()) {
+            for (const implicitEntry of domain.getImplicitEntries(headlessProfileId, profileBuildOptions)) {
               buildExtras.entryFiles.add(implicitEntry);
             }
           }
@@ -945,7 +998,7 @@ class OmsWatcher extends EventEmitter<{
             domains: this._domains,
             projectRoot: this._projectPath,
             config: this._config,
-            profileBuildConfig: this._config.headless.build,
+            profileBuildConfig: this._config.profiles.headless?.build,
           });
         })
         : undefined;

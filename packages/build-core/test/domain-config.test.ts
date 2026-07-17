@@ -3,7 +3,7 @@ import fs from 'fs-extra';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
-import { Domain, readOmsDomainConfig } from '../src/domain.js';
+import { Domain, type DomainProfile, readOmsDomainConfig } from '../src/domain.js';
 import { UUIDManager } from '../src/uuid-manager.js';
 import { OmsDomainConfigWatcher } from '../src/domain-config-watcher.js';
 import { makeOmsEntryFileName } from '../src/utils/entry-id.js';
@@ -11,6 +11,15 @@ import { BuildRecord } from '../src/build-record.js';
 import { normalizeProjectUserConfig } from '../src/config.js';
 
 const tempDirs: string[] = [];
+const testDomainProfile: DomainProfile = {
+  id: 'test',
+  sourceMatcher: () => true,
+  bundle: {
+    idSuffix: '',
+    indexPreStem: 'index-pre',
+    indexPostStem: 'index',
+  },
+};
 
 afterEach(async () => {
   await Promise.all(tempDirs.map((dir) => fs.remove(dir)));
@@ -105,7 +114,7 @@ it('normalizes npm-style oms.config.js export keys for package-like imports', as
     config.partitions,
     config.exports,
     new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
-    undefined,
+    [testDomainProfile],
   );
 
   expect(domain.generateTypingEntries()).toEqual([
@@ -155,7 +164,7 @@ it('uses exportPackageName as the public OMS package name', async () => {
     config.partitions,
     config.exports,
     new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
-    undefined,
+    [testDomainProfile],
     config.exportPackageName,
   );
 
@@ -173,11 +182,7 @@ it('uses exportPackageName as the public OMS package name', async () => {
     },
   ]);
 
-  const entrySpecs = domain.getEntrySpecs({
-    regular: true,
-    editor: false,
-    headless: false,
-  });
+  const entrySpecs = domain.getEntrySpecs(testDomainProfile.id);
   expect(entrySpecs['friendly-plugin:.']?.exportId).toBe('friendly-plugin:.');
   expect(entrySpecs['friendly-plugin:abc']?.exportId).toBe('friendly-plugin:abc');
   expect(entrySpecs['some-plugin:.']).toBeUndefined();
@@ -225,6 +230,48 @@ it('normalizes project define and env options', () => {
   });
 });
 
+it('normalizes default and headless profiles without accepting the legacy top-level headless option', () => {
+  /// @case
+  /// 1. A project config declares a default exclusion, an unsupported default include, and an explicitly empty headless include.
+  /// 2. A second config uses only the removed top-level headless option.
+  /// @expect
+  /// The normalized profiles preserve the new filtering semantics, keep default.include undefined, and do not enable legacy headless.
+  const config = normalizeProjectUserConfig({
+    profiles: {
+      default: {
+        exclude: ['src/authority/**'],
+        include: ['src/client/**'],
+      },
+      headless: {
+        include: [],
+        exclude: ['src/client/**'],
+        build: {
+          target: 'chrome80',
+        },
+      },
+    },
+  } as Parameters<typeof normalizeProjectUserConfig>[0]);
+
+  expect(config.profiles.default.include).toBeUndefined();
+  expect(config.profiles.default.exclude?.('src/authority/agent.component.ts')).toBe(true);
+  expect(config.profiles.default.exclude?.('src/shared/value.component.ts')).toBe(false);
+  expect(config.profiles.headless?.include?.('src/shared/value.component.ts')).toBe(false);
+  expect(config.profiles.headless?.exclude?.('src/client/view.component.ts')).toBe(true);
+  expect(config.profiles.headless?.build.target).toBe('chrome80');
+
+  const unfilteredHeadlessConfig = normalizeProjectUserConfig({
+    profiles: {
+      headless: {},
+    },
+  });
+  expect(unfilteredHeadlessConfig.profiles.headless?.include).toBeUndefined();
+
+  const legacyConfig = normalizeProjectUserConfig({
+    headless: true,
+  } as Parameters<typeof normalizeProjectUserConfig>[0]);
+  expect(legacyConfig.profiles.headless).toBeUndefined();
+});
+
 it('creates public export entry specs for __oms_import__', async () => {
   const domainRoot = await makeTempDir();
   const domain = new Domain(
@@ -236,20 +283,83 @@ it('creates public export entry specs for __oms_import__', async () => {
       a: 'oms/src/abc.ts',
     },
     new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
-    undefined,
+    [testDomainProfile],
   );
 
-  const entrySpecs = domain.getEntrySpecs({
-    regular: true,
-    editor: false,
-    headless: false,
-  });
+  const entrySpecs = domain.getEntrySpecs(testDomainProfile.id);
 
   expect(entrySpecs['some-plugin:.']?.exportId).toBe('some-plugin:.');
   expect(entrySpecs['some-plugin:a']?.exportId).toBe('some-plugin:a');
   expect(entrySpecs['some-plugin:a']?.source).toEqual({
     module: expect.stringContaining(join('oms', 'src', 'abc.ts')),
   });
+});
+
+it('uses arbitrary profile descriptors and selects editor entries per build request', async () => {
+  /// @case
+  /// 1. A domain registers profiles whose ids and entry stems are unrelated to default or headless.
+  /// 2. The same profile is requested once without editor entries and once with them, while another profile selects different editor sources.
+  /// 3. Dynamic exports are requested with undefined, true, and false.
+  /// @expect
+  /// Source matching and entry naming use only each descriptor, editor state is isolated and invocation-specific, and dynamic exports follow the explicit switch.
+  const domainRoot = await makeTempDir();
+  const profile = {
+    id: 'server',
+    sourceMatcher: (path: string) => path.replace(/\\/g, '/').startsWith('src/shared/'),
+    bundle: {
+      idSuffix: '.server',
+      indexPreStem: 'index-pre.server',
+      indexPostStem: 'index.server',
+    },
+  };
+  const clientProfile = {
+    id: 'client',
+    sourceMatcher: (path: string) => path.replace(/\\/g, '/').startsWith('src/client/'),
+    bundle: {
+      idSuffix: '.client',
+      indexPreStem: 'index-pre.client',
+      indexPostStem: 'index.client',
+    },
+  };
+  const domain = new Domain(
+    'arbitrary',
+    domainRoot,
+    [{ rootDir: 'src' }],
+    { '.': 'src/dynamic-export.ts' },
+    new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
+    [profile, clientProfile],
+  );
+  const files = {
+    runtimeIndex: join(domainRoot, 'src', 'index.server.ts'),
+    editorIndex: join(domainRoot, 'src', 'index.server.editor.ts'),
+    runtimeComponent: join(domainRoot, 'src', 'shared', 'runtime.component.ts'),
+    editorComponent: join(domainRoot, 'src', 'shared', 'tool.component.editor.ts'),
+    excludedComponent: join(domainRoot, 'src', 'client', 'view.component.ts'),
+    clientEditorComponent: join(domainRoot, 'src', 'client', 'panel.component.editor.ts'),
+  };
+  for (const file of Object.values(files)) {
+    await fs.outputFile(file, 'export {};');
+    await domain.addSourceFile(file);
+  }
+
+  const runtimeEntries = domain.getEntrySpecs(profile.id);
+  expect(runtimeEntries['bundle-arbitrary.server']?.source).toEqual(expect.stringContaining(files.runtimeIndex.replace(/\\/g, '/')));
+  expect(runtimeEntries['bundle-arbitrary.server']?.source).toEqual(expect.stringContaining(files.runtimeComponent.replace(/\\/g, '/')));
+  expect(runtimeEntries['bundle-arbitrary.server']?.source).not.toEqual(expect.stringContaining(files.excludedComponent.replace(/\\/g, '/')));
+  expect(runtimeEntries['bundle-arbitrary.server.editor']).toBeUndefined();
+  expect(runtimeEntries['arbitrary:.']?.exportId).toBe('arbitrary:.');
+
+  const editorEntries = domain.getEntrySpecs(profile.id, { editor: true, dynamicExports: true });
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.editorIndex.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.editorComponent.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).not.toEqual(expect.stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
+  expect(editorEntries['arbitrary:.']?.exportId).toBe('arbitrary:.');
+  expect(domain.getImplicitEntries(profile.id)).not.toContain(files.editorComponent);
+  expect(domain.getImplicitEntries(profile.id, { editor: true })).toContain(files.editorComponent);
+  expect(domain.getEntrySpecs(clientProfile.id, { editor: true })['bundle-arbitrary.client.editor']?.source).toEqual(expect.stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
+
+  const entriesWithoutDynamicExports = domain.getEntrySpecs(profile.id, { dynamicExports: false });
+  expect(entriesWithoutDynamicExports['arbitrary:.']).toBeUndefined();
 });
 
 it('maps colon export entry ids into portable export file names', () => {
@@ -297,7 +407,7 @@ it('resolves npm-style OMS import specifiers in bundle sources', async () => {
       abc: 'oms/src/abc.ts',
     },
     new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
-    undefined,
+    [testDomainProfile],
     'friendly-plugin',
   );
   const buildRecord = new BuildRecord({
@@ -346,7 +456,7 @@ it('builds public export entries without adding a synthetic default export', asy
       'editor/font': 'oms/src/font.ts',
     },
     new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
-    undefined,
+    [testDomainProfile],
   );
   const buildRecord = new BuildRecord({
     title: 'test-build',
@@ -358,11 +468,7 @@ it('builds public export entries without adding a synthetic default export', asy
   });
 
   const result = await buildRecord.rebuild({
-    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs({
-      regular: true,
-      editor: false,
-      headless: false,
-    })).map(([key, spec]) => [key, spec.source])),
+    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id)).map(([key, spec]) => [key, spec.source])),
     domains: {},
     uuidProvider: undefined,
     config: normalizeProjectUserConfig({}),
@@ -390,7 +496,7 @@ it('preserves public export entry default exports', async () => {
       'editor/font': 'oms/src/font.ts',
     },
     new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
-    undefined,
+    [testDomainProfile],
   );
   const buildRecord = new BuildRecord({
     title: 'test-build',
@@ -402,11 +508,7 @@ it('preserves public export entry default exports', async () => {
   });
 
   const result = await buildRecord.rebuild({
-    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs({
-      regular: true,
-      editor: false,
-      headless: false,
-    })).map(([key, spec]) => [key, spec.source])),
+    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id)).map(([key, spec]) => [key, spec.source])),
     domains: {},
     uuidProvider: undefined,
     config: normalizeProjectUserConfig({}),

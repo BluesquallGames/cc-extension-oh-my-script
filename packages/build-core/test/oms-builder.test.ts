@@ -902,6 +902,228 @@ it('fails build when project mode is local', async () => {
   }
 });
 
+it('builds default and headless as independent profiles in development and production', async () => {
+  /// @case
+  /// 1. A project excludes authority components from default and includes shared plus authority components in headless.
+  /// 2. Dedicated entries, dynamic exports, and client/shared/authority components are built in development and production.
+  /// @expect
+  /// Each profile contains only its own entry, dynamic exports, and component view, while UUID registration remains source-level across shared and filtered components.
+  const project = await makeTempDir();
+  const defaultProdDir = join(await makeTempDir(), 'default-build');
+  const headlessProdDir = join(await makeTempDir(), 'headless-build');
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: {',
+    '    default: { exclude: ["src/authority/**"] },',
+    '    headless: {',
+    '      include: ["src/shared/**", "src/authority/**"],',
+    '      exclude: ["src/shared/headless-excluded/**"],',
+    '    },',
+    '  },',
+    '  exports: { "./dynamic": "./src/shared/dynamic-export.ts" },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), [
+    'import "./authority/explicit-dependency.js";',
+    'globalThis.__omsDefaultEntry = "default-entry-marker";',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.headless.ts'), 'globalThis.__omsHeadlessEntry = "headless-entry-marker";');
+  await fs.outputFile(join(project, 'src', 'authority', 'explicit-dependency.ts'), 'globalThis.__omsExplicitAuthorityDependency = "explicit-authority-dependency-marker";');
+  await fs.outputFile(join(project, 'src', 'shared', 'dynamic-export.ts'), 'globalThis.__omsDynamicExport = "dynamic-export-marker";');
+  await fs.outputFile(join(project, 'src', 'client', 'client-only.component.ts'), [
+    '/// <meta "uuid"="11111111-1111-4111-8111-111111111111"/>',
+    'globalThis.__omsClientComponent = "client-component-marker";',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'client', 'client-tool.component.editor.ts'), [
+    '/// <meta "uuid"="55555555-5555-4555-8555-555555555555"/>',
+    'globalThis.__omsClientEditorComponent = "client-editor-component-marker";',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'shared', 'shared.component.ts'), [
+    '/// <meta "uuid"="22222222-2222-4222-8222-222222222222"/>',
+    'globalThis.__omsSharedComponent = "shared-component-marker";',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'shared', 'headless-excluded', 'excluded.component.ts'), [
+    '/// <meta "uuid"="66666666-6666-4666-8666-666666666666"/>',
+    'globalThis.__omsHeadlessExcludedComponent = "headless-excluded-component-marker";',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'authority', 'authority.component.ts'), [
+    '/// <meta "uuid"="33333333-3333-4333-8333-333333333333"/>',
+    'globalThis.__omsAuthorityComponent = "authority-component-marker";',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'authority', 'authority-tool.component.editor.ts'), [
+    '/// <meta "uuid"="77777777-7777-4777-8777-777777777777"/>',
+    'globalThis.__omsAuthorityEditorComponent = "authority-editor-component-marker";',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const defaultDevelopmentOutput = await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'));
+    const headlessDevelopmentOutput = await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'));
+    expectProfileOutput(defaultDevelopmentOutput, {
+      includes: [
+        'default-entry-marker',
+        'client-component-marker',
+        'client-editor-component-marker',
+        'shared-component-marker',
+        'headless-excluded-component-marker',
+        'explicit-authority-dependency-marker',
+        'dynamic-export-marker',
+      ],
+      excludes: ['headless-entry-marker', 'authority-component-marker', 'authority-editor-component-marker'],
+    });
+    expectProfileOutput(headlessDevelopmentOutput, {
+      includes: ['headless-entry-marker', 'shared-component-marker', 'authority-component-marker'],
+      excludes: [
+        'default-entry-marker',
+        'client-component-marker',
+        'client-editor-component-marker',
+        'headless-excluded-component-marker',
+        'authority-editor-component-marker',
+        'dynamic-export-marker',
+      ],
+    });
+
+    const defaultMetadata = await fs.readFile(join(project, 'temp', 'oms', 'out', 'metadata.js'), 'utf8');
+    const headlessMetadata = await fs.readFile(join(project, 'temp', 'oms', 'out-headless', 'metadata.js'), 'utf8');
+    expect(defaultMetadata).toContain("['main', false]");
+    expect(defaultMetadata).not.toContain('main.headless');
+    expect(defaultMetadata).toContain('main:dynamic');
+    expect(headlessMetadata).toContain("['main.headless', false]");
+    expect(headlessMetadata).not.toContain("['main', false]");
+    expect(headlessMetadata).not.toContain('main:dynamic');
+    await expect(fs.readJSON(join(project, 'temp', 'oms', 'out', 'package.json'))).resolves.toEqual({ type: 'commonjs' });
+    await expect(fs.readJSON(join(project, 'temp', 'oms', 'out-headless', 'package.json'))).resolves.toEqual({ type: 'module' });
+
+    const emittedUUIDs = await fs.readJSON(join(project, 'temp', 'oms', 'uuids.json')) as Record<string, string>;
+    const sharedUUIDEntries = Object.entries(emittedUUIDs).filter(([file]) => file.endsWith(join('src', 'shared', 'shared.component.ts')));
+    expect(sharedUUIDEntries).toEqual([
+      [expect.any(String), '22222222-2222-4222-8222-222222222222'],
+    ]);
+    const filteredEditorUUIDEntries = Object.entries(emittedUUIDs).filter(([file]) => file.endsWith(join('src', 'authority', 'authority-tool.component.editor.ts')));
+    expect(filteredEditorUUIDEntries).toEqual([
+      [expect.any(String), '77777777-7777-4777-8777-777777777777'],
+    ]);
+
+    await builder.buildProd({
+      buildDir: defaultProdDir,
+      debug: false,
+      sourceMaps: false,
+      platform: 'web',
+      headless: false,
+    });
+    await builder.buildProd({
+      buildDir: headlessProdDir,
+      debug: false,
+      sourceMaps: false,
+      platform: 'nodejs',
+      headless: true,
+    });
+
+    expectProfileOutput(await readJavaScriptOutput(join(defaultProdDir, 'oms')), {
+      includes: [
+        'default-entry-marker',
+        'client-component-marker',
+        'shared-component-marker',
+        'headless-excluded-component-marker',
+        'explicit-authority-dependency-marker',
+        'dynamic-export-marker',
+      ],
+      excludes: [
+        'headless-entry-marker',
+        'client-editor-component-marker',
+        'authority-component-marker',
+        'authority-editor-component-marker',
+      ],
+    });
+    expectProfileOutput(await readJavaScriptOutput(join(headlessProdDir, 'oms')), {
+      includes: ['headless-entry-marker', 'shared-component-marker', 'authority-component-marker'],
+      excludes: [
+        'default-entry-marker',
+        'client-component-marker',
+        'client-editor-component-marker',
+        'headless-excluded-component-marker',
+        'authority-editor-component-marker',
+        'dynamic-export-marker',
+      ],
+    });
+
+    const lateSharedComponent = join(project, 'src', 'shared', 'late-shared.component.ts');
+    let passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(lateSharedComponent, [
+      '/// <meta "uuid"="44444444-4444-4444-8444-444444444444"/>',
+      'globalThis.__omsLateSharedComponent = "late-shared-component-marker";',
+    ].join('\n'));
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).toContain('late-shared-component-marker');
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).toContain('late-shared-component-marker');
+
+    passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.remove(lateSharedComponent);
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).not.toContain('late-shared-component-marker');
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).not.toContain('late-shared-component-marker');
+
+    passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'oms.config.mjs'), [
+      'export default {',
+      '  profiles: {',
+      '    default: { exclude: ["src/authority/**"] },',
+      '    headless: { include: ["src/authority/**"] },',
+      '  },',
+      '};',
+    ].join('\n'));
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).toContain('shared-component-marker');
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).not.toContain('shared-component-marker');
+
+    passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'oms.config.mjs'), [
+      'export default {',
+      '  profiles: {',
+      '    default: { exclude: ["src/authority/**"] },',
+      '  },',
+      '};',
+    ].join('\n'));
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+    await expect(fs.pathExists(join(project, 'temp', 'oms', 'out-headless'))).resolves.toBe(false);
+
+    passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'oms.config.mjs'), [
+      'export default {',
+      '  profiles: {',
+      '    default: { exclude: ["src/authority/**"] },',
+      '    headless: { include: ["src/authority/**"] },',
+      '  },',
+      '};',
+    ].join('\n'));
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).toContain('authority-component-marker');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
 it('uses production mode for prod builds', async () => {
   /// @case
   /// 1. A project entry branches on import.meta.env.PROD and cc/env BUILD.
@@ -1110,6 +1332,34 @@ function waitForPassiveBuildEnd(builder: OmsBuilder) {
     };
     builder.once('passive-build-end', onEnd);
   });
+}
+
+async function readJavaScriptOutput(root: string): Promise<string> {
+  const sources: string[] = [];
+  const visit = async (dir: string) => {
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await visit(path);
+      } else if (entry.isFile() && entry.name.endsWith('.js')) {
+        sources.push(await fs.readFile(path, 'utf8'));
+      }
+    }
+  };
+  await visit(root);
+  return sources.join('\n');
+}
+
+function expectProfileOutput(output: string, expected: {
+  includes: string[];
+  excludes: string[];
+}) {
+  for (const marker of expected.includes) {
+    expect(output).toContain(marker);
+  }
+  for (const marker of expected.excludes) {
+    expect(output).not.toContain(marker);
+  }
 }
 
 async function outputNodePackage(root: string, packageName: string, source: string, extraPackageJson: Record<string, unknown> = {}) {

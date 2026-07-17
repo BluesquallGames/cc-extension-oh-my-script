@@ -14,12 +14,16 @@ export interface OmsProjectUserConfig {
   envDir?: string;
   envPrefix?: string | unknown[];
 
-  headless?: boolean | {
-    enabled?: boolean;
-    include?: string[];
-    exclude?: string[];
-    build?: {
-      target?: string;
+  profiles?: {
+    default?: {
+      exclude?: string[];
+    };
+    headless?: {
+      include?: string[];
+      exclude?: string[];
+      build?: {
+        target?: string;
+      };
     };
   };
 }
@@ -35,11 +39,15 @@ export interface OmsProjectConfig {
   envDir: string | undefined;
   envPrefix: string[];
 
-  headless: HeadlessConfig;
+  profiles: ProjectProfilesConfig;
 }
 
-export interface HeadlessConfig {
-  enabled: boolean;
+export interface ProjectProfilesConfig {
+  default: ProfileConfig;
+  headless: ProfileConfig | undefined;
+}
+
+export interface ProfileConfig {
   include?: (string: string) => boolean;
   exclude?: (string: string) => boolean;
   build: ProfileBuildConfig;
@@ -62,7 +70,7 @@ export function normalizeProjectUserConfig(userConfig: OmsProjectUserConfig): Om
     mode: normalizeMode(userConfig.mode),
     envDir: normalizeEnvDir(userConfig.envDir),
     envPrefix: normalizeEnvPrefix(userConfig.envPrefix),
-    headless: normalizeUserHeadlessConfig(userConfig.headless),
+    profiles: normalizeUserProfilesConfig(userConfig.profiles),
   };
 }
 
@@ -170,37 +178,32 @@ export type OmsConfig = OmsProjectConfig;
 
 export const normalizeUserConfig = normalizeProjectUserConfig;
 
-function normalizeUserHeadlessConfig(headlessConfig: OmsProjectUserConfig['headless']): HeadlessConfig {
-  const defaultHeadlessConfig: HeadlessConfig = {
-    enabled: false,
-    build: {
-      target: undefined,
-    },
-  };
-  if (headlessConfig === true) {
-    return {
-      ...defaultHeadlessConfig,
-      enabled: true,
-    };
-  }
-  if (!(typeof headlessConfig === 'object' && headlessConfig)) {
-    return {
-      ...defaultHeadlessConfig,
-      enabled: false,
-    };
-  }
+function normalizeUserProfilesConfig(profiles: OmsProjectUserConfig['profiles']): ProjectProfilesConfig {
+  const headless = profiles?.headless;
   return {
-    ...defaultHeadlessConfig,
-    enabled: headlessConfig.enabled ?? true,
-    include: normalizeHeadlessFilter(headlessConfig.include ?? []),
-    exclude: normalizeHeadlessFilter(headlessConfig.exclude ?? []),
-    build: {
-      target: headlessConfig.build?.target,
+    default: {
+      include: undefined,
+      exclude: normalizeProfileFilter(profiles?.default?.exclude),
+      build: {
+        target: undefined,
+      },
     },
+    headless: headless === undefined
+      ? undefined
+      : {
+        include: normalizeProfileFilter(headless.include),
+        exclude: normalizeProfileFilter(headless.exclude),
+        build: {
+          target: headless.build?.target,
+        },
+      },
   };
 }
 
-function normalizeHeadlessFilter(filter: string[]) {
+function normalizeProfileFilter(filter: string[] | undefined) {
+  if (filter === undefined) {
+    return undefined;
+  }
   const matchers = filter.map((pattern) => picomatch(pattern, {
     windows: platform === 'win32',
   }));

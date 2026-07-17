@@ -133,6 +133,7 @@ export class BuildRecord {
 
   private _title: string;
   private _cache: rollup.RollupCache | undefined;
+  private _emittedFiles = new Set<string>();
   private _outDir: string;
   private _headless: boolean;
   private _sourceMaps: boolean | 'inline';
@@ -389,7 +390,12 @@ export class BuildRecord {
     };
 
     const writeStart = Date.now();
-    await rollupBuild.write(outputOptions);
+    const writeResult = await rollupBuild.write(outputOptions);
+    const emittedFiles = new Set(writeResult.output.map((output) => output.fileName));
+    await Promise.all([...this._emittedFiles]
+      .filter((file) => !emittedFiles.has(file))
+      .map((file) => fs.remove(join(this._outDir, file))));
+    this._emittedFiles = emittedFiles;
     const outputSummary = await summarizeOutputDir(this._outDir);
     logger.info(`${this._title} Rollup write done in ${Date.now() - writeStart}ms (${outputSummary.files} files, ${formatBytes(outputSummary.bytes)})`);
     if (rollupBuild.getTimings) {

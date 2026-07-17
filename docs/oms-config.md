@@ -9,7 +9,7 @@ OMS 使用两类配置文件：
 
 ## 项目配置
 
-项目配置用于影响整体构建解析和 headless 输出。
+项目配置用于影响整体构建解析，以及 default/headless profile 的组件扫描与输出。
 
 ```js
 export default {
@@ -19,12 +19,15 @@ export default {
     },
     projectPeers: ['@scope/shared-runtime'],
   },
-  headless: {
-    enabled: true,
-    include: ['src/**/*.ts'],
-    exclude: ['src/**/*.editor.ts'],
-    build: {
-      target: 'node18',
+  profiles: {
+    default: {
+      exclude: ['src/authority/**'],
+    },
+    headless: {
+      include: ['src/shared/**', 'src/authority/**'],
+      build: {
+        target: 'node18',
+      },
     },
   },
 };
@@ -57,15 +60,24 @@ OMS 会去掉 `#oms-peer:` 前缀，并从项目根目录解析真实包名。`#
 
 每个条目必须是 bare package name，例如 `react` 或 `@scope/pkg`，不能写相对路径、绝对路径或子路径。`react` 会自动允许 `#oms-peer:react/jsx-runtime` 这类子路径 import。
 
-### headless
+### profiles
 
-`headless` 控制是否额外生成 headless ESM 输出。它可以写成 `true`，也可以写成对象。
+`profiles.default` 与 `profiles.headless` 分别描述两个独立的组件扫描视图。`profiles.headless` 存在时，OMS 会额外生成 headless ESM 输出；不存在时不启用 headless。
 
 ```js
 export default {
-  headless: true,
+  profiles: {
+    default: {
+      exclude: ['src/authority/**'],
+    },
+    headless: {
+      include: ['src/shared/**', 'src/authority/**'],
+    },
+  },
 };
 ```
+
+`profiles.default` 暂时只支持 `exclude`。`profiles.headless` 支持 `include`、`exclude` 和 `build.target`。过滤规则只影响 `.component.*` 自动收集；各自的 `index*` 入口以及入口显式导入的依赖不受影响。同一个组件可以同时进入两个 profile。
 
 ## 扩展配置
 

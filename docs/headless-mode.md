@@ -4,24 +4,29 @@ Headless 模式用于把一部分 OMS 代码提供给非场景环境使用。典
 
 ## 启用方式
 
-最简单的方式：
+配置 `profiles.headless` 即可启用：
 
 ```js
 export default {
-  headless: true,
+  profiles: {
+    headless: {},
+  },
 };
 ```
 
-也可以写成对象：
+也可以为 default 与 headless 配置各自的组件扫描视图：
 
 ```js
 export default {
-  headless: {
-    enabled: true,
-    include: ['src/**/*.ts'],
-    exclude: ['src/**/*.editor.ts'],
-    build: {
-      target: 'node18',
+  profiles: {
+    default: {
+      exclude: ['src/authority/**'],
+    },
+    headless: {
+      include: ['src/shared/**', 'src/authority/**'],
+      build: {
+        target: 'node18',
+      },
     },
   },
 };
@@ -29,21 +34,25 @@ export default {
 
 ## include 和 exclude
 
-`include` 与 `exclude` 使用 glob 规则，匹配的是相对源码根目录的路径。
+`include` 与 `exclude` 使用 glob 规则，匹配的是相对项目 domain 根目录的路径。它们只控制 `.component.*` 脚本的自动收集，不会阻止入口显式导入对应目录中的普通模块。
 
-- `include` 存在时，只有命中的文件会进入 Headless 模式。
-- `exclude` 命中时，该文件不会进入 Headless 模式。
+- `profiles.default` 暂时只支持 `exclude`，未配置时会收集全部普通组件。
+- `profiles.headless.include` 未配置时会收集全部普通组件，显式配置为空数组时不自动收集组件。
+- `exclude` 命中时不会自动收集该组件，并且优先于 `include`。
+- 同一个组件可以同时被 default 与 headless 收集；headless 的 `include` 不会把组件从 default 中移走。
 
 ## Headless 入口
 
-可以使用专门的入口文件：
+两个 profile 使用各自的入口文件：
 
 ```text
+src/index-pre.ts
+src/index.ts
 src/index-pre.headless.ts
 src/index.headless.ts
 ```
 
-这适合放测试、工具或非场景环境需要执行的初始化逻辑。
+入口文件不受组件过滤器影响。开发与生产构建采用相同的 profile 边界：default 构建只运行 default 入口，headless 构建只运行 headless 入口。
 
 ## 生成内容
 
