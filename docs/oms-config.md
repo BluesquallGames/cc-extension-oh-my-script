@@ -77,7 +77,9 @@ export default {
 };
 ```
 
-`profiles.default` 暂时只支持 `exclude`。`profiles.headless` 支持 `include`、`exclude` 和 `build.target`。过滤规则只影响 `.component.*` 自动收集；各自的 `index*` 入口以及入口显式导入的依赖不受影响。同一个组件可以同时进入两个 profile。
+`profiles.default` 暂时只支持 `exclude`。`profiles.headless` 支持 `include`、`exclude` 和 `build.target`。过滤规则只影响 primary bundle 的 `.component.*` 自动收集；各自的 `index*` 入口以及入口显式导入的依赖不受影响。同一个组件可以同时进入两个 profile。
+
+Preview 和生产构建只运行对应 profile 的 primary bundle。编辑器开发构建会在 default primary 之外运行 editor overlay：primary 过滤掉的普通组件和所有 `.component.editor.*` 都会进入这个 editor entry。这样 profile 可以排除非目标运行环境的组件，同时不影响编辑器 builder、asset-db 和 scene 对完整组件集合的注册。
 
 ## 扩展配置
 

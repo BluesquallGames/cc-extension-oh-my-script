@@ -905,9 +905,9 @@ it('fails build when project mode is local', async () => {
 it('builds default and headless as independent profiles in development and production', async () => {
   /// @case
   /// 1. A project excludes authority components from default and includes shared plus authority components in headless.
-  /// 2. Dedicated entries, dynamic exports, and client/shared/authority components are built in development and production.
+  /// 2. The development default build enables its editor overlay, while production builds select only their primary profile.
   /// @expect
-  /// Each profile contains only its own entry, dynamic exports, and component view, while UUID registration remains source-level across shared and filtered components.
+  /// Preview and production keep the configured profile boundary, the editor overlay restores every filtered component, and UUID registration remains source-level.
   const project = await makeTempDir();
   const defaultProdDir = join(await makeTempDir(), 'default-build');
   const headlessProdDir = join(await makeTempDir(), 'headless-build');
@@ -977,10 +977,37 @@ it('builds default and headless as independent profiles in development and produ
         'client-editor-component-marker',
         'shared-component-marker',
         'headless-excluded-component-marker',
+        'authority-component-marker',
+        'authority-editor-component-marker',
         'explicit-authority-dependency-marker',
         'dynamic-export-marker',
       ],
-      excludes: ['headless-entry-marker', 'authority-component-marker', 'authority-editor-component-marker'],
+      excludes: ['headless-entry-marker'],
+    });
+    expectProfileOutput(await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8'), {
+      includes: [
+        'client-component-marker',
+        'shared-component-marker',
+        'headless-excluded-component-marker',
+        'explicit-authority-dependency-marker',
+      ],
+      excludes: [
+        'client-editor-component-marker',
+        'authority-component-marker',
+        'authority-editor-component-marker',
+      ],
+    });
+    expectProfileOutput(await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.editor.js'), 'utf8'), {
+      includes: [
+        'client-editor-component-marker',
+        'authority-component-marker',
+        'authority-editor-component-marker',
+      ],
+      excludes: [
+        'client-component-marker',
+        'shared-component-marker',
+        'headless-excluded-component-marker',
+      ],
     });
     expectProfileOutput(headlessDevelopmentOutput, {
       includes: ['headless-entry-marker', 'shared-component-marker', 'authority-component-marker'],
@@ -997,6 +1024,7 @@ it('builds default and headless as independent profiles in development and produ
     const defaultMetadata = await fs.readFile(join(project, 'temp', 'oms', 'out', 'metadata.js'), 'utf8');
     const headlessMetadata = await fs.readFile(join(project, 'temp', 'oms', 'out-headless', 'metadata.js'), 'utf8');
     expect(defaultMetadata).toContain("['main', false]");
+    expect(defaultMetadata).toContain("['main.editor', true]");
     expect(defaultMetadata).not.toContain('main.headless');
     expect(defaultMetadata).toContain('main:dynamic');
     expect(headlessMetadata).toContain("['main.headless', false]");
@@ -1078,6 +1106,27 @@ it('builds default and headless as independent profiles in development and produ
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).not.toContain('late-shared-component-marker');
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).not.toContain('late-shared-component-marker');
 
+    const lateAuthorityComponent = join(project, 'src', 'authority', 'late-authority.component.ts');
+    passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(lateAuthorityComponent, [
+      '/// <meta "uuid"="99999999-9999-4999-8999-999999999999"/>',
+      'globalThis.__omsLateAuthorityComponent = "late-authority-component-marker";',
+    ].join('\n'));
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+    expect(await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).not.toContain('late-authority-component-marker');
+    expect(await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.editor.js'), 'utf8')).toContain('late-authority-component-marker');
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).toContain('late-authority-component-marker');
+
+    passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.remove(lateAuthorityComponent);
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).not.toContain('late-authority-component-marker');
+    expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).not.toContain('late-authority-component-marker');
+
     passiveBuild = waitForPassiveBuildEnd(builder);
     await fs.outputFile(join(project, 'oms.config.mjs'), [
       'export default {',
@@ -1124,12 +1173,12 @@ it('builds default and headless as independent profiles in development and produ
   }
 });
 
-it('removes the last matched component after a profile filter hot update', async () => {
+it('moves the last filtered component between primary and editor bundles after a config hot update', async () => {
   /// @case
   /// 1. A project without an index initially builds one automatically scanned component.
-  /// 2. A project config hot update excludes every source from the default profile.
+  /// 2. A project config hot update excludes every source from the default primary, then removes the exclusion.
   /// @expect
-  /// The rebuilt default profile no longer emits or contains the previously matched component bundle.
+  /// The component moves into the editor overlay and back, while obsolete primary and editor bundle files are removed.
   const project = await makeTempDir();
   const outDir = join(project, 'temp', 'oms', 'out');
   await fs.outputFile(join(project, 'oms.config.mjs'), [
@@ -1164,8 +1213,24 @@ it('removes the last matched component after a profile filter hot update', async
       result: { ok: true },
     });
 
-    expect(await readJavaScriptOutput(outDir)).not.toContain('only-component-marker');
+    expect(await readJavaScriptOutput(outDir)).toContain('only-component-marker');
     await expect(fs.pathExists(join(outDir, 'bundle-main.js'))).resolves.toBe(false);
+    await expect(fs.readFile(join(outDir, 'bundle-main.editor.js'), 'utf8')).resolves.toContain('only-component-marker');
+    await expect(fs.readFile(join(outDir, 'metadata.js'), 'utf8')).resolves.toContain("['main.editor', true]");
+
+    const restoredBuild = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'oms.config.mjs'), [
+      'export default {',
+      '  profiles: { default: {} },',
+      '};',
+    ].join('\n'));
+    await expect(restoredBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+
+    await expect(fs.readFile(join(outDir, 'bundle-main.js'), 'utf8')).resolves.toContain('only-component-marker');
+    await expect(fs.pathExists(join(outDir, 'bundle-main.editor.js'))).resolves.toBe(false);
+    await expect(fs.readFile(join(outDir, 'metadata.js'), 'utf8')).resolves.not.toContain("['main.editor', true]");
   } finally {
     await (builder as any)._clean();
   }

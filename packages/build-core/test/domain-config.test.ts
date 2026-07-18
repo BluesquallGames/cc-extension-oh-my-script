@@ -298,10 +298,10 @@ it('creates public export entry specs for __oms_import__', async () => {
 it('uses arbitrary profile descriptors and selects editor entries per build request', async () => {
   /// @case
   /// 1. A domain registers profiles whose ids and entry stems are unrelated to default or headless.
-  /// 2. The same profile is requested once without editor entries and once with them, while another profile selects different editor sources.
+  /// 2. The same profile is requested once without editor entries and once with its full editor overlay.
   /// 3. Dynamic exports are requested with undefined, true, and false.
   /// @expect
-  /// Source matching and entry naming use only each descriptor, editor state is isolated and invocation-specific, and dynamic exports follow the explicit switch.
+  /// Primary source matching uses only each descriptor, editor overlays restore unmatched and editor-only components, and dynamic exports follow the explicit switch.
   const domainRoot = await makeTempDir();
   const profile = {
     id: 'server',
@@ -352,11 +352,17 @@ it('uses arbitrary profile descriptors and selects editor entries per build requ
   const editorEntries = domain.getEntrySpecs(profile.id, { editor: true, dynamicExports: true });
   expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.editorIndex.replace(/\\/g, '/')));
   expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.editorComponent.replace(/\\/g, '/')));
-  expect(editorEntries['bundle-arbitrary.server.editor']?.source).not.toEqual(expect.stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.excludedComponent.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).not.toEqual(expect.stringContaining(files.runtimeComponent.replace(/\\/g, '/')));
   expect(editorEntries['arbitrary:.']?.exportId).toBe('arbitrary:.');
   expect(domain.getImplicitEntries(profile.id)).not.toContain(files.editorComponent);
   expect(domain.getImplicitEntries(profile.id, { editor: true })).toContain(files.editorComponent);
-  expect(domain.getEntrySpecs(clientProfile.id, { editor: true })['bundle-arbitrary.client.editor']?.source).toEqual(expect.stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
+  const clientEditorEntry = domain.getEntrySpecs(clientProfile.id, { editor: true })['bundle-arbitrary.client.editor']?.source;
+  expect(clientEditorEntry).toEqual(expect.stringContaining(files.runtimeComponent.replace(/\\/g, '/')));
+  expect(clientEditorEntry).toEqual(expect.stringContaining(files.editorComponent.replace(/\\/g, '/')));
+  expect(clientEditorEntry).toEqual(expect.stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
+  expect(clientEditorEntry).not.toEqual(expect.stringContaining(files.excludedComponent.replace(/\\/g, '/')));
 
   const entriesWithoutDynamicExports = domain.getEntrySpecs(profile.id, { dynamicExports: false });
   expect(entriesWithoutDynamicExports['arbitrary:.']).toBeUndefined();

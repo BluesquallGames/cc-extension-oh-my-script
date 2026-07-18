@@ -41,6 +41,8 @@ export default {
 - `exclude` 命中时不会自动收集该组件，并且优先于 `include`。
 - 同一个组件可以同时被 default 与 headless 收集；headless 的 `include` 不会把组件从 default 中移走。
 
+过滤规则描述的是 profile 的 primary 组件视图。Preview 和生产构建只运行 primary；编辑器开发构建还会生成 editor overlay，把 primary 未收集的普通组件和所有 `.component.editor.*` 组件补入 editor entry。因此，编辑器仍能注册完整组件集合，而 Preview 保持 default 的过滤边界。
+
 ## Headless 入口
 
 两个 profile 使用各自的入口文件：
@@ -52,7 +54,7 @@ src/index-pre.headless.ts
 src/index.headless.ts
 ```
 
-入口文件不受组件过滤器影响。开发与生产构建采用相同的 profile 边界：default 构建只运行 default 入口，headless 构建只运行 headless 入口。
+入口文件不受组件过滤器影响。开发与生产构建采用相同的 primary profile 边界：default 构建只运行 default 入口，headless 构建只运行 headless 入口；仅编辑器开发态会额外运行 default 的 editor entry 和组件补集。
 
 ## 生成内容
 

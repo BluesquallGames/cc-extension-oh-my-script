@@ -191,10 +191,21 @@ export class Domain {
     const isEditorModule = /\.editor\.\w+$/.test(path);
     const relativePath = relative(this._domainRoot, path);
     for (const profileState of Object.values(this._profileStates)) {
-      const bundle = isEditorModule ? profileState.editorBundle : profileState.bundle;
-      if (bundle.isIndexModule(path)
-        || (bundle.isComponentModule(path) && profileState.sourceMatcher(relativePath))) {
-        bundles.push(bundle);
+      if (isEditorModule) {
+        if (profileState.editorBundle.isIndexModule(path) || profileState.editorBundle.isComponentModule(path)) {
+          bundles.push(profileState.editorBundle);
+        }
+        continue;
+      }
+
+      if (profileState.bundle.isIndexModule(path)) {
+        bundles.push(profileState.bundle);
+        continue;
+      }
+      if (profileState.bundle.isComponentModule(path)) {
+        bundles.push(profileState.sourceMatcher(relativePath)
+          ? profileState.bundle
+          : profileState.editorBundle);
       }
     }
     return bundles;
