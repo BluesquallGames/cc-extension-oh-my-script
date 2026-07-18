@@ -154,6 +154,7 @@ export class BuildRecord {
     if (Object.keys(entries).length === 0) {
       logger.debug(`${this._title} No entry found, skip build`);
       this._cache = undefined;
+      await this._reconcileEmittedFiles(new Set());
       return {
         ok: true,
         inferredFiles: [],
@@ -392,10 +393,7 @@ export class BuildRecord {
     const writeStart = Date.now();
     const writeResult = await rollupBuild.write(outputOptions);
     const emittedFiles = new Set(writeResult.output.map((output) => output.fileName));
-    await Promise.all([...this._emittedFiles]
-      .filter((file) => !emittedFiles.has(file))
-      .map((file) => fs.remove(join(this._outDir, file))));
-    this._emittedFiles = emittedFiles;
+    await this._reconcileEmittedFiles(emittedFiles);
     const outputSummary = await summarizeOutputDir(this._outDir);
     logger.info(`${this._title} Rollup write done in ${Date.now() - writeStart}ms (${outputSummary.files} files, ${formatBytes(outputSummary.bytes)})`);
     if (rollupBuild.getTimings) {
@@ -406,6 +404,13 @@ export class BuildRecord {
       ok: true,
       inferredFiles: rollupBuild.watchFiles,
     };
+  }
+
+  private async _reconcileEmittedFiles(emittedFiles: Set<string>) {
+    await Promise.all([...this._emittedFiles]
+      .filter((file) => !emittedFiles.has(file))
+      .map((file) => fs.remove(join(this._outDir, file))));
+    this._emittedFiles = emittedFiles;
   }
 
   private _makeRollupBabelPlugin({

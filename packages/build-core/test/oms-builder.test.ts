@@ -1124,6 +1124,99 @@ it('builds default and headless as independent profiles in development and produ
   }
 });
 
+it('removes the last matched component after a profile filter hot update', async () => {
+  /// @case
+  /// 1. A project without an index initially builds one automatically scanned component.
+  /// 2. A project config hot update excludes every source from the default profile.
+  /// @expect
+  /// The rebuilt default profile no longer emits or contains the previously matched component bundle.
+  const project = await makeTempDir();
+  const outDir = join(project, 'temp', 'oms', 'out');
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: { default: {} },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'only.component.ts'), [
+    '/// <meta "uuid"="88888888-8888-4888-8888-888888888888"/>',
+    'globalThis.__omsOnlyComponent = "only-component-marker";',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({ ok: true });
+    expect(await readJavaScriptOutput(outDir)).toContain('only-component-marker');
+
+    const passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'oms.config.mjs'), [
+      'export default {',
+      '  profiles: { default: { exclude: ["src/**"] } },',
+      '};',
+    ].join('\n'));
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+
+    expect(await readJavaScriptOutput(outDir)).not.toContain('only-component-marker');
+    await expect(fs.pathExists(join(outDir, 'bundle-main.js'))).resolves.toBe(false);
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('initializes an empty headless profile after a config hot update', async () => {
+  /// @case
+  /// 1. An empty project starts without a headless profile and completes its initial default build.
+  /// 2. A config hot update enables headless with an explicit empty component include list.
+  /// @expect
+  /// The new headless build is rebuilt from current profile entries and emits its empty metadata entry.
+  const project = await makeTempDir();
+  const headlessOutDir = join(project, 'temp', 'oms', 'out-headless');
+  await fs.ensureDir(join(project, 'src'));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: { default: {} },',
+    '};',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({ ok: true });
+
+    const passiveBuild = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'oms.config.mjs'), [
+      'export default {',
+      '  profiles: {',
+      '    default: {},',
+      '    headless: { include: [] },',
+      '  },',
+      '};',
+    ].join('\n'));
+    await expect(passiveBuild).resolves.toMatchObject({
+      result: { ok: true },
+    });
+
+    await expect(fs.pathExists(join(headlessOutDir, 'metadata.js'))).resolves.toBe(true);
+    expect(await fs.readFile(join(headlessOutDir, 'metadata.js'), 'utf8')).not.toContain('main.headless');
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
 it('uses production mode for prod builds', async () => {
   /// @case
   /// 1. A project entry branches on import.meta.env.PROD and cc/env BUILD.

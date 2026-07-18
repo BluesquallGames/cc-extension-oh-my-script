@@ -362,6 +362,29 @@ it('uses arbitrary profile descriptors and selects editor entries per build requ
   expect(entriesWithoutDynamicExports['arbitrary:.']).toBeUndefined();
 });
 
+it('emits dynamic exports independently from profile registration', async () => {
+  /// @case
+  /// 1. A domain registers one component profile and exposes a dynamic export.
+  /// 2. A build requests a different profile id with dynamic exports omitted, enabled, and disabled.
+  /// @expect
+  /// The unknown profile contributes no component bundle, while dynamic exports are emitted unless explicitly disabled.
+  const domainRoot = await makeTempDir();
+  const domain = new Domain(
+    'extension',
+    domainRoot,
+    [{ rootDir: 'src' }],
+    { '.': 'src/dynamic-export.ts' },
+    new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
+    [testDomainProfile],
+  );
+
+  const defaultEntries = domain.getEntrySpecs('unregistered');
+  expect(defaultEntries['bundle-extension']).toBeUndefined();
+  expect(defaultEntries['extension:.']?.exportId).toBe('extension:.');
+  expect(domain.getEntrySpecs('unregistered', { dynamicExports: true })['extension:.']?.exportId).toBe('extension:.');
+  expect(domain.getEntrySpecs('unregistered', { dynamicExports: false })['extension:.']).toBeUndefined();
+});
+
 it('maps colon export entry ids into portable export file names', () => {
   expect(makeOmsEntryFileName('some-plugin:a')).toBe('exports/some-plugin/a');
   expect(makeOmsEntryFileName('some-plugin:.')).toBe('exports/some-plugin/index');
@@ -391,6 +414,57 @@ it('writes colon export entry ids under exports/domain', async () => {
   expect(result.ok).toBe(true);
   expect(await fs.pathExists(join(outDir, 'exports', 'some-plugin', 'a.js'))).toBe(true);
   expect(await fs.pathExists(join(outDir, 'some-plugin_a.js'))).toBe(false);
+});
+
+it('removes obsolete JavaScript and sourcemap outputs across rebuilds', async () => {
+  /// @case
+  /// 1. A build with external sourcemaps emits a first entry.
+  /// 2. A non-empty rebuild replaces it with a second entry, followed by an empty rebuild.
+  /// @expect
+  /// Every JavaScript file and external sourcemap owned by the prior build is removed after it becomes obsolete.
+  const outDir = join(await makeTempDir(), 'out');
+  const config = normalizeProjectUserConfig({});
+  const buildRecord = new BuildRecord({
+    title: 'test-build',
+    outDir,
+    sourceMaps: true,
+    config,
+    headless: false,
+    treeShake: false,
+  });
+  const commonBuildOptions = {
+    domains: {},
+    uuidProvider: undefined,
+    config,
+    profileBuildConfig: undefined,
+  };
+
+  await expect(buildRecord.rebuild({
+    ...commonBuildOptions,
+    entries: {
+      first: 'export const first = 1;',
+    },
+  })).resolves.toMatchObject({ ok: true });
+  await expect(fs.pathExists(join(outDir, 'first.js'))).resolves.toBe(true);
+  await expect(fs.pathExists(join(outDir, 'first.js.map'))).resolves.toBe(true);
+
+  await expect(buildRecord.rebuild({
+    ...commonBuildOptions,
+    entries: {
+      second: 'export const second = 2;',
+    },
+  })).resolves.toMatchObject({ ok: true });
+  await expect(fs.pathExists(join(outDir, 'first.js'))).resolves.toBe(false);
+  await expect(fs.pathExists(join(outDir, 'first.js.map'))).resolves.toBe(false);
+  await expect(fs.pathExists(join(outDir, 'second.js'))).resolves.toBe(true);
+  await expect(fs.pathExists(join(outDir, 'second.js.map'))).resolves.toBe(true);
+
+  await expect(buildRecord.rebuild({
+    ...commonBuildOptions,
+    entries: {},
+  })).resolves.toMatchObject({ ok: true });
+  await expect(fs.pathExists(join(outDir, 'second.js'))).resolves.toBe(false);
+  await expect(fs.pathExists(join(outDir, 'second.js.map'))).resolves.toBe(false);
 });
 
 it('resolves npm-style OMS import specifiers in bundle sources', async () => {

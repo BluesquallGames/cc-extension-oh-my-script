@@ -587,6 +587,7 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private async _reloadDomainsAndFileWatcher() {
+    this._lastBuildExtras = undefined;
     this._fileWatcherPhase = FileWatcherPhase.Starting;
     this._fileQueueConsumerScheduled = true;
     this._fileQueue = {};

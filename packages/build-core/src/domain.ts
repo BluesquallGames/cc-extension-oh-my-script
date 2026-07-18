@@ -70,25 +70,24 @@ export class Domain {
     const entrySpecs: Record<string, BundleEntrySpec> = {};
 
     const profileState = this._profileStates[profileId];
-    if (!profileState) {
-      return entrySpecs;
-    }
-    const bundles = [profileState.bundle, opts.editor ? profileState.editorBundle : undefined];
-    for (const bundle of bundles) {
-      if (!bundle) {
-        continue;
+    if (profileState) {
+      const bundles = [profileState.bundle, opts.editor ? profileState.editorBundle : undefined];
+      for (const bundle of bundles) {
+        if (!bundle) {
+          continue;
+        }
+        if (bundle.empty) {
+          continue;
+        }
+        const bundleId = bundle.id;
+        entrySpecs[`bundle-${bundleId}`] = {
+          source: bundle.entrySource,
+          autoRun: {
+            bundleId,
+            isEditorEntry: bundle === profileState.editorBundle,
+          },
+        };
       }
-      if (bundle.empty) {
-        continue;
-      }
-      const bundleId = bundle.id;
-      entrySpecs[`bundle-${bundleId}`] = {
-        source: bundle.entrySource,
-        autoRun: {
-          bundleId,
-          isEditorEntry: bundle === profileState.editorBundle,
-        },
-      };
     }
 
     if (opts.dynamicExports !== false) {
