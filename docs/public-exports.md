@@ -42,6 +42,8 @@ import { createTextFieldInspector } from 'oms://text-field/editor';
 import { bakeTextMesh } from 'oms://text-field/runtime/mesh';
 ```
 
+`editor` 是保留的 editor-only 导出命名空间。`./editor` 和 `./editor/*` 会继续出现在编辑器开发输出、metadata 和 TypeScript 声明中，但所有生产构建都会省略对应的 JavaScript 文件与 metadata 映射。运行时导出（例如 `.`、`./runtime/mesh`）不受影响。
+
 ## 自定义公开包名
 
 默认情况下，`oms://` 后面的包名等于扩展 ID。扩展可以通过 `exportPackageName` 指定更适合用户 import 的名字。

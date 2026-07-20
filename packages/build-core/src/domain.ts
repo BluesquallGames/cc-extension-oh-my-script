@@ -8,6 +8,7 @@ import { domainURLProtocol } from './constants.js';
 import { isOmsConfigFileName, loadOmsConfigModule } from './config-loader.js';
 import { makeOmsExportEntryId } from './utils/entry-id.js';
 import type { InternalBuildEntry } from './build-record.js';
+import type { OmsConfigContext } from './config.js';
 
 export interface DomainProfile {
   id: string;
@@ -92,6 +93,9 @@ export class Domain {
 
     if (opts.dynamicExports !== false) {
       for (const [key, value] of Object.entries(this._exports)) {
+        if (!opts.editor && this.isEditorExport(key)) {
+          continue;
+        }
         const entryName = makeOmsExportEntryId(this._exportPackageName, key);
         entrySpecs[entryName] = {
           source: {
@@ -125,10 +129,16 @@ export class Domain {
     return [...implicitEntries];
   }
 
-  async addSourceFile(path: string) {
+  async addSourceFile(path: string, allowUpdateUUID: boolean) {
     const bundles = this._getSourceFileBundles(path);
     if (this._isComponentModule(path)) {
-      await this._ensureUUID(path);
+      if (!allowUpdateUUID) {
+        if (!this._isEditorModule(path) && !await this._uuidManager.hasUUIDForPath(path)) {
+          throw new Error(`Production component ${path} has no project UUID. Production UUID discovery is read-only; run an OMS development build or add the component to the centralized UUID map before building production.`);
+        }
+      } else {
+        await this._ensureUUID(path);
+      }
     }
     let shouldRebuildBundle = false;
     for (const bundle of bundles) {
@@ -153,6 +163,11 @@ export class Domain {
     if (this._isComponentModule(path)) {
       await this._ensureUUID(path);
     }
+  }
+
+  isEditorExport(subpath: string): boolean {
+    const exportId = normalizeExportId(subpath);
+    return exportId === 'editor' || exportId.startsWith('editor/');
   }
 
   resolveExport(exportSubpath: string): string | undefined {
@@ -188,7 +203,7 @@ export class Domain {
     }
 
     const bundles: Bundle[] = [];
-    const isEditorModule = /\.editor\.\w+$/.test(path);
+    const isEditorModule = this._isEditorModule(path);
     const relativePath = relative(this._domainRoot, path);
     for (const profileState of Object.values(this._profileStates)) {
       if (isEditorModule) {
@@ -213,6 +228,10 @@ export class Domain {
 
   private _isComponentModule(path: string) {
     return Object.values(this._profileStates).some(({ bundle }) => bundle.isComponentModule(path));
+  }
+
+  private _isEditorModule(path: string) {
+    return /\.editor\.\w+$/.test(path);
   }
 
   private async _ensureUUID(sourceFile: string) {
@@ -255,6 +274,7 @@ export interface OmsDomainConfig {
 
 export async function readOmsDomainConfig(domainRoot: string, options: {
   preferredSourceRoot: string;
+  context: OmsConfigContext;
   configFile?: string | null;
 }): Promise<OmsDomainConfig> {
   const packageConfig = await readLegacyPackageDomainConfig(domainRoot);
@@ -262,7 +282,7 @@ export async function readOmsDomainConfig(domainRoot: string, options: {
     ? await findOmsDomainConfigFile(domainRoot)
     : options.configFile;
   const fileConfig = configFile
-    ? await readOmsDomainConfigFile(resolve(domainRoot, configFile))
+    ? await readOmsDomainConfigFile(resolve(domainRoot, configFile), options.context)
     : {};
 
   const partitions = normalizePartitions(
@@ -301,9 +321,9 @@ async function findOmsDomainConfigFile(domainRoot: string) {
   return entries.filter(isOmsConfigFileName).sort()[0] ?? null;
 }
 
-async function readOmsDomainConfigFile(path: string): Promise<OmsDomainUserConfig> {
+async function readOmsDomainConfigFile(path: string, context: OmsConfigContext): Promise<OmsDomainUserConfig> {
   try {
-    const config = await loadOmsConfigModule<OmsDomainUserConfig>(path);
+    const config = await loadOmsConfigModule<OmsDomainUserConfig>(path, context);
     if (typeof config !== 'object' || !config) {
       logger.error(`OMS domain config ${path} should export an object`);
       return {};

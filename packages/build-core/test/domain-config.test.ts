@@ -11,6 +11,7 @@ import { BuildRecord } from '../src/build-record.js';
 import { normalizeProjectUserConfig } from '../src/config.js';
 
 const tempDirs: string[] = [];
+const developmentConfigContext = { mode: 'development' };
 const testDomainProfile: DomainProfile = {
   id: 'test',
   sourceMatcher: () => true,
@@ -24,6 +25,45 @@ const testDomainProfile: DomainProfile = {
 afterEach(async () => {
   await Promise.all(tempDirs.map((dir) => fs.remove(dir)));
   tempDirs.length = 0;
+});
+
+it('loads object, synchronous function, and asynchronous function configs with the supplied context', async () => {
+  /// @case
+  /// Three domains export an object, a synchronous config function, and an asynchronous config function; function configs read a custom mode string.
+  /// @expect
+  /// Every export form remains compatible and both function forms receive the exact caller-provided mode without enum coercion or fallback.
+  const objectDomain = await makeTempDir();
+  const syncDomain = await makeTempDir();
+  const asyncDomain = await makeTempDir();
+  await fs.outputFile(join(objectDomain, 'oms.config.mjs'), 'export default { exports: { object: "./object.ts" } };');
+  await fs.outputFile(join(syncDomain, 'oms.config.mjs'), [
+    'export default ({ mode }) => ({',
+    '  exports: { sync: `./${mode}.ts` },',
+    '});',
+  ].join('\n'));
+  await fs.outputFile(join(asyncDomain, 'oms.config.mjs'), [
+    'export default async ({ mode }) => ({',
+    '  exportPackageName: mode,',
+    '  exports: { async: "./async.ts" },',
+    '});',
+  ].join('\n'));
+  const context = { mode: 'custom-mode' };
+
+  await expect(readOmsDomainConfig(objectDomain, {
+    preferredSourceRoot: 'oms/src',
+    context,
+  })).resolves.toMatchObject({ exports: { object: 'object.ts' } });
+  await expect(readOmsDomainConfig(syncDomain, {
+    preferredSourceRoot: 'oms/src',
+    context,
+  })).resolves.toMatchObject({ exports: { sync: 'custom-mode.ts' } });
+  await expect(readOmsDomainConfig(asyncDomain, {
+    preferredSourceRoot: 'oms/src',
+    context,
+  })).resolves.toMatchObject({
+    exportPackageName: 'custom-mode',
+    exports: { async: 'async.ts' },
+  });
 });
 
 it('reads legacy package.json OMS partitions but ignores package.json exports', async () => {
@@ -41,6 +81,7 @@ it('reads legacy package.json OMS partitions but ignores package.json exports', 
 
   const config = await readOmsDomainConfig(domainRoot, {
     preferredSourceRoot: 'oms/src',
+    context: developmentConfigContext,
   });
 
   expect(config).toEqual({
@@ -75,6 +116,7 @@ it('lets oms.config.js provide exports and override legacy package.json partitio
 
   const config = await readOmsDomainConfig(domainRoot, {
     preferredSourceRoot: 'oms/src',
+    context: developmentConfigContext,
   });
 
   expect(config).toEqual({
@@ -101,6 +143,7 @@ it('normalizes npm-style oms.config.js export keys for package-like imports', as
 
   const config = await readOmsDomainConfig(domainRoot, {
     preferredSourceRoot: 'oms/src',
+    context: developmentConfigContext,
   });
 
   expect(config.exports).toEqual({
@@ -145,6 +188,7 @@ it('uses exportPackageName as the public OMS package name', async () => {
 
   const config = await readOmsDomainConfig(domainRoot, {
     preferredSourceRoot: 'oms/src',
+    context: developmentConfigContext,
   });
 
   expect(config).toEqual({
@@ -339,7 +383,7 @@ it('uses arbitrary profile descriptors and selects editor entries per build requ
   };
   for (const file of Object.values(files)) {
     await fs.outputFile(file, 'export {};');
-    await domain.addSourceFile(file);
+    await domain.addSourceFile(file, true);
   }
 
   const runtimeEntries = domain.getEntrySpecs(profile.id);
@@ -548,7 +592,7 @@ it('builds public export entries without adding a synthetic default export', asy
   });
 
   const result = await buildRecord.rebuild({
-    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id)).map(([key, spec]) => [key, spec.source])),
+    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id, { editor: true })).map(([key, spec]) => [key, spec.source])),
     domains: {},
     uuidProvider: undefined,
     config: normalizeProjectUserConfig({}),
@@ -588,7 +632,7 @@ it('preserves public export entry default exports', async () => {
   });
 
   const result = await buildRecord.rebuild({
-    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id)).map(([key, spec]) => [key, spec.source])),
+    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id, { editor: true })).map(([key, spec]) => [key, spec.source])),
     domains: {},
     uuidProvider: undefined,
     config: normalizeProjectUserConfig({}),
@@ -671,16 +715,21 @@ it('reports syntax errors from entry source without wrapping them as unexpected'
 });
 
 it('watches domain oms.config.js changes', async () => {
+  /// @case
+  /// A development-mode domain watcher reloads a changed function config that selects its export path from context.mode.
+  /// @expect
+  /// Both the initial read and hot reload receive the watcher's creation mode instead of changing context or using a fallback.
   const domainRoot = await makeTempDir();
   await fs.outputFile(join(domainRoot, 'oms.config.mjs'), [
-    'export default {',
-    '  exports: { a: "./a.ts" },',
-    '};',
+    'export default ({ mode }) => ({',
+    '  exports: { a: `./a-${mode}.ts` },',
+    '});',
   ].join('\n'));
 
   const watcher = new OmsDomainConfigWatcher({
     domainRoot,
     preferredSourceRoot: 'oms/src',
+    context: developmentConfigContext,
   });
 
   try {
@@ -689,21 +738,21 @@ it('watches domain oms.config.js changes', async () => {
         { rootDir: join('oms', 'src') },
       ],
       exports: {
-        a: 'a.ts',
+        a: 'a-development.ts',
       },
     });
 
     await setTimeout(20);
     const updated = onceDomainConfigUpdated(watcher);
     await fs.outputFile(join(domainRoot, 'oms.config.mjs'), [
-      'export default {',
-      '  exports: { b: "./b.ts" },',
-      '};',
+      'export default ({ mode }) => ({',
+      '  exports: { b: `./b-${mode}.ts` },',
+      '});',
     ].join('\n'));
 
     await expect(updated).resolves.toMatchObject({
       exports: {
-        b: 'b.ts',
+        b: 'b-development.ts',
       },
     });
   } finally {

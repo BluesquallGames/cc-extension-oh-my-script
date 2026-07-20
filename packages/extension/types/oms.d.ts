@@ -1,5 +1,9 @@
 /// <reference types="node" />
 
+interface OmsConfigContext {
+  mode: string;
+}
+
 interface ImportMetaHot {
   signalOnDispose: AbortSignal;
 }

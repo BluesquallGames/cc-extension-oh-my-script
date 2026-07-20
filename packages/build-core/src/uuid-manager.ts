@@ -52,8 +52,12 @@ export class UUIDManager {
     }
   }
 
-  get(module: string): string | undefined {
-    return this._map[module]?.uuid;
+  getByKey(realPath: string): string | undefined {
+    return this._map[realPath]?.uuid;
+  }
+
+  async hasUUIDForPath(path: string): Promise<boolean> {
+    return this.getByKey(await this._getPathKey(path)) !== undefined;
   }
 
   *centralizedModules(): Generator<[string, string]> {

@@ -65,6 +65,10 @@ oms/uuids.json
 
 项目构建时，OMS 会把脚本产物一起生成到构建目录里。通常你不需要直接引用 `temp/oms` 下的文件，也不应该把它们当作 public API。
 
+OMS 会为生产构建重新读取 `production` mode 的项目与扩展配置，并建立独立的 production domain graph。Cocos Release（`debug: false`）输出会使用 esbuild 压缩，同时保留类名和函数名；Debug 输出不压缩。关闭、外部文件和 inline 三种 source-map 模式都会在压缩后保持有效。该规则同时适用于 Web 等 SystemJS 输出和 Headless ESM 输出。
+
+组件 UUID 是项目级身份，不随构建 mode 分叉。production graph 会复用 development 已初始化的 UUID 映射，但只允许读取，不会生成、更新或写入 UUID。production 配置引入的组件如果尚未出现在项目 UUID 映射中，构建会失败；先让 OMS development discovery 收录该组件，或将它加入 `oms/uuids.json` 后再构建。
+
 需要在测试、工具脚本或非场景环境复用逻辑时，可以开启 [Headless 模式](./headless-mode.md)。
 
 ## 什么时候需要手动操作

@@ -25,6 +25,7 @@ import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.
 import { rollupPluginProjectPeerImports } from './features/rollup-plugin-project-peer-imports.js';
 import { createProjectDefine } from './env.js';
 import { rollupPluginDefine } from './features/rollup-plugin-define.js';
+import { rollupPluginMinify } from './features/rollup-plugin-minify.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -84,7 +85,7 @@ export class BuildRecord {
     title: string;
     outDir: string;
     sourceMaps?: boolean | 'inline';
-    debug?: boolean;
+    minify?: boolean;
     ccEnvParams?: CCEnvParams;
     config: OmsProjectConfig;
     headless: boolean;
@@ -95,7 +96,7 @@ export class BuildRecord {
     this._outDir = options.outDir;
     this._headless = options.headless;
     this._sourceMaps = options.sourceMaps ?? true;
-    this._debug = options.debug ?? true;
+    this._minify = options.minify ?? false;
     this._ccEnvParams = options.ccEnvParams;
     this._treeShake = options.treeShake ?? true;
     this._mode = options.mode;
@@ -137,7 +138,7 @@ export class BuildRecord {
   private _outDir: string;
   private _headless: boolean;
   private _sourceMaps: boolean | 'inline';
-  private _debug: boolean;
+  private _minify: boolean;
   private _treeShake: boolean;
   private _mode: string | undefined;
   private _suppressRollupWarningCodes = [
@@ -275,6 +276,7 @@ export class BuildRecord {
 
       rollupPluginDomain({
         domains: options.domains,
+        allowEditorOnlyImports: this._mode !== 'production',
       }),
 
       rollupPluginWasm({}),
@@ -367,6 +369,7 @@ export class BuildRecord {
     this._cache = rollupBuild.cache;
 
     const outputPlugins: rollup.Plugin[] = [
+      ...(this._minify ? [rollupPluginMinify()] : []),
     ];
 
     const preserveModules = !!this._headless;

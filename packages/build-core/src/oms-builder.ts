@@ -11,12 +11,12 @@ import type { BuildOptions, BuildResult, InvocationParams, PassiveBuildEndInfo }
 import { promiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
-import { Domain, type DomainProfile, type ProfileBuildOptions } from './domain.js';
+import { Domain, readOmsDomainConfig, type DomainProfile, type ProfileBuildOptions } from './domain.js';
 import { MergedTaskExecError, TaskQueue } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { OmsProjectConfigWatcher } from './config-watcher.js';
-import type { OmsProjectConfig, ProfileConfig } from './config.js';
+import type { OmsConfigContext, OmsProjectConfig, ProfileConfig } from './config.js';
 import { BuildRecord, mergeBuildResults, type InternalBuildEntry, type InternalBuildResult } from './build-record.js';
 import { OmsDomainConfigWatcher } from './domain-config-watcher.js';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
@@ -25,6 +25,8 @@ const mainDomainId = 'main';
 const omsPackageRootEnvName = 'OMS_PACKAGE_ROOT';
 const defaultProfileId = 'default';
 const headlessProfileId = 'headless';
+const developmentConfigContext: OmsConfigContext = { mode: 'development' };
+const productionConfigContext: OmsConfigContext = { mode: 'production' };
 
 function makeDefaultDomainProfile(profileConfig: ProfileConfig | undefined): DomainProfile {
   return {
@@ -205,6 +207,7 @@ export class OmsBuilder extends EventEmitter<{
     assert.ok(!this._configWatcher);
     return this._configWatcher = new OmsProjectConfigWatcher({
       projectPath: this._projectPath,
+      context: developmentConfigContext,
     });
   }
 }
@@ -355,7 +358,6 @@ class OmsWatcher extends EventEmitter<{
     this._ctx = ctx;
 
     this._config = config;
-
     const treeShake = false;
     const buildRecord = new BuildRecord({
       title: `default-build`,
@@ -376,7 +378,7 @@ class OmsWatcher extends EventEmitter<{
     const uuidManager = new UUIDManager(this._projectPath, options.uuidMapOutPath);
     this._uuidManager = uuidManager;
 
-    const uuidProvider = uuidManager.get.bind(uuidManager);
+    const uuidProvider = uuidManager.getByKey.bind(uuidManager);
     this._uuidProvider = uuidProvider;
   }
 
@@ -451,10 +453,16 @@ class OmsWatcher extends EventEmitter<{
 
     const configWatcher = new OmsProjectConfigWatcher({
       projectPath: this._projectPath,
+      context: productionConfigContext,
       once: true,
     });
-    const config = await configWatcher.ready();
-    await configWatcher.close();
+    const config = await (async () => {
+      try {
+        return await configWatcher.ready();
+      } finally {
+        await configWatcher.close();
+      }
+    })();
 
     const headless = opts.headless ?? false;
 
@@ -462,7 +470,7 @@ class OmsWatcher extends EventEmitter<{
       title: `prod-build`,
       outDir,
       sourceMaps: opts.sourceMaps,
-      debug: opts.debug,
+      minify: !opts.debug,
       ccEnvParams: {
         platform: opts.platform,
         mode: 'build',
@@ -478,18 +486,26 @@ class OmsWatcher extends EventEmitter<{
       type: 'build-prod',
 
       exec: async () => {
+        const productionDomains = await this._createProductionDomains(config);
         const { entries } = await this._makeEntries(
           headless ? headlessProfileId : defaultProfileId,
           headless ? { dynamicExports: false } : undefined,
+          productionDomains,
         );
-        await buildRecord.rebuild({
+        await fs.emptyDir(outDir);
+        const buildResult = await buildRecord.rebuild({
           entries,
           uuidProvider: this._uuidProvider,
-          domains: this._domains,
+          domains: productionDomains,
           projectRoot: this._projectPath,
           config,
           profileBuildConfig: headless ? config.profiles.headless?.build : undefined,
         });
+        if (!buildResult.ok) {
+          const error = new Error(buildResult.error.message);
+          error.stack = buildResult.error.stack;
+          throw error;
+        }
       },
     });
   }
@@ -602,6 +618,7 @@ class OmsWatcher extends EventEmitter<{
     const domainConfigWatcher = new OmsDomainConfigWatcher({
       domainRoot,
       preferredSourceRoot: preferredDomainSourceRoot,
+      context: developmentConfigContext,
     });
     this._domainConfigWatchers[domainId] = domainConfigWatcher;
     const domainConfig = await domainConfigWatcher.ready();
@@ -635,6 +652,53 @@ class OmsWatcher extends EventEmitter<{
       });
     }
     this._domainSourceRootMap.sort((a, b) => b.sourceRoot.length - a.sourceRoot.length);
+  }
+
+  private async _createProductionDomains(config: OmsProjectConfig) {
+    const domains: Record<string, Domain> = {};
+    const domainDefinitions = [
+      {
+        id: mainDomainId,
+        root: this._projectPath,
+        preferredSourceRoot: 'src',
+      },
+      ...this._buildOptions.extensionBuildOptions.map(({ name, path }) => ({
+        id: name,
+        root: path,
+        preferredSourceRoot: 'oms/src',
+      })),
+    ];
+
+    for (const definition of domainDefinitions) {
+      const domainConfig = await readOmsDomainConfig(definition.root, {
+        preferredSourceRoot: definition.preferredSourceRoot,
+        context: productionConfigContext,
+      });
+      const domainProfiles = definition.id === mainDomainId
+        ? [
+          makeDefaultDomainProfile(config.profiles.default),
+          ...(config.profiles.headless
+            ? [makeHeadlessDomainProfile(config.profiles.headless)]
+            : []),
+        ]
+        : [makeDefaultDomainProfile(undefined)];
+      const domain = domains[definition.id] = new Domain(
+        definition.id,
+        definition.root,
+        domainConfig.partitions,
+        domainConfig.exports,
+        this._uuidManager,
+        domainProfiles,
+        domainConfig.exportPackageName,
+      );
+      for (const sourceRoot of domain.sourceRoots) {
+        for await (const file of walkWatchableFiles(sourceRoot)) {
+          await domain.addSourceFile(file, false);
+        }
+      }
+    }
+
+    return domains;
   }
 
   private async _queueDomainConfigUpdate(domainId: string) {
@@ -764,7 +828,11 @@ class OmsWatcher extends EventEmitter<{
     this._fileWatcherPhase = FileWatcherPhase.Closed;
   }
 
-  private async _makeEntries(profileId: string, opts: ProfileBuildOptions = {}) {
+  private async _makeEntries(
+    profileId: string,
+    opts: ProfileBuildOptions = {},
+    domains: Record<string, Domain> = this._domains,
+  ) {
     const entries: Record<string, InternalBuildEntry> = {};
     const autoRunInfos: Array<{
       entryId: string;
@@ -772,7 +840,7 @@ class OmsWatcher extends EventEmitter<{
       isEditorEntry: boolean;
     }> = [];
     const exportEntries: Record<string, string> = {};
-    for (const [domainId, domain] of Object.entries(this._domains)) {
+    for (const [domainId, domain] of Object.entries(domains)) {
       const domainEntrySpecs = domain.getEntrySpecs(profileId, opts);
       for (const [domainEntrySpecId, domainEntrySpec] of Object.entries(domainEntrySpecs)) {
         if (domainEntrySpecId in entries) {
@@ -1143,7 +1211,7 @@ class OmsWatcher extends EventEmitter<{
     }
     const domain = this._domains[domainId];
     assert.ok(domain, `Domain ${domainId} not found`);
-    const shouldRebuildBundles = await domain.addSourceFile(path);
+    const shouldRebuildBundles = await domain.addSourceFile(path, true);
     return shouldRebuildBundles;
   }
 

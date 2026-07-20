@@ -1,6 +1,11 @@
 import EventEmitter from 'node:events';
 import * as chokidar from 'chokidar';
-import { normalizeProjectUserConfig, type OmsProjectConfig, type OmsProjectUserConfig } from './config.js';
+import {
+  normalizeProjectUserConfig,
+  type OmsConfigContext,
+  type OmsProjectConfig,
+  type OmsProjectUserConfig,
+} from './config.js';
 import { promiseWithResolvers } from './utils/promise-with-resolvers.js';
 import { logger } from './logger.js';
 import { basename, relative, resolve } from 'node:path';
@@ -11,9 +16,12 @@ export class OmsProjectConfigWatcher extends EventEmitter<{
 }> {
   constructor(options: {
     projectPath: string;
+    context: OmsConfigContext;
     once?: boolean;
   }) {
     super();
+    this._context = options.context;
+    const rejectInitialLoadError = options.once === true;
     const readyPromiseWithResolvers = promiseWithResolvers<void>();
     this._readyPromise = readyPromiseWithResolvers.promise;
     const rootDir = options.projectPath;
@@ -35,7 +43,13 @@ export class OmsProjectConfigWatcher extends EventEmitter<{
     });
     fsWatcher.on('ready', () => {
       ready = true;
-      this._onAvailableConfigFilesChange(readyPromiseWithResolvers.resolve);
+      this._onAvailableConfigFilesChange((error) => {
+        if (error === undefined || !rejectInitialLoadError) {
+          readyPromiseWithResolvers.resolve();
+        } else {
+          readyPromiseWithResolvers.reject(error);
+        }
+      });
     });
     fsWatcher.on('add', (path) => {
       this._availableConfigFiles.add(path);
@@ -70,13 +84,14 @@ export class OmsProjectConfigWatcher extends EventEmitter<{
 
   private _config: OmsProjectConfig = normalizeProjectUserConfig({});
 
+  private _context: OmsConfigContext;
   private _rootDir: string;
   private _fsWatcher: chokidar.FSWatcher;
   private _readyPromise: Promise<void>;
   private _effectiveConfigFile = '';
   private _availableConfigFiles: Set<string> = new Set();
 
-  private _onAvailableConfigFilesChange(callback?: () => void) {
+  private _onAvailableConfigFilesChange(callback?: (error?: unknown) => void) {
     const effectiveConfigFile = [...this._availableConfigFiles.values()].sort()[0] ?? '';
     if (this._effectiveConfigFile !== effectiveConfigFile) {
       this._effectiveConfigFile = effectiveConfigFile;
@@ -86,7 +101,7 @@ export class OmsProjectConfigWatcher extends EventEmitter<{
     }
   }
 
-  private _onEffectiveConfigFileChange(callback?: () => void) {
+  private _onEffectiveConfigFileChange(callback?: (error?: unknown) => void) {
     if (!this._effectiveConfigFile) {
       this._config = normalizeProjectUserConfig({});
       this.emit('configUpdated', this._config);
@@ -95,15 +110,16 @@ export class OmsProjectConfigWatcher extends EventEmitter<{
     }
     const path = resolve(this._rootDir, this._effectiveConfigFile);
     (async () => {
-      const useConfig = await loadOmsConfigModule<OmsProjectUserConfig>(path);
+      const useConfig = await loadOmsConfigModule<OmsProjectUserConfig>(path, this._context);
       logger.debug('user config read: %o', useConfig);
       this._config = normalizeProjectUserConfig(useConfig);
       logger.debug('config updated: %o', this._config);
       this.emit('configUpdated', this._config);
-    })().catch((err) => {
-      logger.error(`Error loading config file ${path}: %o`, err);
-    }).finally(() => {
+    })().then(() => {
       callback?.();
+    }).catch((err) => {
+      logger.error(`Error loading config file ${path}: %o`, err);
+      callback?.(err);
     });
   }
 }

@@ -5,8 +5,10 @@ const domainModuleURLRegex = /^oms:\/\/([^\/]+)(?:\/(.*))?$/;
 
 export function rollupPluginDomain({
   domains,
+  allowEditorOnlyImports,
 }: {
   domains: Record<string, Domain>,
+  allowEditorOnlyImports: boolean,
 }): Plugin {
   return {
     name: 'oms:domain',
@@ -24,6 +26,9 @@ export function rollupPluginDomain({
       const domain = matchingDomains[0];
       if (!domain) {
         return this.error(`OMS export package ${domainId} not found`);
+      }
+      if (!allowEditorOnlyImports && domain.isEditorExport(exportSubpath)) {
+        return this.error(`Editor-only OMS import ${id} is not available in production builds`);
       }
       const exportPathResolved = domain.resolveExport(exportSubpath);
       if (!exportPathResolved) {

@@ -83,6 +83,9 @@ importers:
       ejs:
         specifier: ^3.1.10
         version: 3.1.10
+      esbuild:
+        specifier: ^0.25.8
+        version: 0.25.8
       fs-extra:
         specifier: ^11.3.0
         version: 11.3.0
@@ -108,6 +111,9 @@ importers:
         specifier: ^2.7.0
         version: 2.8.0
     devDependencies:
+      '@jridgewell/trace-mapping':
+        specifier: ^0.3.30
+        version: 0.3.30
       '@types/babel__core':
         specifier: ^7.20.5
         version: 7.20.5

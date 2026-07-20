@@ -3,6 +3,10 @@ import picomatch from 'picomatch';
 import { logger } from './logger.js';
 import { getBarePackageName } from './utils/package-name.js';
 
+export interface OmsConfigContext {
+  mode: string;
+}
+
 export interface OmsProjectUserConfig {
   resolve?: {
     alias?: Record<string, string>;

@@ -5,6 +5,7 @@ import { isOmsConfigFileName } from './config-loader.js';
 import { logger } from './logger.js';
 import { readOmsDomainConfig, type OmsDomainConfig } from './domain.js';
 import { promiseWithResolvers } from './utils/promise-with-resolvers.js';
+import type { OmsConfigContext } from './config.js';
 
 export class OmsDomainConfigWatcher extends EventEmitter<{
   configUpdated: [config: OmsDomainConfig];
@@ -12,10 +13,12 @@ export class OmsDomainConfigWatcher extends EventEmitter<{
   constructor(options: {
     domainRoot: string;
     preferredSourceRoot: string;
+    context: OmsConfigContext;
   }) {
     super();
     this._domainRoot = options.domainRoot;
     this._preferredSourceRoot = options.preferredSourceRoot;
+    this._context = options.context;
 
     const readyPromiseWithResolvers = promiseWithResolvers<void>();
     this._readyPromise = readyPromiseWithResolvers.promise;
@@ -74,6 +77,7 @@ export class OmsDomainConfigWatcher extends EventEmitter<{
 
   private _domainRoot: string;
   private _preferredSourceRoot: string;
+  private _context: OmsConfigContext;
   private _fsWatcher: chokidar.FSWatcher;
   private _readyPromise: Promise<void>;
   private _config: OmsDomainConfig = {
@@ -98,6 +102,7 @@ export class OmsDomainConfigWatcher extends EventEmitter<{
       this._config = await readOmsDomainConfig(this._domainRoot, {
         preferredSourceRoot: this._preferredSourceRoot,
         configFile: this._effectiveConfigFile || null,
+        context: this._context,
       });
       logger.debug('OMS domain config updated for %s: %o', this._domainRoot, this._config);
       this.emit('configUpdated', this._config);

@@ -5,7 +5,22 @@ OMS 使用两类配置文件：
 - 项目根目录的 `oms.config.*` 配置整个项目构建。
 - 扩展根目录的 `oms.config.*` 配置该扩展 domain。
 
-支持的文件名是 `oms.config.js`、`oms.config.cjs` 和 `oms.config.mjs`。配置模块需要 `export default` 一个对象，也可以 `export default` 一个返回对象的函数。
+支持的文件名是 `oms.config.js`、`oms.config.cjs` 和 `oms.config.mjs`。配置模块可以默认导出对象、同步配置函数或异步配置函数：
+
+```js
+export default ({ mode }) => ({
+  profiles: {
+    default: {
+      exclude: [
+        'src/authority/**',
+        ...(mode === 'production' ? ['src/client/test/**'] : []),
+      ],
+    },
+  },
+});
+```
+
+配置函数收到 `{ mode: string }`。编辑器、热更新和 Preview 使用 `development`；所有 Cocos 生产构建（无论 Debug 或 Release）使用 `production`。项目配置和扩展 domain 配置遵循同一约定，配置热更新会继续使用 watcher 创建时的 mode。loader 也允许调用方传入其他 mode 字符串，不会把它改写为预设枚举值。
 
 ## 项目配置
 
@@ -78,6 +93,8 @@ export default {
 ```
 
 `profiles.default` 暂时只支持 `exclude`。`profiles.headless` 支持 `include`、`exclude` 和 `build.target`。过滤规则只影响 primary bundle 的 `.component.*` 自动收集；各自的 `index*` 入口以及入口显式导入的依赖不受影响。同一个组件可以同时进入两个 profile。
+
+`profiles.default.exclude` 可以由配置函数按 mode 动态返回，因此 development 与 production 能拥有不同的自动收集边界。`profiles.default.include` 仍未开放。
 
 Preview 和生产构建只运行对应 profile 的 primary bundle。编辑器开发构建会在 default primary 之外运行 editor overlay：primary 过滤掉的普通组件和所有 `.component.editor.*` 都会进入这个 editor entry。这样 profile 可以排除非目标运行环境的组件，同时不影响编辑器 builder、asset-db 和 scene 对完整组件集合的注册。
 
