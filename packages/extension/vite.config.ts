@@ -48,6 +48,7 @@ function defineEntries(files: string[]) {
 const entries = defineEntries([
   'hooks.ts',
   'main.ts',
+  'worker/run-as-node-probe.ts',
   'worker/worker-entry.ts',
   'worker/worker-entry-prelude.ts',
   'contributions/builder/default-hooks.ts',

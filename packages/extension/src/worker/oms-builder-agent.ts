@@ -10,10 +10,24 @@ import { broadcastInner, InnerPackageMessageId } from '../inner-package-messagin
 import { selfExtensionName, selfPackageName, selfPackagePath } from '../self-info.js';
 import { SceneMethods } from '../contributions/scene/index.js';
 import { createInterface } from 'node:readline/promises';
+import { resolve } from 'node:path';
+import { clean as cleanSemver, satisfies as satisfiesSemver } from 'semver';
+import { promiseWithResolvers } from '../utils/promise-with-resolvers.js';
 
 setLogger(logger);
 
 const logTag = '[BuilderAgent] ';
+// Matches the strictest Node engine requirement among build-core runtime dependencies: oxc-transform@0.135.0.
+const supportedNodeVersionRange = '^20.19.0 || >=22.12.0';
+const runAsNodeProbeTimeoutMs = 3_000;
+// Sandboxie Plus 1.18.0 injects its default Chromium compatibility flag,
+// `--disable-features=PrintCompositorLPAC`, into processes classified as Chrome. That includes Electron
+// when mapped through `SpecialImage=chrome`; see https://sandboxie-plus.com/sandboxie/customchromiumflags/.
+// ELECTRON_RUN_AS_NODE turns Electron into plain Node, which rejects that Chromium-only option and exits
+// before running the entry script. Sandboxie skips the injection when the command line contains " --type=".
+// Keep this deliberately nonstandard marker after the entry script: Sandboxie can see it, while RunAsNode
+// passes it to the script instead of parsing it as a Node option.
+const sandboxieRunAsNodeProcessTypeArg = '--type=magic-param-for-sandboxie-workaround';
 
 export class OmsBuilderAgent extends EventEmitter<{
   setup: [];
@@ -208,6 +222,7 @@ export class OmsBuilderAgent extends EventEmitter<{
         this.emit('setup');
         return serverAgent;
       }).catch((err) => {
+        this._setupPromise = undefined;
         this._state = { type: StateType.closed };
         throw err;
       });
@@ -218,17 +233,48 @@ export class OmsBuilderAgent extends EventEmitter<{
   private async _doSetup(): Promise<ServerAgent> {
     const setupStart = Date.now();
     logger.debug(`${logTag}Setup OMS builder`);
+    const runtime = await this._selectBuilderRuntime();
     const main = require.resolve('@oms/build-core/main');
     const workerLogFd = 3;
     const spawnStart = Date.now();
-    const childProcess = cp.spawn('node', ['--inspect-publish-uid=http', '--inspect', main], {
+
+    const childEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      OMS_BUILDER_CORE_LOG_FD: `${workerLogFd}`,
+      OMS_PACKAGE_ROOT: selfPackagePath,
+    };
+    if (runtime.runElectronAsNode) {
+      childEnv.ELECTRON_RUN_AS_NODE = '1';
+    }
+
+    const childArgs = ['--inspect-publish-uid=http', '--inspect', main];
+    if (runtime.runElectronAsNode) {
+      childArgs.push(sandboxieRunAsNodeProcessTypeArg);
+    }
+
+    logger.info(`${logTag}Starting OMS builder with ${runtime.description}`);
+    const childProcess = cp.spawn(runtime.executable, childArgs, {
       stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'],
-      env: {
-        ...process.env,
-        OMS_BUILDER_CORE_LOG_FD: `${workerLogFd}`,
-        OMS_PACKAGE_ROOT: selfPackagePath,
-      },
+      env: childEnv,
     });
+
+    const {
+      promise: processAbortedPromise,
+      reject: rejectProcessAborted,
+    } = promiseWithResolvers<never>();
+    const onProcessError = (error: Error) => {
+      rejectProcessAborted(new Error(
+        `${logTag}OMS builder using ${runtime.description} failed before bootstrap setup completed: ${error.message}`,
+      ));
+    };
+    const onProcessExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      rejectProcessAborted(new Error(
+        `${logTag}OMS builder using ${runtime.description} exited before bootstrap setup completed (code ${code ?? 'unknown'}, signal ${signal ?? 'none'})`,
+      ));
+    };
+    childProcess.once('error', onProcessError);
+    childProcess.once('exit', onProcessExit);
+
     if (childProcess.stdout) {
       (async () => {
         for await (const line of createInterface(childProcess.stdout as NodeJS.ReadableStream)) {
@@ -286,8 +332,13 @@ export class OmsBuilderAgent extends EventEmitter<{
       ipc.dispatch(message as InvocationMessage);
     });
 
-    const bootstrapPromise = new Promise<void>((resolve, reject) => {
-      ipc.listen('bootstrapped', async () => {
+    const {
+      promise: bootstrapPromise,
+      resolve: resolveBootstrap,
+      reject: rejectBootstrap,
+    } = promiseWithResolvers<void>();
+    ipc.listen('bootstrapped', async () => {
+      try {
         logger.debug(`${logTag}OMS builder has bootstrapped`);
         logger.info(`${logTag}Worker bootstrapped in ${Date.now() - spawnStart}ms`);
         const setupIpcStart = Date.now();
@@ -295,8 +346,12 @@ export class OmsBuilderAgent extends EventEmitter<{
           project: Editor.Project.path,
         });
         logger.info(`${logTag}Worker setup IPC done in ${Date.now() - setupIpcStart}ms`);
-        resolve();
-      });
+        resolveBootstrap();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        rejectBootstrap(new Error(`${logTag}OMS builder setup IPC failed using ${runtime.description}: ${message}`));
+        childProcess.kill();
+      }
     });
 
     ipc.listen('pong', async () => {
@@ -320,7 +375,12 @@ export class OmsBuilderAgent extends EventEmitter<{
       });
     });
 
-    await bootstrapPromise;
+    try {
+      await Promise.race([bootstrapPromise, processAbortedPromise]);
+    } finally {
+      childProcess.off('error', onProcessError);
+      childProcess.off('exit', onProcessExit);
+    }
 
     logger.info(`${logTag}Builder setup done in ${Date.now() - setupStart}ms`);
     logger.debug(`${logTag}Builder has setup`);
@@ -329,6 +389,113 @@ export class OmsBuilderAgent extends EventEmitter<{
       ipc,
       childProcess,
     };
+  }
+
+  private async _selectBuilderRuntime(): Promise<BuilderRuntime> {
+    const runElectronAsNode: boolean = await Editor.Profile.getProject(
+      selfPackageName,
+      'builder.useElectronRunAsNode',
+    );
+    if (!runElectronAsNode) {
+      const embeddedRuntimeIssue = 'Electron RunAsNode is disabled by project setting';
+      logger.info(`${logTag}${embeddedRuntimeIssue}; checking external Node from PATH`);
+      return await this._selectExternalNode(embeddedRuntimeIssue);
+    }
+
+    const electronVersion = process.versions.electron;
+    const embeddedNodeVersion = process.versions.node;
+    if (electronVersion && satisfiesSemver(embeddedNodeVersion, supportedNodeVersionRange)) {
+      try {
+        await this._probeElectronRunAsNode(electronVersion, embeddedNodeVersion);
+        return {
+          executable: process.execPath,
+          description: `Electron ${electronVersion} RunAsNode (Node ${embeddedNodeVersion})`,
+          runElectronAsNode: true,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const embeddedRuntimeIssue = `Electron ${electronVersion} embeds supported Node ${embeddedNodeVersion}, but its RunAsNode probe failed (${message})`;
+        logger.warn(`${logTag}${embeddedRuntimeIssue}; trying external Node from PATH`);
+        return await this._selectExternalNode(embeddedRuntimeIssue);
+      }
+    }
+
+    const embeddedRuntimeIssue = electronVersion
+      ? `Electron ${electronVersion} embeds Node ${embeddedNodeVersion}, which does not satisfy ${supportedNodeVersionRange}`
+      : `the current process is not Electron (Node ${embeddedNodeVersion}), so Electron RunAsNode is unavailable`;
+    return await this._selectExternalNode(embeddedRuntimeIssue);
+  }
+
+  private _probeElectronRunAsNode(electronVersion: string, embeddedNodeVersion: string): Promise<void> {
+    const probePath = resolve(selfPackagePath, 'dist/worker/run-as-node-probe.cjs');
+    const expectedOutput = `oms-run-as-node-probe:${electronVersion}:${embeddedNodeVersion}`;
+    return new Promise((resolveProbe, rejectProbe) => {
+      cp.execFile(process.execPath, [probePath, sandboxieRunAsNodeProcessTypeArg], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+        },
+        timeout: runAsNodeProbeTimeoutMs,
+      }, (error, stdout) => {
+        if (error) {
+          if (error.killed) {
+            rejectProbe(new Error(`timed out after ${runAsNodeProbeTimeoutMs}ms`));
+          } else {
+            rejectProbe(new Error(error.message));
+          }
+          return;
+        }
+        const output = stdout.trim();
+        if (output !== expectedOutput) {
+          rejectProbe(new Error(`expected ${JSON.stringify(expectedOutput)}, received ${JSON.stringify(output)}`));
+          return;
+        }
+        resolveProbe();
+      });
+    });
+  }
+
+  private async _selectExternalNode(embeddedRuntimeIssue: string): Promise<BuilderRuntime> {
+    let externalNodeVersion: string;
+    try {
+      externalNodeVersion = await this._probeExternalNodeVersion();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `${logTag}Cannot start OMS builder: ${embeddedRuntimeIssue}; external Node from PATH is unavailable (${message}); required Node version is ${supportedNodeVersionRange}`,
+      );
+    }
+    if (!satisfiesSemver(externalNodeVersion, supportedNodeVersionRange)) {
+      throw new Error(
+        `${logTag}Cannot start OMS builder: ${embeddedRuntimeIssue}; external Node ${externalNodeVersion} from PATH does not satisfy ${supportedNodeVersionRange}`,
+      );
+    }
+    return {
+      executable: 'node',
+      description: `external Node ${externalNodeVersion} from PATH`,
+      runElectronAsNode: false,
+    };
+  }
+
+  private _probeExternalNodeVersion(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      cp.execFile('node', ['-v'], {
+        encoding: 'utf8',
+      }, (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        const versionText = stdout.trim();
+        const version = cleanSemver(versionText);
+        if (!version) {
+          reject(new Error(`node -v returned an invalid version ${JSON.stringify(versionText)}`));
+          return;
+        }
+        resolve(version);
+      });
+    });
   }
 
   private _filterPackage(pkg: Editor.Interface.PackageInfo) {
@@ -434,6 +601,12 @@ export class OmsBuilderAgent extends EventEmitter<{
 interface ServerAgent {
   ipc: Ipc<ClientInvocationMethodId, ServerInvocationMethodId>;
   childProcess: cp.ChildProcess;
+}
+
+interface BuilderRuntime {
+  executable: string;
+  description: string;
+  runElectronAsNode: boolean;
 }
 
 interface HandleBuildResultOptions {

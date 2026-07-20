@@ -19,6 +19,29 @@
   "creator": {
     "hookScript": "./dist/hooks.cjs"
   },
+  "contributions": {
+    "profile": {
+      "project": {
+        "builder.useElectronRunAsNode": {
+          "type": "boolean",
+          "default": true,
+          "label": "Use Electron RunAsNode",
+          "description": "Use the current Cocos Creator or Vortex executable as the OMS builder's Node.js runtime when supported. Takes effect the next time the OMS builder starts."
+        }
+      }
+    },
+    "project": {
+      "ohMyScript": {
+        "label": "Oh My Script",
+        "content": {
+          "builder.useElectronRunAsNode": {
+            "ui": "ui-checkbox",
+            "tooltip": "Use the current Cocos Creator or Vortex executable as the OMS builder's Node.js runtime when supported. Takes effect the next time the OMS builder starts."
+          }
+        }
+      }
+    }
+  },
   "scripts": {
     "prepublishOnly": "vite build --mode=production",
     "build": "vue-tsc -b --noEmit && vite build --mode=development",
@@ -33,6 +56,7 @@
     "@cocos/creator-types": "^3.8.5",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "catalog:",
+    "@types/semver": "^7.7.1",
     "@vitejs/plugin-vue": "^5.2.1",
     "bestzip": "^2.2.1",
     "less": "^4.6.4",
@@ -49,6 +73,7 @@
     "@oms/task-queue": "workspace:*",
     "dayjs": "^1.11.20",
     "fs-extra": "^11.3.0",
+    "semver": "^7.8.5",
     "vue": "^3.5.13",
     "winston": "^3.17.0",
     "winston-transport": "*",
