@@ -1,20 +1,7 @@
 import * as rollup from 'rollup';
-import rollupPluginCommonJS_ from '@rollup/plugin-commonjs';
-import rollupPluginNodeResolve_ from '@rollup/plugin-node-resolve';
-import rollupPluginBabel_ from '@rollup/plugin-babel';
-import rollupPluginJson_ from '@rollup/plugin-json';
-// @ts-expect-error
-import babelPluginProposalDecorators from '@babel/plugin-proposal-decorators';
-import babelPresetEnv, { type TargetsOptions } from '@babel/preset-env';
-// @ts-expect-error
-import babelPresetTypescript from '@babel/preset-typescript';
-import { transformCCComponent, type UUIDProvider } from './features/babel-plugin-cc-component.js';
-import { rollupPluginWasm } from './features/rollup-plugin-wasm.js';
+import type { UUIDProvider } from './features/babel-plugin-cc-component.js';
 import { rollupPluginMemoryModules } from './features/rollup-plugin-memory-modules.js';
 import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate-cc-env.js';
-import { rollupPluginDomain } from './features/rollup-plugin-domain.js';
-import { rollupPluginNodeBuiltinModules } from './features/rollup-plugin-node-builtin-modules.js';
-import rollupPluginAlias from '@rollup/plugin-alias';
 import type { OmsProjectConfig, ProfileBuildConfig } from './config.js';
 import { logger } from './logger.js';
 import type { Domain } from './domain.js';
@@ -22,15 +9,9 @@ import { join } from 'node:path';
 import fs from 'fs-extra';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
-import { rollupPluginProjectPeerImports } from './features/rollup-plugin-project-peer-imports.js';
 import { createProjectDefine } from './env.js';
-import { rollupPluginDefine } from './features/rollup-plugin-define.js';
 import { rollupPluginMinify } from './features/rollup-plugin-minify.js';
-
-const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
-const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
-const rollupPluginBabel = rollupPluginBabel_ as unknown as typeof rollupPluginBabel_.default;
-const rollupPluginJson = rollupPluginJson_ as unknown as typeof rollupPluginJson_.default;
+import { createOmsRuntimePlugins } from './oms-plugin-factory.js';
 
 export type InternalBuildEntry = string | {
   module: string;
@@ -274,60 +255,18 @@ export class BuildRecord {
         modules: memoryModules,
       }),
 
-      rollupPluginDomain({
+      ...createOmsRuntimePlugins({
+        projectRoot: options.projectRoot,
+        config: this._buildOptions.config,
         domains: options.domains,
         allowEditorOnlyImports: this._mode !== 'production',
-      }),
-
-      rollupPluginWasm({}),
-
-      rollupPluginNodeBuiltinModules({
-        supportsNativeModules: !!this._headless,
-      }),
-
-      rollupPluginJson({
-        namedExports: false,
-      }),
-
-      rollupPluginCommonJS({
-        extensions: [
-          '.js',
-          '.cjs',
-        ],
-      }),
-
-      rollupPluginAlias({
-        entries: this._buildOptions.config.resolve.alias,
-      }),
-
-      rollupPluginProjectPeerImports({
-        projectPeers: this._buildOptions.config.resolve.projectPeers,
-        projectRoot: options.projectRoot,
-      }),
-
-      rollupPluginNodeResolve({
-        extensions: [
-          '.js',
-          '.mjs',
-          '.cjs',
-          '.ts',
-          '.mts',
-          '.cts',
-        ],
-        allowExportsFolderMapping: false,
-        preferBuiltins: false,
-        exportConditions: [this._headless ? 'headless' : undefined].filter((condition) => condition !== undefined),
-      }),
-
-      this._makeRollupBabelPlugin({
+        projectDefine,
         uuidProvider: options.uuidProvider,
-        decorators: true,
-      }),
-
-      rollupPluginDefine({
-        define: projectDefine.define,
-        watchFiles: projectDefine.watchFiles,
+        supportsNativeModules: !!this._headless,
+        nodeResolveExportConditions: [this._headless ? 'headless' : undefined].filter((condition): condition is string => condition !== undefined),
+        target: this._buildOptions.profileBuildConfig?.target,
         sourcemap: this._sourceMaps,
+        decorators: true,
       }),
 
       {
@@ -415,55 +354,6 @@ export class BuildRecord {
       .map((file) => fs.remove(join(this._outDir, file))));
     this._emittedFiles = emittedFiles;
   }
-
-  private _makeRollupBabelPlugin({
-    decorators,
-    uuidProvider,
-  }: {
-    decorators?: boolean;
-    uuidProvider?: UUIDProvider;
-  }) {
-    const babelTarget = toBabelEnvTarget(this._buildOptions.profileBuildConfig?.target);
-    logger.debug(`Babel target: ${JSON.stringify(babelTarget)}`);
-    return rollupPluginBabel({
-      extensions: [
-        '.js',
-        '.mjs',
-        '.cjs',
-        '.ts',
-        '.mts',
-        '.cts',
-      ],
-      babelHelpers: 'bundled',
-      babelrc: false,
-      skipPreflightCheck: true,
-      plugins: [
-        uuidProvider
-          ? [transformCCComponent({
-            uuidProvider,
-          })]
-          : undefined,
-        decorators
-          ? [babelPluginProposalDecorators, {
-            version: 'legacy',
-          }]
-          : undefined,
-      ].filter((p) => !!p),
-      presets: [
-        [babelPresetEnv, {
-          modules: false,
-          targets: babelTarget,
-          include: [
-            decorators ? '@babel/plugin-transform-class-properties' : undefined,
-            '@babel/plugin-transform-class-static-block',
-          ].filter((p): p is string => !!p),
-        } satisfies babelPresetEnv.Options],
-        [babelPresetTypescript, {
-          allowDeclareFields: true,
-        }],
-      ],
-    });
-  }
 }
 
 async function summarizeOutputDir(dir: string) {
@@ -502,22 +392,6 @@ function formatBytes(bytes: number) {
 
 const ROLLUP_MODULE_CACHE_KEY_UUID = '__oms_uuid__';
 const ROLLUP_MODULE_CACHE_KEY_DEFINE = '__oms_define__';
-
-function toBabelEnvTarget(target: string | undefined): TargetsOptions {
-  if (!target) {
-    return {
-      node: '14',
-    };
-  }
-  const match = /(\w+)(\d.+)/.exec(target);
-  if (!match) {
-    return target;
-  }
-  const [_, runtime, version] = match;
-  return {
-    [runtime]: version,
-  };
-}
 
 function buildFailureResult(title: string, error: unknown): InternalBuildResult {
   const message = errorToBuildMessage(error);

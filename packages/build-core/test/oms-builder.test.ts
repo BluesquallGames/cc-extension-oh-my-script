@@ -578,6 +578,62 @@ it('fails OMS peer imports when the project does not provide the peer package', 
   }
 });
 
+it('keeps alias and wasm support in the default Rollup runtime', async () => {
+  /// @case
+  /// 1. A project entry imports a TypeScript module through resolve.alias and a WebAssembly module by path.
+  /// 2. The project runs the default bundled OMS runtime build.
+  /// @expect
+  /// Rollup resolves the alias, bundles its source, and emits the WebAssembly binary as an output asset.
+  const project = await makeTempDir();
+  const sourceDir = join(project, 'src');
+  await fs.ensureDir(sourceDir);
+  const aliasTarget = join(sourceDir, 'aliased.ts');
+  await fs.outputFile(aliasTarget, 'export const aliasMarker = "resolved-through-rollup-alias";');
+  await fs.outputFile(join(sourceDir, 'tiny.wasm'), Buffer.from([
+    0x00, 0x61, 0x73, 0x6d,
+    0x01, 0x00, 0x00, 0x00,
+  ]));
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  resolve: {',
+    `    alias: { "@oms-alias": ${JSON.stringify(aliasTarget)} },`,
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(sourceDir, 'index.ts'), [
+    'import { aliasMarker } from "@oms-alias";',
+    'import wasmInstance from "./tiny.wasm";',
+    'console.log(aliasMarker, wasmInstance);',
+  ].join('\n'));
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(builder.rebuild({
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const outDir = join(project, 'temp', 'oms', 'out');
+    const outputFiles = await fs.readdir(outDir, {
+      recursive: true,
+    });
+    const javaScriptOutput = (await Promise.all(outputFiles
+      .filter((file) => file.endsWith('.js'))
+      .map(async (file) => await fs.readFile(join(outDir, file), 'utf8'))))
+      .join('\n');
+    expect(javaScriptOutput).toContain('resolved-through-rollup-alias');
+    expect(outputFiles.some((file) => file.endsWith('.wasm'))).toBe(true);
+  } finally {
+    await (builder as any)._clean();
+  }
+}, 20_000);
+
 it('replaces project define expressions during build', async () => {
   /// @case
   /// 1. The project declares JavaScript expression replacements in oms.config.mjs.
