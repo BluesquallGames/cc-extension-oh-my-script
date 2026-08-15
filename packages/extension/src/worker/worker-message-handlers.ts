@@ -8,11 +8,13 @@ omsBuilderAgent.addListener('setup', () => {
 
 export const workerMessageHandlers = {
   'rebuild': async (opts) => {
-    return await omsBuilderAgent.rebuild(opts);
+    return opts === undefined
+      ? await omsBuilderAgent.cleanRebuild()
+      : await omsBuilderAgent.rebuild(opts);
   },
 
-  'ensure-runtime-build': async () => {
-    return await omsBuilderAgent.ensureRuntimeBuild();
+  'ensure-default-profile': async () => {
+    return await omsBuilderAgent.ensureDefaultProfile();
   },
 
   'restart': async () => {

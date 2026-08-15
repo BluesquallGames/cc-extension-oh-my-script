@@ -1,4 +1,5 @@
 import { type OmsBuilderAgent } from './oms-builder-agent.js';
+import type { BuildProfileId, BuildProfileResult, BuildProfileResults } from '@oms/build-core/protocol';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-empty-object-type
 export interface WorkerMessageDescription<TSignature extends (...args: any) => any> {
@@ -10,25 +11,15 @@ function defineWorkerMessage<TSignature extends (...args: any) => any>() {
   } as WorkerMessageDescription<TSignature>;
 }
 
-export type BuildResult = {
-  ok: true;
-  beginningModules: string[];
-} | {
-  ok: false;
-  error: {
-    message: string;
-    stack?: string;
-  };
-};
-
 export interface RebuildOptions {
   reason?: string;
   reloadAssetDbRuntime?: boolean;
+  profiles?: BuildProfileId[];
 }
 
 export const workerMessageDescriptions = {
-  'rebuild': defineWorkerMessage<(opts?: RebuildOptions) => Promise<BuildResult>>(),
-  'ensure-runtime-build': defineWorkerMessage<() => Promise<BuildResult>>(),
+  'rebuild': defineWorkerMessage<(opts?: RebuildOptions) => Promise<BuildProfileResults>>(),
+  'ensure-default-profile': defineWorkerMessage<() => Promise<BuildProfileResult>>(),
   'restart': defineWorkerMessage<() => void>(),
   'inline-uuids': defineWorkerMessage<() => void>(),
   'build-prod': defineWorkerMessage<(opts: Parameters<OmsBuilderAgent['buildProd']>[0]) => void>(),

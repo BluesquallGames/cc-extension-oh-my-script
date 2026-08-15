@@ -1,9 +1,22 @@
 import cp from 'node:child_process';
+import assert from 'node:assert';
 import { logger } from '../logger.js';
-import { Ipc, type InvocationMessage, type ClientInvocationMethodId, type ServerInvocationMethodId, setLogger, type BuildOptions, type ExtensionBuildOptions, BuildResult as ProtocolBuildResult } from '@oms/build-core/protocol';
+import {
+  allBuildProfileIds,
+  BuildProfileId,
+  Ipc,
+  setLogger,
+  type BuildOptions,
+  type BuildProfileResult as ProtocolBuildProfileResult,
+  type BuildProfileResults as ProtocolBuildResults,
+  type ClientInvocationMethodId,
+  type ExtensionBuildOptions,
+  type InvocationMessage,
+  type ServerInvocationMethodId,
+} from '@oms/build-core/protocol';
 import { addEditorBroadcastListener } from '../utils/editor/common.js';
 import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
-import type { BuildResult, RebuildOptions } from './worker-message-descriptions.js';
+import type { RebuildOptions } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { broadcastInner, InnerPackageMessageId } from '../inner-package-messaging.js';
@@ -63,70 +76,102 @@ export class OmsBuilderAgent extends EventEmitter<{
     }
 
     this._state = { type: StateType.closing };
-    if (this._setupPromise) {
-      const setupPromise = this._setupPromise;
-      this._setupPromise = undefined;
-      try {
+    const setupPromise = this._setupPromise;
+    this._setupPromise = undefined;
+    this._currentBuilds.clear();
+    this._invalidateDefaultProfileResult();
+    try {
+      if (setupPromise) {
         const serverAgent = await setupPromise;
+        serverAgent.ipc.close(`${logTag}Builder agent closed`);
         serverAgent.childProcess.kill();
-      } catch (err) {
-        logger.error(`${logTag}close builder agent failed: ${err}`);
-      } finally {
-        this._state = { type: StateType.closed };
       }
+    } catch (err) {
+      logger.error(`${logTag}close builder agent failed: ${err}`);
+    } finally {
+      this._state = { type: StateType.closed };
     }
   }
 
-  async rebuild(opts: RebuildOptions = {}): Promise<BuildResult> {
+  async rebuild(opts: RebuildOptions = {}): Promise<ProtocolBuildResults> {
+    return await this._rebuild(opts, false);
+  }
+
+  async cleanRebuild(): Promise<ProtocolBuildResults> {
+    return await this._rebuild({}, true);
+  }
+
+  private async _rebuild(opts: RebuildOptions, clean: boolean): Promise<ProtocolBuildResults> {
     const reason = opts.reason ?? 'rebuild()';
     const t0 = Date.now();
-    const rebuildResult = await this._getOrStartBuild();
+    const runOptions = {
+      profiles: opts.profiles,
+      clean,
+    };
+    const requestedProfiles = [...new Set(opts.profiles ?? allBuildProfileIds)];
+    const rebuildResult = clean
+      ? await this._runTrackedRebuild(runOptions, requestedProfiles)
+      : await this._getOrStartBuild(runOptions);
     logger.debug(`${logTag}Rebuild ok in ${Date.now() - t0}ms, let's handle the result`);
     await this._handleBuildResult(rebuildResult, reason, {
       reloadAssetDbRuntime: opts.reloadAssetDbRuntime ?? true,
+      profiles: opts.profiles,
     });
     logger.info(`${logTag}Rebuild done in ${Date.now() - t0}ms`);
-    return this._toWorkerBuildResult(rebuildResult);
+    return rebuildResult;
   }
 
-  async ensureRuntimeBuild(): Promise<BuildResult> {
+  async ensureDefaultProfile(): Promise<ProtocolBuildProfileResult> {
     const t0 = Date.now();
-    const rebuildResult = await this._ensureRuntimeBuildResult();
-    logger.info(`${logTag}Runtime build ensured in ${Date.now() - t0}ms`);
-    return this._toWorkerBuildResult(rebuildResult);
+    const defaultProfileResult = await this._ensureDefaultProfileResult();
+    logger.info(`${logTag}Default profile ensured in ${Date.now() - t0}ms`);
+    return defaultProfileResult;
   }
 
-  private async _ensureRuntimeBuildResult(): Promise<ProtocolBuildResult> {
-    if (this._currentBuildPromise) {
-      return await this._currentBuildPromise;
+  private async _ensureDefaultProfileResult(): Promise<ProtocolBuildProfileResult> {
+    let profileResults: ProtocolBuildResults;
+    if (this._currentBuilds.size !== 0) {
+      profileResults = await this._getOrStartBuild({
+        profiles: [BuildProfileId.default],
+      });
+    } else if (this._lastDefaultProfileResult?.ok) {
+      return this._lastDefaultProfileResult;
+    } else {
+      profileResults = await this._getOrStartBuild({
+        profiles: [BuildProfileId.default],
+      });
     }
-    if (this._lastBuildResult?.ok) {
-      return this._lastBuildResult;
-    }
-    return await this._getOrStartBuild();
+    const defaultProfileResult = profileResults[BuildProfileId.default];
+    assert.ok(defaultProfileResult, 'OMS default profile result is missing');
+    return defaultProfileResult;
   }
 
-  private async _getOrStartBuild(): Promise<ProtocolBuildResult> {
-    if (this._currentBuildPromise) {
-      return await this._currentBuildPromise;
-    }
-    return await this._runTrackedRebuild();
-  }
-
-  private _runTrackedRebuild(): Promise<ProtocolBuildResult> {
-    const buildPromise = this._runRebuild().then((buildResult) => {
-      this._rememberBuildResult(buildResult);
-      return buildResult;
-    }).finally(() => {
-      if (this._currentBuildPromise === buildPromise) {
-        this._currentBuildPromise = undefined;
+  private async _getOrStartBuild(options: RunRebuildOptions): Promise<ProtocolBuildResults> {
+    const requestedProfiles = [...new Set(options.profiles ?? allBuildProfileIds)];
+    for (const [buildPromise, profiles] of this._currentBuilds) {
+      if (requestedProfiles.length === profiles.size
+        && requestedProfiles.every((profile) => profiles.has(profile))) {
+        return await buildPromise;
       }
+    }
+    return await this._runTrackedRebuild(options, requestedProfiles);
+  }
+
+  private _runTrackedRebuild(
+    options: RunRebuildOptions,
+    requestedProfiles: BuildProfileId[],
+  ): Promise<ProtocolBuildResults> {
+    const buildPromise = this._runRebuild(options).then((profileResults) => {
+      this._rememberDefaultProfileResult(profileResults);
+      return profileResults;
+    }).finally(() => {
+      this._currentBuilds.delete(buildPromise);
     });
-    this._currentBuildPromise = buildPromise;
+    this._currentBuilds.set(buildPromise, new Set(requestedProfiles));
     return buildPromise;
   }
 
-  private async _runRebuild(): Promise<ProtocolBuildResult> {
+  private async _runRebuild(options: RunRebuildOptions): Promise<ProtocolBuildResults> {
     switch (this._state.type) {
     case StateType.closing:
       throw new Error(`${logTag} is closing`);
@@ -134,8 +179,12 @@ export class OmsBuilderAgent extends EventEmitter<{
 
     const serverAgent = await this._setup();
     const buildOptions = await this._makeBuildOptions();
-    logger.debug(`${logTag}Rebuild with options: %o`, buildOptions);
-    return await serverAgent.ipc.invoke('rebuild', buildOptions);
+    await serverAgent.ipc.invoke('update-build-options', buildOptions);
+    const rebuildOptions = {
+      ...(options.profiles ? { profiles: options.profiles } : {}),
+    };
+    logger.debug(`${logTag}Rebuild with options: %o`, rebuildOptions);
+    return await serverAgent.ipc.invoke(options.clean ? 'clean-rebuild' : 'rebuild', rebuildOptions);
   }
 
   async restart() {
@@ -181,8 +230,8 @@ export class OmsBuilderAgent extends EventEmitter<{
     };
 
   private _setupPromise: Promise<ServerAgent> | undefined = undefined;
-  private _currentBuildPromise: Promise<ProtocolBuildResult> | undefined = undefined;
-  private _lastBuildResult: ProtocolBuildResult | undefined = undefined;
+  private _currentBuilds = new Map<Promise<ProtocolBuildResults>, Set<BuildProfileId>>();
+  private _lastDefaultProfileResult: ProtocolBuildProfileResult | undefined = undefined;
   private _pingPongDuration = 5;
   private _pongReceived = false;
 
@@ -319,6 +368,24 @@ export class OmsBuilderAgent extends EventEmitter<{
         childProcess.send(message);
       },
     });
+    const closeIpc = (reason: string) => {
+      ipc.close(reason);
+      if (this._state.type === StateType.opened && this._state.serverAgent.ipc === ipc) {
+        this._setupPromise = undefined;
+        this._currentBuilds.clear();
+        this._invalidateDefaultProfileResult();
+        this._state = { type: StateType.closed };
+      }
+    };
+    childProcess.once('disconnect', () => {
+      closeIpc(`${logTag}OMS builder IPC disconnected`);
+    });
+    childProcess.once('exit', (code, signal) => {
+      closeIpc(`${logTag}OMS builder exited (code ${code ?? 'unknown'}, signal ${signal ?? 'none'})`);
+    });
+    childProcess.once('error', (error) => {
+      closeIpc(`${logTag}OMS builder process failed: ${error.message}`);
+    });
     const listen_vendor = ipc.listen;
     ipc.listen = function (...args) {
       const [methodId, callback, ...remainArgs] = args;
@@ -358,12 +425,23 @@ export class OmsBuilderAgent extends EventEmitter<{
       this._pongReceived = true;
     });
 
-    ipc.listen('passive-build-end', async (result) => {
-      await this._handleBuildResult(result.result, 'passive build');
+    ipc.listen('passive-build-end', () => {
+      // Revision completion is retained for protocol compatibility; runtime work follows the default lane.
+    });
+
+    ipc.listen('passive-profile-build-end', async ({ profile, result }) => {
+      if (profile !== BuildProfileId.default) {
+        return;
+      }
+      await this._handleBuildResult({
+        [BuildProfileId.default]: result,
+      }, 'passive build', {
+        profiles: [BuildProfileId.default],
+      });
     });
 
     ipc.listen('build-start', async (opts) => {
-      this._handleBuildStart();
+      this._handleBuildStart(opts.profiles);
       broadcastInner(InnerPackageMessageId.buildStart, {
         ...opts,
       });
@@ -512,7 +590,7 @@ export class OmsBuilderAgent extends EventEmitter<{
   }
 
   private async _updateBuildOptions() {
-    this._invalidateBuildResult();
+    this._invalidateDefaultProfileResult();
     const buildOptions = await this._makeBuildOptions();
     const serverAgent = await this._setupPromise;
     if (!serverAgent) {
@@ -541,61 +619,69 @@ export class OmsBuilderAgent extends EventEmitter<{
   }
 
   private async _handleBuildResult(
-    buildResult: ProtocolBuildResult,
+    profileResults: ProtocolBuildResults,
     reason: string,
     opts: HandleBuildResultOptions = {},
   ) {
-    this._rememberBuildResult(buildResult);
-    if (buildResult.ok) {
-      const reloadAssetDbRuntime = opts.reloadAssetDbRuntime ?? true;
-      // 不要在这里 await，因为场景进程可能正在等待 db，而 db 又在等待我们，造成死循环。
-      Editor.Message.request('scene', 'execute-scene-script', {
+    const profiles = [...new Set(opts.profiles ?? allBuildProfileIds)];
+    this._rememberDefaultProfileResult(profileResults);
+    for (const profile of profiles) {
+      const profileResult = profileResults[profile];
+      assert.ok(profileResult, `OMS build result is missing the ${profile} profile`);
+      if (!profileResult.ok) {
+        logger.error(`${profileResult.error.message}`);
+      }
+    }
+    if (!profiles.includes(BuildProfileId.default)) {
+      return;
+    }
+    const defaultBuildResult = profileResults[BuildProfileId.default];
+    assert.ok(defaultBuildResult, 'OMS build result is missing the default profile');
+    if (!defaultBuildResult.ok) {
+      return;
+    }
+    const reloadAssetDbRuntime = opts.reloadAssetDbRuntime ?? true;
+    // 不要在这里 await，因为场景进程可能正在等待 db，而 db 又在等待我们，造成死循环。
+    Editor.Message.request('scene', 'execute-scene-script', {
+      name: selfPackageName,
+      method: 'reloadScripts' satisfies keyof SceneMethods,
+      args: [reason] as Parameters<SceneMethods['reloadScripts']>,
+    }).catch((err) => {
+      logger.error(`execute-scene-script failed: ${err}`);
+    });
+    if (reloadAssetDbRuntime) {
+      Editor.Message.request('asset-db', 'execute-script', {
         name: selfPackageName,
-        method: 'reloadScripts' satisfies keyof SceneMethods,
-        args: [reason] as Parameters<SceneMethods['reloadScripts']>,
+        method: 'reloadRuntime',
+        args: [reason],
       }).catch((err) => {
-        logger.error(`execute-scene-script failed: ${err}`);
+        logger.error(`reload asset-db OMS runtime failed: ${err}`);
       });
-      if (reloadAssetDbRuntime) {
-        Editor.Message.request('asset-db', 'execute-script', {
-          name: selfPackageName,
-          method: 'reloadRuntime',
-          args: [reason],
-        }).catch((err) => {
-          logger.error(`reload asset-db OMS runtime failed: ${err}`);
-        });
-      }
+    }
 
-      for (const file of buildResult.affectedFiles) {
-        logger.debug(`${logTag}Reimport asset: %s`, file);
-        await Editor.Message.request('asset-db', 'refresh-asset', file);
-      }
-    } else {
-      logger.error(`${buildResult.error.message}`);
+    for (const file of defaultBuildResult.affectedFiles) {
+      logger.debug(`${logTag}Reimport asset: %s`, file);
+      await Editor.Message.request('asset-db', 'refresh-asset', file);
     }
   }
 
-  private _handleBuildStart() {
-    this._invalidateBuildResult();
-  }
-
-  private _rememberBuildResult(buildResult: ProtocolBuildResult) {
-    this._lastBuildResult = buildResult;
-  }
-
-  private _invalidateBuildResult() {
-    this._lastBuildResult = undefined;
-  }
-
-  private _toWorkerBuildResult(buildResult: ProtocolBuildResult): BuildResult {
-    if (!buildResult.ok) {
-      return buildResult;
+  private _handleBuildStart(profiles: BuildProfileId[]) {
+    if (profiles.includes(BuildProfileId.default)) {
+      this._invalidateDefaultProfileResult();
     }
-    return {
-      ok: true,
-      beginningModules: buildResult.affectedFiles,
-    };
   }
+
+  private _rememberDefaultProfileResult(profileResults: ProtocolBuildResults) {
+    const defaultProfileResult = profileResults[BuildProfileId.default];
+    if (defaultProfileResult?.ok) {
+      this._lastDefaultProfileResult = defaultProfileResult;
+    }
+  }
+
+  private _invalidateDefaultProfileResult() {
+    this._lastDefaultProfileResult = undefined;
+  }
+
 }
 
 interface ServerAgent {
@@ -611,6 +697,12 @@ interface BuilderRuntime {
 
 interface HandleBuildResultOptions {
   reloadAssetDbRuntime?: boolean;
+  profiles?: BuildProfileId[];
+}
+
+interface RunRebuildOptions {
+  profiles?: BuildProfileId[];
+  clean?: boolean;
 }
 
 enum StateType {

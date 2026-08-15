@@ -2,9 +2,9 @@ import { setTimeout } from 'node:timers/promises';
 import { logger } from '../../logger.js';
 import { selfExtensionName } from '../../self-info.js';
 import { requestSelfWorkerMessage } from '../../utils/request-self.js';
-import { type BuildResult } from '../../worker/worker-message-descriptions.js';
 import { ReloadInterruptError } from '../scene/module-system.js';
 import { OmsScriptRuntime } from '../scene/oms-script-runtime.js';
+import { BuildProfileId, type BuildProfileResult } from '@oms/build-core/protocol';
 
 interface AssetDBInfo {
   preImportExtList?: string[];
@@ -37,7 +37,7 @@ const globalScriptRuntime = (() => {
       }
       scriptRuntime = new OmsScriptRuntime({
         label: 'asset-db',
-        ensureBuild: async () => await requestSelfWorkerMessage('ensure-runtime-build'),
+        ensureBuild: async () => await requestSelfWorkerMessage('ensure-default-profile'),
       });
       scriptRuntime.installGlobalImport();
       return scriptRuntime;
@@ -49,7 +49,7 @@ const globalScriptRuntime = (() => {
   };
 })();
 
-let firstBuildResult: BuildResult | undefined = undefined;
+let firstBuildResult: BuildProfileResult | undefined = undefined;
 let runtimePhase = AssetDBRuntimePhase.starting;
 let pendingReadyReloadReason: string | undefined = undefined;
 
@@ -65,15 +65,20 @@ export const methods = {
       firstBuildSyncTaskDetail,
     );
     try {
-      const result = await Promise.race([
+      const profileResults = await Promise.race([
         requestSelfWorkerMessage('rebuild', {
           reason: 'asset-db startup build',
           reloadAssetDbRuntime: false,
+          profiles: [BuildProfileId.default],
         }),
         setTimeout(firstBuildTimeoutSec * 1000).then(() => {
           throw new Error(`${selfExtensionName} first build timeout after ${firstBuildTimeoutSec}s`);
         }),
       ]);
+      const result = profileResults.default;
+      if (!result) {
+        throw new Error(`${selfExtensionName} first build result is missing the default profile`);
+      }
       firstBuildResult = result;
       const elapsedMs = Date.now() - t0;
       if (result.ok) {

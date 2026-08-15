@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BuildResult } from '../src/worker/worker-message-descriptions';
+import type { BuildProfileResult, BuildProfileResults } from '@oms/build-core/protocol';
 
 const mockState = vi.hoisted(() => {
   return {
@@ -16,8 +16,11 @@ const mockState = vi.hoisted(() => {
       detail?: string;
     }>,
     installGlobalImportCalls: 0,
-    rebuildResult: { ok: true, beginningModules: ['src/index.ts'] } as BuildResult,
-    rebuildPromise: undefined as Promise<BuildResult> | undefined,
+    rebuildResult: {
+      default: { ok: true, affectedFiles: ['src/index.ts'] },
+    } as BuildProfileResults,
+    defaultProfileResult: { ok: true, affectedFiles: ['src/index.ts'] } as BuildProfileResult,
+    rebuildPromise: undefined as Promise<BuildProfileResults> | undefined,
     rebuildError: undefined as Error | undefined,
   };
 });
@@ -60,8 +63,8 @@ vi.mock(import('../src/utils/request-self.js'), () => {
         }
         return mockState.rebuildResult;
       }
-      if (messageId === 'ensure-runtime-build') {
-        return mockState.rebuildResult;
+      if (messageId === 'ensure-default-profile') {
+        return mockState.defaultProfileResult;
       }
       throw new Error(`Unexpected worker message ${messageId}`);
     }),
@@ -113,9 +116,12 @@ beforeEach(() => {
   mockState.syncTaskCalls.length = 0;
   mockState.installGlobalImportCalls = 0;
   mockState.rebuildResult = {
-    ok: true,
-    beginningModules: ['src/index.ts'],
+    default: {
+      ok: true,
+      affectedFiles: ['src/index.ts'],
+    },
   };
+  mockState.defaultProfileResult = { ok: true, affectedFiles: ['src/index.ts'] };
   mockState.rebuildPromise = undefined;
   mockState.rebuildError = undefined;
   vi.stubGlobal('Editor', {
@@ -250,6 +256,7 @@ describe('asset-db OMS runtime startup', () => {
       args: [{
         reason: 'asset-db startup build',
         reloadAssetDbRuntime: false,
+        profiles: ['default'],
       }],
     });
     expect(mockState.reloadCalls).toEqual([]);
@@ -305,9 +312,11 @@ describe('asset-db OMS runtime startup', () => {
     /// @expect
     /// The failed first build does not leave asset-db stuck in startup state.
     mockState.rebuildResult = {
-      ok: false,
-      error: {
-        message: 'first build failed',
+      default: {
+        ok: false,
+        error: {
+          message: 'first build failed',
+        },
       },
     };
     const assetDb = await import('../src/contributions/asset-db/index');

@@ -2,13 +2,14 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping';
 import fs from 'fs-extra';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import * as ts from 'typescript';
 import { OmsBuilder } from '../src/oms-builder.js';
 import { OmsProjectConfigWatcher } from '../src/config-watcher.js';
 import { ServerContext } from '../src/server-context.js';
+import { type BuildOptions, type RebuildOptions } from '../src/protocol.js';
 
 const tempDirs: string[] = [];
 
@@ -17,7 +18,294 @@ afterEach(async () => {
   tempDirs.length = 0;
 });
 
-it('does not emit passive-build-end when a pending passive build is claimed by an active build', async () => {
+it('observes every profile rejection when a full build closes', async () => {
+  /// @case
+  /// 1. A full-profile build is waiting for its build-start notification.
+  /// 2. The builder closes and rejects both profile lanes before the revision can continue.
+  /// @expect
+  /// The full build rejects once, every lane rejection is observed, and close finishes after the revision exits.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), 'export default { profiles: { headless: {} } };');
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "close-all-profiles";');
+  const buildStarted = deferred<void>();
+  const releaseBuild = deferred<void>();
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStarted.resolve();
+        await releaseBuild.promise;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+  await builder.updateBuildOptions({ extensionBuildOptions: [] });
+
+  const build = builder.rebuild();
+  await buildStarted.promise;
+  const close = builder.close();
+
+  await expect(build).rejects.toThrow('OMS watcher closed');
+  releaseBuild.resolve();
+  await close;
+});
+
+it('recovers when the first watcher startup fails', async () => {
+  /// @case
+  /// 1. A file blocks creation of the default output directory while the builder starts its first watcher.
+  /// 2. The path is repaired and the same builder receives another default-profile request.
+  /// @expect
+  /// Failed startup state is released and the second request starts a fresh watcher successfully.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "startup-recovery";');
+  const blockedOutputPath = join(project, 'temp', 'oms', 'out');
+  await fs.outputFile(blockedOutputPath, 'blocks the output directory');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+  await builder.updateBuildOptions({ extensionBuildOptions: [] });
+
+  try {
+    await expect(builder.rebuild({ profiles: ['default'] })).rejects.toThrow();
+    await fs.remove(blockedOutputPath);
+    await expect(builder.rebuild({ profiles: ['default'] })).resolves.toMatchObject({
+      default: { ok: true },
+    });
+  } finally {
+    await builder.close();
+  }
+});
+
+it('serializes consecutive clean rebuilds through profile completion', async () => {
+  /// @case
+  /// 1. A clean rebuild is paused after its revision starts.
+  /// 2. A second clean rebuild is requested before the first profile batch finishes.
+  /// @expect
+  /// The second request does not replace the first watcher; the first build finishes before the next clean build starts.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), 'export default { profiles: { headless: {} } };');
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "serialized-clean-rebuild";');
+  const firstBuildStarted = deferred<void>();
+  const releaseFirstBuild = deferred<void>();
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start' && ++buildStartCount === 1) {
+        firstBuildStarted.resolve();
+        await releaseFirstBuild.promise;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+  await builder.updateBuildOptions({ extensionBuildOptions: [] });
+
+  try {
+    const firstBuild = builder.cleanRebuild();
+    await firstBuildStarted.promise;
+    const secondBuild = builder.cleanRebuild();
+    await Promise.resolve();
+    expect(buildStartCount).toBe(1);
+
+    releaseFirstBuild.resolve();
+    await expect(firstBuild).resolves.toMatchObject({
+      default: { ok: true },
+      headless: { ok: true },
+    });
+    await expect(secondBuild).resolves.toMatchObject({
+      default: { ok: true },
+      headless: { ok: true },
+    });
+    expect(buildStartCount).toBe(2);
+  } finally {
+    releaseFirstBuild.resolve();
+    await builder.close();
+  }
+});
+
+it('shares clean watcher startup with a concurrent profile rebuild', async () => {
+  /// @case
+  /// 1. A clean rebuild starts a fresh watcher and pauses in its initial revision.
+  /// 2. A default-profile rebuild arrives before the clean rebuild has finished every profile.
+  /// @expect
+  /// The profile caller joins the same watcher startup, both calls succeed, and no second startup tears the watcher down.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), 'export default { profiles: { headless: {} } };');
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "shared-clean-startup";');
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+  await builder.updateBuildOptions({ extensionBuildOptions: [] });
+
+  try {
+    const cleanBuild = builder.cleanRebuild();
+    const defaultBuild = builder.rebuild({ profiles: ['default'] });
+
+    await expect(defaultBuild).resolves.toMatchObject({
+      default: { ok: true },
+    });
+    await expect(cleanBuild).resolves.toMatchObject({
+      default: { ok: true },
+      headless: { ok: true },
+    });
+    expect(buildStartCount).toBe(1);
+
+    await expect(builder.rebuild({ profiles: ['default'] })).resolves.toMatchObject({
+      default: { ok: true },
+    });
+  } finally {
+    await builder.close();
+  }
+});
+
+it('attaches profile rebuilds to the latest pending clean startup', async () => {
+  /// @case
+  /// 1. A clean rebuild is active while a second clean rebuild waits behind it.
+  /// 2. A default-profile rebuild is requested before the first clean rebuild finishes.
+  /// @expect
+  /// The profile caller waits for the second clean watcher instead of settling from the watcher about to be replaced.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), 'export default { profiles: { headless: {} } };');
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "latest-clean-startup";');
+  const firstBuildStarted = deferred<void>();
+  const secondBuildStarted = deferred<void>();
+  const releaseFirstBuild = deferred<void>();
+  const releaseSecondBuild = deferred<void>();
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method !== 'build-start') {
+        return;
+      }
+      buildStartCount++;
+      if (buildStartCount === 1) {
+        firstBuildStarted.resolve();
+        await releaseFirstBuild.promise;
+      } else if (buildStartCount === 2) {
+        secondBuildStarted.resolve();
+        await releaseSecondBuild.promise;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+  await builder.updateBuildOptions({ extensionBuildOptions: [] });
+
+  try {
+    const firstCleanBuild = builder.cleanRebuild();
+    await firstBuildStarted.promise;
+    const secondCleanBuild = builder.cleanRebuild();
+    const defaultBuild = builder.rebuild({ profiles: ['default'] });
+
+    releaseFirstBuild.resolve();
+    const firstSettlement = await Promise.race([
+      defaultBuild.then(() => 'default-build'),
+      secondBuildStarted.promise.then(() => 'second-build-started'),
+    ]);
+    expect(firstSettlement).toBe('second-build-started');
+
+    releaseSecondBuild.resolve();
+    await expect(firstCleanBuild).resolves.toMatchObject({
+      default: { ok: true },
+      headless: { ok: true },
+    });
+    await expect(secondCleanBuild).resolves.toMatchObject({
+      default: { ok: true },
+      headless: { ok: true },
+    });
+    await expect(defaultBuild).resolves.toMatchObject({
+      default: { ok: true },
+    });
+  } finally {
+    releaseFirstBuild.resolve();
+    releaseSecondBuild.resolve();
+    await builder.close();
+  }
+});
+
+it('does not strand a profile waiter when a pending clean rebuild is aborted', async () => {
+  /// @case
+  /// 1. Two clean rebuilds are requested while the first watcher is still starting.
+  /// 2. A default-profile caller observes the latest startup, then close aborts the pending second clean rebuild.
+  /// @expect
+  /// The pending clean rejection propagates to the profile caller instead of leaving its startup wait pending forever.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), 'export default { profiles: { headless: {} } };');
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "abort-pending-clean";');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  const firstCleanBuild = builder.cleanRebuild();
+  const pendingCleanBuild = builder.cleanRebuild();
+  const defaultBuild = builder.rebuild({ profiles: ['default'] });
+  const defaultBuildSettlement = defaultBuild.then(
+    () => 'resolved',
+    () => 'rejected',
+  );
+  const pendingCleanRejection = expect(pendingCleanBuild).rejects.toThrow('Task queue aborted');
+  const close = builder.close();
+
+  await pendingCleanRejection;
+  await expect(firstCleanBuild).resolves.toMatchObject({
+    default: { ok: true },
+    headless: { ok: true },
+  });
+  await close;
+  await expect(Promise.race([
+    defaultBuildSettlement,
+    setTimeout(1_000, 'timeout'),
+  ])).resolves.not.toBe('timeout');
+});
+
+it('preserves a pending clean startup after an earlier clean startup fails', async () => {
+  /// @case
+  /// 1. An output-path conflict makes the active clean rebuild fail during watcher startup.
+  /// 2. A second clean rebuild is already pending; the path is repaired before a default-profile request arrives.
+  /// @expect
+  /// The failed startup rolls back only its own resources, and the profile caller shares the pending clean startup successfully.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), 'export default { profiles: { headless: {} } };');
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "recover-pending-clean";');
+  const blockedOutputPath = join(project, 'temp', 'oms', 'out');
+  await fs.outputFile(blockedOutputPath, 'blocks the first clean startup');
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  try {
+    const failedCleanBuild = builder.cleanRebuild();
+    const recoveredCleanBuild = builder.cleanRebuild();
+    await expect(failedCleanBuild).rejects.toThrow();
+    await fs.remove(blockedOutputPath);
+
+    const defaultBuild = builder.rebuild({ profiles: ['default'] });
+    await expect(defaultBuild).resolves.toMatchObject({
+      default: { ok: true },
+    });
+    await expect(recoveredCleanBuild).resolves.toMatchObject({
+      default: { ok: true },
+      headless: { ok: true },
+    });
+    expect(buildStartCount).toBe(1);
+  } finally {
+    await fs.remove(blockedOutputPath);
+    await builder.close();
+  }
+});
+
+it('does not emit passive-build-end when an active waiter attaches to a pending passive build', async () => {
   const project = await makeTempDir();
   await fs.ensureDir(join(project, 'src'));
   const ctx = new ServerContext({
@@ -28,7 +316,7 @@ it('does not emit passive-build-end when a pending passive build is claimed by a
   });
 
   try {
-    await builder.rebuild({
+    await rebuildDefault(builder, {
       extensionBuildOptions: [],
     });
 
@@ -57,13 +345,73 @@ it('does not emit passive-build-end when a pending passive build is claimed by a
 
     await blockTask;
     await expect(activeBuild).resolves.toMatchObject({
-      ok: true,
+      default: { ok: true },
+      headless: { ok: true },
     });
     await setTimeout(50);
 
     expect(passiveBuildEndCount).toBe(0);
   } finally {
     await (builder as any)._clean();
+  }
+});
+
+it('lets an active caller attach to a passive revision during preparation', async () => {
+  /// @case
+  /// 1. A source change starts a passive revision and pauses in its build-start notification.
+  /// 2. An active default-profile caller arrives before profile execution begins.
+  /// @expect
+  /// The caller attaches to that revision, no second revision runs, and passive side effects are not emitted separately.
+  const project = await makeTempDir();
+  const entry = join(project, 'src', 'index.ts');
+  await fs.outputFile(entry, 'export const marker = "before-active-attach";');
+  const initialBuildEnd = deferred<void>();
+  const passiveBuildStart = deferred<void>();
+  const releasePassivePreparation = deferred<void>();
+  let blockNextBuildStart = false;
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+        if (blockNextBuildStart) {
+          blockNextBuildStart = false;
+          passiveBuildStart.resolve();
+          await releasePassivePreparation.promise;
+        }
+      } else if (method === 'build-end' && buildStartCount === 1) {
+        initialBuildEnd.resolve();
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  try {
+    await expect(rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    })).resolves.toMatchObject({ ok: true });
+    await initialBuildEnd.promise;
+
+    let passiveBuildEndCount = 0;
+    builder.on('passive-build-end', () => {
+      passiveBuildEndCount++;
+    });
+    blockNextBuildStart = true;
+    await fs.outputFile(entry, 'export const marker = "after-active-attach";');
+    await passiveBuildStart.promise;
+
+    const activeBuild = builder.rebuild({ profiles: ['default'] });
+    releasePassivePreparation.resolve();
+    await expect(activeBuild).resolves.toMatchObject({
+      default: { ok: true },
+    });
+    await setTimeout(150);
+
+    expect(buildStartCount).toBe(2);
+    expect(passiveBuildEndCount).toBe(0);
+  } finally {
+    await builder.close();
   }
 });
 
@@ -130,7 +478,7 @@ it('does not run a second default build from initial source discovery', async ()
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions,
     })).resolves.toMatchObject({
       ok: true,
@@ -173,7 +521,7 @@ it('ignores late files outside OMS domain source roots', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [
         {
           name: 'plain-extension',
@@ -212,7 +560,7 @@ it('coalesces a queued source delete with a same-path add', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -247,7 +595,7 @@ it('rebuilds when domain source files are added, changed, and deleted', async ()
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -256,8 +604,9 @@ it('rebuilds when domain source files are added, changed, and deleted', async ()
     let passiveBuildEnd = waitForPassiveBuildEnd(builder);
     await fs.outputFile(component, '(globalThis as any).__omsDomainSourceMarker = "domain-source-added";');
     await expect(passiveBuildEnd).resolves.toMatchObject({
-      result: {
-        ok: true,
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
       },
     });
     await expect(fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).resolves.toContain('domain-source-added');
@@ -265,8 +614,9 @@ it('rebuilds when domain source files are added, changed, and deleted', async ()
     passiveBuildEnd = waitForPassiveBuildEnd(builder);
     await fs.outputFile(component, '(globalThis as any).__omsDomainSourceMarker = "domain-source-changed";');
     await expect(passiveBuildEnd).resolves.toMatchObject({
-      result: {
-        ok: true,
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
       },
     });
     const changedOutput = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
@@ -276,8 +626,9 @@ it('rebuilds when domain source files are added, changed, and deleted', async ()
     passiveBuildEnd = waitForPassiveBuildEnd(builder);
     await fs.remove(component);
     await expect(passiveBuildEnd).resolves.toMatchObject({
-      result: {
-        ok: true,
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
       },
     });
     await expect(fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).resolves.not.toContain('domain-source-changed');
@@ -314,7 +665,7 @@ it('emits OMS export module declarations without a generated tsconfig paths file
     const previousOmsPackageRoot = process.env.OMS_PACKAGE_ROOT;
     try {
       process.env.OMS_PACKAGE_ROOT = omsPackageRoot;
-      await expect(builder.rebuild({
+      await expect(rebuildDefault(builder, {
         extensionBuildOptions: [
           {
             name: 'text-field',
@@ -390,7 +741,7 @@ it('generates OMS typing proxies from the real export entry path', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [
         {
           name: 'linked-extension',
@@ -451,7 +802,7 @@ it('resolves OMS peer imports from the project root', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [
         {
           name: 'peer-extension',
@@ -512,7 +863,7 @@ it('resolves OMS peer imports from dependencies outside the extension root', asy
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [
         {
           name: 'peer-extension',
@@ -560,7 +911,7 @@ it('fails OMS peer imports when the project does not provide the peer package', 
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [
         {
           name: 'peer-extension',
@@ -613,7 +964,7 @@ it('keeps alias and wasm support in the default Rollup runtime', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -667,7 +1018,7 @@ it('replaces project define expressions during build', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -736,7 +1087,7 @@ it('loads OMS-prefixed dotenv files into import.meta.env', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -788,7 +1139,7 @@ it('loads dotenv files from envDir during build', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -835,7 +1186,7 @@ it('respects custom envPrefix during build', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -879,7 +1230,7 @@ it('lets define override import.meta.env values', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -916,7 +1267,7 @@ it('emits bare import.meta.env as an object with only public env keys', async ()
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -959,7 +1310,7 @@ it('fails build when project mode is local', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: false,
@@ -1032,7 +1383,7 @@ it('builds default and headless as independent profiles in development and produ
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -1163,7 +1514,10 @@ it('builds default and headless as independent profiles in development and produ
       'globalThis.__omsLateSharedComponent = "late-shared-component-marker";',
     ].join('\n'));
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).toContain('late-shared-component-marker');
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).toContain('late-shared-component-marker');
@@ -1171,7 +1525,10 @@ it('builds default and headless as independent profiles in development and produ
     passiveBuild = waitForPassiveBuildEnd(builder);
     await fs.remove(lateSharedComponent);
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).not.toContain('late-shared-component-marker');
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).not.toContain('late-shared-component-marker');
@@ -1183,7 +1540,10 @@ it('builds default and headless as independent profiles in development and produ
       'globalThis.__omsLateAuthorityComponent = "late-authority-component-marker";',
     ].join('\n'));
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
     expect(await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8')).not.toContain('late-authority-component-marker');
     expect(await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.editor.js'), 'utf8')).toContain('late-authority-component-marker');
@@ -1192,7 +1552,10 @@ it('builds default and headless as independent profiles in development and produ
     passiveBuild = waitForPassiveBuildEnd(builder);
     await fs.remove(lateAuthorityComponent);
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).not.toContain('late-authority-component-marker');
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).not.toContain('late-authority-component-marker');
@@ -1207,7 +1570,10 @@ it('builds default and headless as independent profiles in development and produ
       '};',
     ].join('\n'));
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'))).toContain('shared-component-marker');
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).not.toContain('shared-component-marker');
@@ -1221,7 +1587,10 @@ it('builds default and headless as independent profiles in development and produ
       '};',
     ].join('\n'));
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
     await expect(fs.pathExists(join(project, 'temp', 'oms', 'out-headless'))).resolves.toBe(false);
 
@@ -1235,7 +1604,10 @@ it('builds default and headless as independent profiles in development and produ
       '};',
     ].join('\n'));
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
     expect(await readJavaScriptOutput(join(project, 'temp', 'oms', 'out-headless'))).toContain('authority-component-marker');
   } finally {
@@ -1270,7 +1642,7 @@ it('moves the last filtered component between primary and editor bundles after a
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({ ok: true });
     expect(await readJavaScriptOutput(outDir)).toContain('only-component-marker');
@@ -1284,7 +1656,10 @@ it('moves the last filtered component between primary and editor bundles after a
       '});',
     ].join('\n'));
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
 
     expect(await readJavaScriptOutput(outDir)).toContain('only-component-marker');
@@ -1301,7 +1676,10 @@ it('moves the last filtered component between primary and editor bundles after a
       '});',
     ].join('\n'));
     await expect(restoredBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
 
     await expect(fs.readFile(join(outDir, 'bundle-main.js'), 'utf8')).resolves.toContain('only-component-marker');
@@ -1334,7 +1712,7 @@ it('initializes an empty headless profile after a config hot update', async () =
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({ ok: true });
 
@@ -1348,7 +1726,10 @@ it('initializes an empty headless profile after a config hot update', async () =
       '};',
     ].join('\n'));
     await expect(passiveBuild).resolves.toMatchObject({
-      result: { ok: true },
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
     });
 
     await expect(fs.pathExists(join(headlessOutDir, 'metadata.js'))).resolves.toBe(true);
@@ -1380,7 +1761,7 @@ it('uses production mode for prod builds', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -1459,7 +1840,7 @@ it('builds production from mode-specific project and extension configs without m
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [{ name: 'mode-extension', path: extensionRoot }],
     })).resolves.toMatchObject({ ok: true });
 
@@ -1515,7 +1896,12 @@ it('builds production from mode-specific project and extension configs without m
 
     const passiveBuild = waitForPassiveBuildEnd(builder);
     await fs.outputFile(join(project, 'src', 'runtime.component.ts'), 'globalThis.__omsRuntimeMarker = "runtime-v2-marker";');
-    await expect(passiveBuild).resolves.toMatchObject({ result: { ok: true } });
+    await expect(passiveBuild).resolves.toMatchObject({
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
+    });
 
     const rebuiltDevelopmentOutput = await readJavaScriptOutput(developmentOutDir);
     expectProfileOutput(rebuiltDevelopmentOutput, {
@@ -1562,7 +1948,7 @@ it.each(['editor', 'editor/tools'])('rejects an explicit editor-only OMS import 
   });
 
   try {
-    await expect(builder.rebuild({ extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
+    await expect(rebuildDefault(builder, { extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
     await expect(builder.buildProd({
       buildDir,
       debug: true,
@@ -1603,7 +1989,7 @@ it('propagates an async production config failure and recovers on the next produ
   const closeWatcher = vi.spyOn(OmsProjectConfigWatcher.prototype, 'close');
 
   try {
-    await expect(builder.rebuild({ extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
+    await expect(rebuildDefault(builder, { extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
     await expect(builder.buildProd({
       buildDir: failedBuildDir,
       debug: true,
@@ -1615,7 +2001,12 @@ it('propagates an async production config failure and recovers on the next produ
 
     const repairedDevelopmentBuild = waitForPassiveBuildEnd(builder);
     await fs.outputFile(configPath, 'export default async () => ({});');
-    await expect(repairedDevelopmentBuild).resolves.toMatchObject({ result: { ok: true } });
+    await expect(repairedDevelopmentBuild).resolves.toMatchObject({
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
+    });
     await expect(builder.buildProd({
       buildDir: recoveredBuildDir,
       debug: true,
@@ -1658,7 +2049,7 @@ it('reuses development UUIDs in Debug and Release production builds without rewr
   });
 
   try {
-    await expect(builder.rebuild({ extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
+    await expect(rebuildDefault(builder, { extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
     const uuidMapPath = join(project, 'temp', 'oms', 'uuids.json');
     const uuidMapBeforeProduction = await fs.readFile(uuidMapPath, 'utf8');
     const developmentOutput = await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'));
@@ -1726,7 +2117,7 @@ it('resolves a linked extension component UUID through its real path in producti
   });
 
   try {
-    await expect(builder.rebuild({ extensionBuildOptions })).resolves.toMatchObject({ ok: true });
+    await expect(rebuildDefault(builder, { extensionBuildOptions })).resolves.toMatchObject({ ok: true });
     const uuidMapPath = join(project, 'temp', 'oms', 'uuids.json');
     const uuidMapBeforeProduction = await fs.readFile(uuidMapPath, 'utf8');
     const developmentOutput = await readJavaScriptOutput(join(project, 'temp', 'oms', 'out'));
@@ -1782,7 +2173,7 @@ it('reads a production-only component UUID without changing the project UUID map
   });
 
   try {
-    await expect(builder.rebuild({ extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
+    await expect(rebuildDefault(builder, { extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
     const uuidMapPath = join(project, 'temp', 'oms', 'uuids.json');
     const uuidMapBeforeProduction = await fs.readFile(uuidMapPath, 'utf8');
 
@@ -1829,7 +2220,7 @@ it('fails production when a production-only component has no project UUID', asyn
   });
 
   try {
-    await expect(builder.rebuild({ extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
+    await expect(rebuildDefault(builder, { extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
     const uuidMapPath = join(project, 'temp', 'oms', 'uuids.json');
     const uuidMapBeforeProduction = await fs.readFile(uuidMapPath, 'utf8');
 
@@ -1876,7 +2267,7 @@ it('does not require a UUID for a production-only editor component that cannot e
   });
 
   try {
-    await expect(builder.rebuild({ extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
+    await expect(rebuildDefault(builder, { extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
     const uuidMapPath = join(project, 'temp', 'oms', 'uuids.json');
     const uuidMapBeforeProduction = await fs.readFile(uuidMapPath, 'utf8');
 
@@ -1935,7 +2326,7 @@ it('minifies release output with preserved names and composed source maps', asyn
   });
 
   try {
-    await expect(builder.rebuild({ extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
+    await expect(rebuildDefault(builder, { extensionBuildOptions: [] })).resolves.toMatchObject({ ok: true });
     await builder.buildProd({
       buildDir: debugBuildDir,
       debug: true,
@@ -2075,7 +2466,7 @@ it('replaces process.env.NODE_ENV in production dependencies', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -2117,7 +2508,7 @@ it('rebuilds when a dotenv file changes', async () => {
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -2128,8 +2519,9 @@ it('rebuilds when a dotenv file changes', async () => {
     await fs.outputFile(join(project, '.env'), 'OMS_VALUE=two\n');
 
     await expect(passiveBuildEnd).resolves.toMatchObject({
-      result: {
-        ok: true,
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
       },
     });
     const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
@@ -2161,7 +2553,7 @@ it('keeps a source file when it is recreated before the passive rebuild runs', a
   });
 
   try {
-    await expect(builder.rebuild({
+    await expect(rebuildDefault(builder, {
       extensionBuildOptions: [],
     })).resolves.toMatchObject({
       ok: true,
@@ -2177,8 +2569,9 @@ it('keeps a source file when it is recreated before the passive rebuild runs', a
     ].join('\n'));
 
     await expect(passiveBuildEnd).resolves.toMatchObject({
-      result: {
-        ok: true,
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
       },
     });
     const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
@@ -2188,6 +2581,847 @@ it('keeps a source file when it is recreated before the passive rebuild runs', a
     await (builder as any)._clean();
   }
 });
+
+it('returns runtime build success without waiting for a failing headless profile', async () => {
+  /// @case
+  /// 1. A project enables headless output with a valid runtime entry and a broken headless-only entry.
+  /// 2. The startup build requests runtime readiness without waiting for headless.
+  /// @expect
+  /// The build returns success for runtime output, and scene metadata does not include the headless entry.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: {',
+    '    headless: {',
+    '      include: ["src/**/*.headless.ts"],',
+    '    },',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const runtimeMarker = "runtime-ready";');
+  await fs.outputFile(join(project, 'src', 'index.headless.ts'), 'import "./missing-headless-only";');
+  const buildEnd = deferred<void>();
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-end') {
+        buildEnd.resolve();
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const runtimeOutput = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    const metadataOutput = await fs.readFile(join(project, 'temp', 'oms', 'out', 'metadata.js'), 'utf8');
+    expect(runtimeOutput).toContain('runtime-ready');
+    expect(metadataOutput).not.toContain('main.headless');
+    await buildEnd.promise;
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('keeps full rebuild failure semantics for a failing headless profile', async () => {
+  /// @case
+  /// 1. A project enables headless output with a valid runtime entry and a broken headless-only entry.
+  /// 2. A normal rebuild waits for all profiles.
+  /// @expect
+  /// The build fails and reports the headless profile error.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: {',
+    '    headless: {',
+    '      include: ["src/**/*.headless.ts"],',
+    '    },',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const runtimeMarker = "runtime-ready";');
+  await fs.outputFile(join(project, 'src', 'index.headless.ts'), 'import "./missing-headless-only";');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(rebuildProfiles(builder, {
+      extensionBuildOptions: [],
+    })).resolves.toMatchObject({
+      default: {
+        ok: true,
+      },
+      headless: {
+        ok: false,
+        error: {
+          message: expect.stringContaining('headless-build failed'),
+        },
+      },
+    });
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('reports per-profile passive results when headless fails', async () => {
+  /// @case
+  /// 1. A project has a valid default entry and a broken headless-only entry.
+  /// 2. A source change triggers a passive full revision.
+  /// @expect
+  /// The revision reports each profile independently so runtime side effects can use the successful default result.
+  const project = await makeTempDir();
+  const runtimeEntry = join(project, 'src', 'index.ts');
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: {',
+    '    headless: {',
+    '      include: ["src/**/*.headless.ts"],',
+    '    },',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(runtimeEntry, 'export const marker = "before-passive-profile-result";');
+  await fs.outputFile(join(project, 'src', 'index.headless.ts'), 'import "./missing-passive-headless";');
+  const initialBuildEnd = deferred<void>();
+  let buildEndCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-end' && ++buildEndCount === 1) {
+        initialBuildEnd.resolve();
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  try {
+    await expect(rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    })).resolves.toMatchObject({ ok: true });
+    await initialBuildEnd.promise;
+
+    const passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(runtimeEntry, 'export const marker = "after-passive-profile-result";');
+
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      profileResults: {
+        default: {
+          ok: true,
+        },
+        headless: {
+          ok: false,
+        },
+      },
+    });
+  } finally {
+    await builder.close();
+  }
+});
+
+it('keeps watching the last successful headless dependencies after a later headless failure', async () => {
+  /// @case
+  /// 1. A runtime-only build returns before the headless profile finishes.
+  /// 2. The headless profile infers a dependency outside the OMS source root.
+  /// 3. A later headless build fails, then that last successful dependency changes again.
+  /// @expect
+  /// The inferred dependency remains passively watched across the failure and triggers the next passive build.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: {',
+    '    headless: {',
+    '      include: ["src/**/*.headless.ts"],',
+    '    },',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const runtimeMarker = "runtime-ready";');
+  await fs.outputFile(join(project, 'src', 'index.headless.ts'), [
+    'import { headlessValue } from "../shared/headless-dep";',
+    'export const value = headlessValue;',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'shared', 'headless-dep.ts'), 'export const headlessValue = "before";');
+  const buildEnd = deferred<void>();
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-end') {
+        buildEnd.resolve();
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    })).resolves.toMatchObject({
+      ok: true,
+    });
+    await buildEnd.promise;
+
+    const passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'shared', 'headless-dep.ts'), 'export const headlessValue = "after";');
+
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
+    });
+
+    const failedHeadlessBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'src', 'index.headless.ts'), 'import "./missing-after-success";');
+    await expect(failedHeadlessBuildEnd).resolves.toMatchObject({
+      profileResults: {
+        default: { ok: true },
+        headless: {
+          ok: false,
+          error: {
+            message: expect.stringContaining('headless-build failed'),
+          },
+        },
+      },
+    });
+
+    const retainedDependencyBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(join(project, 'shared', 'headless-dep.ts'), 'export const headlessValue = "after-failure";');
+    await expect(retainedDependencyBuildEnd).resolves.toMatchObject({
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: false },
+      },
+    });
+  } finally {
+    await (builder as any)._clean();
+  }
+});
+
+it('queues source changes behind the active profile revision barrier', async () => {
+  /// @case
+  /// 1. The initial default profile becomes ready while a deliberately large headless dependency is still building.
+  /// 2. A default source changes before that headless lane finishes.
+  /// @expect
+  /// The source change runs in one following revision after the initial barrier.
+  const project = await makeTempDir();
+  const runtimeEntry = join(project, 'src', 'index.ts');
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: {',
+    '    headless: {',
+    '      include: ["src/**/*.headless.ts"],',
+    '    },',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(runtimeEntry, 'export const marker = "before-shared-barrier";');
+  await fs.outputFile(join(project, 'src', 'index.headless.ts'), 'export { values } from "../headless-heavy";');
+  await fs.outputFile(join(project, 'headless-heavy.ts'), [
+    'export const values = [',
+    Array.from({ length: 50_000 }, (_, index) => `${index},`).join(''),
+    '];',
+  ].join('\n'));
+  const buildEvents: string[] = [];
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildEvents.push('start');
+      } else if (method === 'build-end') {
+        buildEvents.push('end');
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    await expect(rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    })).resolves.toMatchObject({ ok: true });
+    expect(buildEvents).toEqual(['start']);
+
+    const passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(runtimeEntry, 'export const marker = "after-shared-barrier";');
+
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
+    });
+    expect(buildEvents).toEqual(['start', 'end', 'start', 'end']);
+    const output = await fs.readFile(join(project, 'temp', 'oms', 'out', 'bundle-main.js'), 'utf8');
+    expect(output).toContain('after-shared-barrier');
+    expect(output).not.toContain('before-shared-barrier');
+  } finally {
+    await builder.close();
+  }
+});
+
+it('coalesces concurrent callers waiting for the same profile', async () => {
+  /// @case
+  /// 1. Two callers request the default profile before the first request completes.
+  /// 2. Both callers target the same source revision.
+  /// @expect
+  /// Both callers share one default-profile build instead of rebuilding the watcher twice.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "shared-default-build";');
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    const firstBuild = rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    });
+    const secondBuild = rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    });
+
+    await expect(Promise.all([firstBuild, secondBuild])).resolves.toEqual([
+      expect.objectContaining({ ok: true }),
+      expect.objectContaining({ ok: true }),
+    ]);
+    expect(buildStartCount).toBe(1);
+  } finally {
+    await builder.close();
+  }
+});
+
+it('runs concurrent default and headless callers in one build revision', async () => {
+  /// @case
+  /// 1. A project has a valid default entry and a broken headless-only entry.
+  /// 2. Separate callers request default and headless while the initial revision is starting.
+  /// @expect
+  /// Both profile lanes share one revision, while each caller receives only its requested profile result.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: {',
+    '    headless: {',
+    '      include: ["src/**/*.headless.ts"],',
+    '    },',
+    '  },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "default-ready";');
+  await fs.outputFile(join(project, 'src', 'index.headless.ts'), 'import "./missing-headless-entry";');
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, {
+    project,
+  });
+
+  try {
+    const defaultBuild = rebuildProfiles(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    });
+    const headlessBuild = rebuildProfiles(builder, {
+      extensionBuildOptions: [],
+      profiles: ['headless'],
+    });
+
+    await expect(defaultBuild).resolves.toMatchObject({
+      default: { ok: true },
+    });
+    await expect(headlessBuild).resolves.toMatchObject({
+      headless: {
+        ok: false,
+        error: {
+          message: expect.stringContaining('headless-build failed'),
+        },
+      },
+    });
+    expect(buildStartCount).toBe(1);
+  } finally {
+    await builder.close();
+  }
+});
+
+it('upgrades a pending subset build to a full revision when source files change', async () => {
+  /// @case
+  /// 1. A default-only build is pending behind an exclusive watcher task.
+  /// 2. A domain source file changes before the pending build starts.
+  /// @expect
+  /// The changed revision builds both default and headless exactly once, so neither profile misses the source update.
+  const project = await makeTempDir();
+  const entry = join(project, 'src', 'index.ts');
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: { headless: {} },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(entry, 'export const marker = "before-pending-subset";');
+  const initialBuildEnd = deferred<void>();
+  let buildEndCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-end' && ++buildEndCount === 1) {
+        initialBuildEnd.resolve();
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  try {
+    await expect(rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    })).resolves.toMatchObject({ ok: true });
+    await initialBuildEnd.promise;
+
+    const watcher = (builder as any)._watcher;
+    const releaseExclusiveTask = deferred<void>();
+    const exclusiveTask = watcher._taskQueue.queueTask({
+      type: 'inlineUUIDs',
+      exec: async () => await releaseExclusiveTask.promise,
+    });
+    const profileBuilds: string[] = [];
+    const runProfileBuild = watcher._runProfileBuild.bind(watcher);
+    vi.spyOn(watcher, '_runProfileBuild').mockImplementation(async (profile: string) => {
+      profileBuilds.push(profile);
+      return await runProfileBuild(profile);
+    });
+
+    const defaultBuild = watcher.build({ profiles: ['default'] });
+    await fs.outputFile(entry, 'export const marker = "after-pending-subset";');
+    await vi.waitFor(() => {
+      expect(watcher._fileQueue[entry]).toBe('change');
+    });
+    releaseExclusiveTask.resolve();
+
+    await exclusiveTask;
+    await expect(defaultBuild).resolves.toMatchObject({
+      default: { ok: true },
+    });
+    await vi.waitFor(() => {
+      expect(profileBuilds).toEqual(expect.arrayContaining(['default', 'headless']));
+    });
+    expect(profileBuilds.filter((profile) => profile === 'default')).toHaveLength(1);
+    expect(profileBuilds.filter((profile) => profile === 'headless')).toHaveLength(1);
+  } finally {
+    await builder.close();
+  }
+});
+
+it('keeps passive default completion when a headless waiter attaches to the revision', async () => {
+  /// @case
+  /// 1. A source change starts a passive full revision and pauses during build-start.
+  /// 2. A headless-only caller attaches before the profile lanes run.
+  /// @expect
+  /// The caller receives the headless result, while passive-build-end still reports the completed passive revision.
+  const project = await makeTempDir();
+  const entry = join(project, 'src', 'index.ts');
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: { headless: {} },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(entry, 'export const marker = "before-headless-attach";');
+  const initialBuildEnd = deferred<void>();
+  const passiveBuildStart = deferred<void>();
+  const releasePassivePreparation = deferred<void>();
+  let buildStartCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+        if (buildStartCount === 2) {
+          passiveBuildStart.resolve();
+          await releasePassivePreparation.promise;
+        }
+      } else if (method === 'build-end' && buildStartCount === 1) {
+        initialBuildEnd.resolve();
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  try {
+    await expect(rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    })).resolves.toMatchObject({ ok: true });
+    await initialBuildEnd.promise;
+
+    const passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    await fs.outputFile(entry, 'export const marker = "after-headless-attach";');
+    await passiveBuildStart.promise;
+    const headlessBuild = builder.rebuild({ profiles: ['headless'] });
+    releasePassivePreparation.resolve();
+
+    await expect(headlessBuild).resolves.toMatchObject({
+      headless: { ok: true },
+    });
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
+    });
+    expect(buildStartCount).toBe(2);
+  } finally {
+    await builder.close();
+  }
+});
+
+it('watches new default dependencies before the headless lane finishes', async () => {
+  /// @case
+  /// 1. A source change makes default discover a new dependency outside the OMS source root.
+  /// 2. The headless lane remains blocked after default succeeds, then the new dependency changes.
+  /// @expect
+  /// Default publishes its dependencies after writing output, so the change queues one following revision.
+  const project = await makeTempDir();
+  const entry = join(project, 'src', 'index.ts');
+  const passiveDependency = join(project, 'shared', 'runtime-dependency.ts');
+  await fs.outputFile(join(project, 'oms.config.mjs'), [
+    'export default {',
+    '  profiles: { headless: {} },',
+    '};',
+  ].join('\n'));
+  await fs.outputFile(entry, 'export const marker = "before-runtime-completion";');
+  await fs.outputFile(passiveDependency, 'export const runtimeValue = "before";');
+  const initialBuildEnd = deferred<void>();
+  let buildStartCount = 0;
+  let buildEndCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-start') {
+        buildStartCount++;
+      } else if (method === 'build-end') {
+        buildEndCount++;
+        if (buildEndCount === 1) {
+          initialBuildEnd.resolve();
+        }
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  try {
+    await expect(rebuildDefault(builder, {
+      extensionBuildOptions: [],
+      profiles: ['default'],
+    })).resolves.toMatchObject({ ok: true });
+    await initialBuildEnd.promise;
+
+    const watcher = (builder as any)._watcher;
+    const headlessStarted = deferred<void>();
+    const releaseHeadless = deferred<void>();
+    const runProfileBuild = watcher._runProfileBuild.bind(watcher);
+    vi.spyOn(watcher, '_runProfileBuild').mockImplementation(async (profile: string) => {
+      if (profile === 'headless') {
+        headlessStarted.resolve();
+        await releaseHeadless.promise;
+      }
+      return await runProfileBuild(profile);
+    });
+
+    const defaultProfileBuildEnd = waitForPassiveProfileBuildEnd(builder, 'default');
+    const passiveBuildEnd = waitForPassiveBuildEnd(builder);
+    let passiveSettled = false;
+    void passiveBuildEnd.then(() => {
+      passiveSettled = true;
+    });
+    await fs.outputFile(entry, [
+      'import { runtimeValue } from "../shared/runtime-dependency";',
+      'export const marker = runtimeValue;',
+    ].join('\n'));
+
+    await headlessStarted.promise;
+    await expect(defaultProfileBuildEnd).resolves.toMatchObject({
+      profile: 'default',
+      result: { ok: true },
+    });
+    await Promise.resolve();
+    expect(passiveSettled).toBe(false);
+    expect(buildEndCount).toBe(1);
+    await vi.waitFor(() => {
+      const watchedEntries = watcher._fileWatcher.getWatched()[dirname(passiveDependency)] ?? [];
+      expect(watchedEntries).toContain(basename(passiveDependency));
+    });
+    await fs.outputFile(passiveDependency, 'export const runtimeValue = "after";');
+
+    releaseHeadless.resolve();
+    await expect(passiveBuildEnd).resolves.toMatchObject({
+      profileResults: {
+        default: { ok: true },
+        headless: { ok: true },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(buildStartCount).toBe(3);
+      expect(buildEndCount).toBe(3);
+    });
+  } finally {
+    await builder.close();
+  }
+});
+
+it('rejects empty and unknown profile requests', async () => {
+  /// @case
+  /// IPC callers submit an empty profile list or an unknown build profile.
+  /// @expect
+  /// Both requests fail before a no-op or undefined profile build can be reported as successful.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "profile-validation";');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  try {
+    await expect(builder.rebuild({ profiles: [] })).rejects.toThrow('at least one profile');
+    await expect(builder.rebuild({ profiles: ['unknown' as any] })).rejects.toThrow('Unknown OMS build profile');
+  } finally {
+    await builder.close();
+  }
+});
+
+it('rejects a pending profile waiter when the watcher closes', async () => {
+  /// @case
+  /// 1. An exclusive watcher task keeps a default build pending in the task queue.
+  /// 2. The OMS watcher closes before that build starts.
+  /// @expect
+  /// The profile waiter rejects instead of remaining permanently pending after TaskQueue abort clears the queued task.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "close-pending-build";');
+  const initialBuildEnd = deferred<void>();
+  let buildEndCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-end' && ++buildEndCount === 1) {
+        initialBuildEnd.resolve();
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  await expect(rebuildDefault(builder, {
+    extensionBuildOptions: [],
+    profiles: ['default'],
+  })).resolves.toMatchObject({ ok: true });
+  await initialBuildEnd.promise;
+
+  const watcher = (builder as any)._watcher;
+  const releaseExclusiveTask = deferred<void>();
+  const exclusiveTask = watcher._taskQueue.queueTask({
+    type: 'inlineUUIDs',
+    exec: async () => await releaseExclusiveTask.promise,
+  });
+  const pendingBuild = watcher.build({ profiles: ['default'] });
+
+  const closePromise = watcher.close({ waitForTasks: false });
+  await expect(pendingBuild).rejects.toThrow('OMS watcher closed');
+  releaseExclusiveTask.resolve();
+  await exclusiveTask;
+  await closePromise;
+});
+
+it('rejects public watcher operations after close', async () => {
+  /// @case
+  /// The OMS watcher has completed shutdown before callers issue explicit operations.
+  /// @expect
+  /// Every public operation rejects as closed instead of reporting a silent success.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "closed-operations";');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  await expect(rebuildDefault(builder, {
+    extensionBuildOptions: [],
+    profiles: ['default'],
+  })).resolves.toMatchObject({ ok: true });
+  const watcher = (builder as any)._watcher;
+  const config = watcher._config;
+  await watcher.close();
+
+  await expect(watcher.updateBuildOptions({ extensionBuildOptions: [] })).rejects.toThrow('OMS watcher closed');
+  await expect(watcher.updateConfig(config)).rejects.toThrow('OMS watcher closed');
+  await expect(watcher.inlineUUIDs()).rejects.toThrow('OMS watcher closed');
+  await expect(watcher.build({ profiles: ['default'] })).rejects.toThrow('OMS watcher closed');
+  await expect(watcher.buildProd({
+    buildDir: join(project, 'build', 'closed'),
+    debug: true,
+    sourceMaps: false,
+    platform: 'web-mobile',
+    headless: false,
+  })).rejects.toThrow('OMS watcher closed');
+
+  await (builder as any)._clean();
+});
+
+it('rejects a pending public rebuild when the builder closes', async () => {
+  /// @case
+  /// 1. An outer builder task is running before watcher initialization begins.
+  /// 2. A public rebuild remains pending behind it when the builder closes.
+  /// @expect
+  /// Closing the builder rejects the pending public caller instead of leaving its start task unresolved.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "close-pending-public-build";');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+  const releaseExclusiveTask = deferred<void>();
+  const exclusiveTask = (builder as any)._taskQueue.queueTask({
+    type: 'inlineUUIDs',
+    exec: async () => await releaseExclusiveTask.promise,
+  });
+  const pendingBuild = builder.rebuild({ profiles: ['default'] });
+
+  const closePromise = builder.close();
+  await expect(pendingBuild).rejects.toThrow('Task queue aborted');
+  releaseExclusiveTask.resolve();
+  await exclusiveTask;
+  await closePromise;
+});
+
+it('does not schedule a watcher build from file changes while close is waiting', async () => {
+  /// @case
+  /// 1. The watcher begins closing while an exclusive running task delays abort completion.
+  /// 2. A real domain source change arrives before that running task finishes.
+  /// @expect
+  /// The closing watcher does not accept a new passive build that could race watcher and domain cleanup.
+  const project = await makeTempDir();
+  const entry = join(project, 'src', 'index.ts');
+  await fs.outputFile(entry, 'export const marker = "before-close-file-change";');
+  const initialBuildEnd = deferred<void>();
+  let buildEndCount = 0;
+  const ctx = new ServerContext({
+    invoke: async (method: string) => {
+      if (method === 'build-end' && ++buildEndCount === 1) {
+        initialBuildEnd.resolve();
+      }
+    },
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  await expect(rebuildDefault(builder, {
+    extensionBuildOptions: [],
+    profiles: ['default'],
+  })).resolves.toMatchObject({ ok: true });
+  await initialBuildEnd.promise;
+
+  const watcher = (builder as any)._watcher;
+  const releaseExclusiveTask = deferred<void>();
+  const exclusiveTask = watcher._taskQueue.queueTask({
+    type: 'inlineUUIDs',
+    exec: async () => await releaseExclusiveTask.promise,
+  });
+  const profileBuilds = vi.spyOn(watcher, '_runProfileBuild');
+  const closePromise = watcher.close();
+  await fs.outputFile(entry, 'export const marker = "after-close-file-change";');
+  await vi.waitFor(() => {
+    expect(watcher._fileQueue[entry]).toBe('change');
+  });
+
+  releaseExclusiveTask.resolve();
+  await exclusiveTask;
+  await closePromise;
+  await setTimeout(150);
+  expect(profileBuilds).not.toHaveBeenCalled();
+});
+
+it('does not queue a production build when close wins during config loading', async () => {
+  /// @case
+  /// 1. A production build begins and pauses while loading its production config.
+  /// 2. The OMS builder closes before that config load finishes.
+  /// @expect
+  /// Releasing the config load rejects the production caller as closed instead of queuing work after abort and cleanup.
+  const project = await makeTempDir();
+  await fs.outputFile(join(project, 'src', 'index.ts'), 'export const marker = "prod-close-config-load";');
+  const ctx = new ServerContext({
+    invoke: async () => undefined,
+  } as any);
+  const builder = new OmsBuilder(ctx, { project });
+
+  await expect(rebuildDefault(builder, {
+    extensionBuildOptions: [],
+    profiles: ['default'],
+  })).resolves.toMatchObject({ ok: true });
+  const watcher = (builder as any)._watcher;
+  const productionConfigLoadStarted = deferred<void>();
+  const releaseProductionConfigLoad = deferred<void>();
+  const configReady = vi.spyOn(OmsProjectConfigWatcher.prototype, 'ready').mockImplementationOnce(async () => {
+    productionConfigLoadStarted.resolve();
+    await releaseProductionConfigLoad.promise;
+    return watcher._config;
+  });
+
+  try {
+    const productionBuild = builder.buildProd({
+      buildDir: join(project, 'build', 'close-during-config'),
+      debug: true,
+      sourceMaps: false,
+      platform: 'web-mobile',
+      headless: false,
+    });
+    await productionConfigLoadStarted.promise;
+    const closePromise = builder.close({ waitForTasks: false });
+    releaseProductionConfigLoad.resolve();
+
+    await expect(productionBuild).rejects.toThrow('OMS watcher closed');
+    await closePromise;
+  } finally {
+    configReady.mockRestore();
+  }
+});
+
+async function rebuildDefault(
+  builder: OmsBuilder,
+  options: BuildOptions & RebuildOptions,
+) {
+  const profileResults = await rebuildProfiles(builder, options);
+  const defaultResult = profileResults.default;
+  if (!defaultResult) {
+    throw new Error('Missing default profile result');
+  }
+  return defaultResult;
+}
+
+async function rebuildProfiles(
+  builder: OmsBuilder,
+  options: BuildOptions & RebuildOptions,
+) {
+  const { profiles, ...buildOptions } = options;
+  await builder.updateBuildOptions(buildOptions);
+  return await builder.rebuild(profiles ? { profiles } : {});
+}
 
 async function makeTempDir() {
   const dir = await fs.mkdtemp(join(tmpdir(), 'oms-builder-'));
@@ -2206,6 +3440,24 @@ function waitForPassiveBuildEnd(builder: OmsBuilder) {
       resolve(info);
     };
     builder.once('passive-build-end', onEnd);
+  });
+}
+
+function waitForPassiveProfileBuildEnd(builder: OmsBuilder, profile: 'default' | 'headless') {
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      builder.off('passive-profile-build-end', onEnd);
+      reject(new Error(`Timed out waiting for passive ${profile} profile build end`));
+    }, 5000);
+    const onEnd = (info: { profile: 'default' | 'headless' }) => {
+      if (info.profile !== profile) {
+        return;
+      }
+      globalThis.clearTimeout(timeout);
+      builder.off('passive-profile-build-end', onEnd);
+      resolve(info);
+    };
+    builder.on('passive-profile-build-end', onEnd);
   });
 }
 
@@ -2250,6 +3502,20 @@ function expectProfileOutput(output: string, expected: {
   for (const marker of expected.excludes) {
     expect(output).not.toContain(marker);
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolve_, reject_) => {
+    resolve = resolve_;
+    reject = reject_;
+  });
+  return {
+    promise,
+    resolve,
+    reject,
+  };
 }
 
 async function outputNodePackage(root: string, packageName: string, source: string, extraPackageJson: Record<string, unknown> = {}) {

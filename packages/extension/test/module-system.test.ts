@@ -358,7 +358,7 @@ describe('OMS script runtime', () => {
         }
         return {
           ok: true,
-          beginningModules: [],
+          affectedFiles: [],
         };
       },
     });

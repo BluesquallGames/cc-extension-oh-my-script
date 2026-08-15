@@ -7,8 +7,18 @@ import * as chokidar from 'chokidar';
 import { type UUIDProvider } from './features/babel-plugin-cc-component.js';
 import assert from 'node:assert';
 import { UUIDManager, writeInlineUUID } from './uuid-manager.js';
-import type { BuildOptions, BuildResult, InvocationParams, PassiveBuildEndInfo } from './protocol.js';
-import { promiseWithResolvers } from './utils/promise-with-resolvers.js';
+import {
+  allBuildProfileIds,
+  BuildProfileId,
+  type BuildOptions,
+  type BuildProfileResult,
+  type BuildProfileResults,
+  type InvocationParams,
+  type PassiveBuildEndInfo,
+  type PassiveProfileBuildEndInfo,
+  type RebuildOptions,
+} from './protocol.js';
+import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
 import { Domain, readOmsDomainConfig, type DomainProfile, type ProfileBuildOptions } from './domain.js';
@@ -17,20 +27,19 @@ import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { OmsProjectConfigWatcher } from './config-watcher.js';
 import type { OmsConfigContext, OmsProjectConfig, ProfileConfig } from './config.js';
-import { BuildRecord, mergeBuildResults, type InternalBuildEntry, type InternalBuildResult } from './build-record.js';
+import { BuildRecord, type InternalBuildEntry, type InternalBuildResult } from './build-record.js';
 import { OmsDomainConfigWatcher } from './domain-config-watcher.js';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
+import { isDeepStrictEqual } from 'node:util';
 
 const mainDomainId = 'main';
 const omsPackageRootEnvName = 'OMS_PACKAGE_ROOT';
-const defaultProfileId = 'default';
-const headlessProfileId = 'headless';
 const developmentConfigContext: OmsConfigContext = { mode: 'development' };
 const productionConfigContext: OmsConfigContext = { mode: 'production' };
 
 function makeDefaultDomainProfile(profileConfig: ProfileConfig | undefined): DomainProfile {
   return {
-    id: defaultProfileId,
+    id: BuildProfileId.default,
     sourceMatcher: makeProfileSourceMatcher(profileConfig),
     bundle: {
       idSuffix: '',
@@ -42,7 +51,7 @@ function makeDefaultDomainProfile(profileConfig: ProfileConfig | undefined): Dom
 
 function makeHeadlessDomainProfile(profileConfig: ProfileConfig | undefined): DomainProfile {
   return {
-    id: headlessProfileId,
+    id: BuildProfileId.headless,
     sourceMatcher: makeProfileSourceMatcher(profileConfig),
     bundle: {
       idSuffix: '.headless',
@@ -61,6 +70,7 @@ function makeProfileSourceMatcher(profileConfig: ProfileConfig | undefined) {
 
 export class OmsBuilder extends EventEmitter<{
   'passive-build-end': [PassiveBuildEndInfo];
+  'passive-profile-build-end': [PassiveProfileBuildEndInfo];
 }> {
   constructor(private _ctx: ServerContext, {
     project,
@@ -71,20 +81,59 @@ export class OmsBuilder extends EventEmitter<{
     this._projectPath = project;
   }
 
-  async rebuild(opts: BuildOptions): Promise<BuildResult> {
-    return await this._taskQueue.queueTask({
-      type: 'rebuild',
+  async rebuild(opts: RebuildOptions = {}): Promise<BuildProfileResults> {
+    const profiles = normalizeBuildProfiles(opts.profiles);
+    if (this._startPromise) {
+      const startedWatcher = await this._startPromise;
+      return await startedWatcher.initialBuild.waitFor(profiles);
+    }
+    if (this._watcherReady) {
+      const watcher = this._watcher;
+      assert.ok(watcher);
+      return await watcher.build({ profiles });
+    }
+    const startedWatcher = await this._ensureStarted();
+    return await startedWatcher.initialBuild.waitFor(profiles);
+  }
+
+  async cleanRebuild(opts: RebuildOptions = {}): Promise<BuildProfileResults> {
+    const profiles = normalizeBuildProfiles(opts.profiles);
+    const startedWatcher = promiseWithResolvers<StartedWatcher>();
+    const cleanBuild = this._taskQueue.queueTask({
+      type: 'cleanRebuild',
       exec: async () => {
-        this._buildOptions = opts;
-        return await this._rebuild();
+        try {
+          const watcher = await this._replaceWatcher();
+          startedWatcher.resolve(watcher);
+          return await watcher.initialBuild.waitFor(profiles);
+        } catch (err) {
+          startedWatcher.reject(err);
+          throw err;
+        }
       },
     });
+    const startPromise = Promise.race([
+      startedWatcher.promise,
+      cleanBuild.then(() => startedWatcher.promise),
+    ]);
+    this._startPromise = startPromise;
+    try {
+      const [, profileResults] = await Promise.all([startPromise, cleanBuild]);
+      return profileResults;
+    } finally {
+      if (this._startPromise === startPromise) {
+        this._startPromise = undefined;
+      }
+    }
   }
 
   async updateBuildOptions(opts: BuildOptions) {
     return await this._taskQueue.queueTask({
       type: 'updateBuildOptions',
       exec: async () => {
+        if (isDeepStrictEqual(this._buildOptions, opts)) {
+          return;
+        }
         this._buildOptions = opts;
         if (this._watcher) {
           await this._watcher.updateBuildOptions(opts);
@@ -127,18 +176,27 @@ export class OmsBuilder extends EventEmitter<{
   private _projectPath: string;
   private _configWatcher: OmsProjectConfigWatcher | undefined;
   private _watcher: OmsWatcher | undefined;
+  private _startPromise: Promise<StartedWatcher> | undefined;
+  private _watcherReady = false;
   private _buildOptions: BuildOptions = {
     extensionBuildOptions: [],
   };
 
   private _taskQueue = new TaskQueue<{
-    rebuild: () => BuildResult;
+    start: () => StartedWatcher;
+    cleanRebuild: () => BuildProfileResults;
     updateBuildOptions: () => void;
     inlineUUIDs: () => void;
     buildProd: () => void;
   }>();
 
   private async _clean(options: CloseOptions = {}) {
+    this._watcherReady = false;
+    this._startPromise = undefined;
+    await this._disposeWatcher(options);
+  }
+
+  private async _disposeWatcher(options: CloseOptions = {}) {
     const configWatcher = this._configWatcher;
     if (configWatcher) {
       this._configWatcher = undefined;
@@ -151,9 +209,42 @@ export class OmsBuilder extends EventEmitter<{
     }
   }
 
-  private async _rebuild() {
-    await this._clean();
+  private async _replaceWatcher() {
+    this._watcherReady = false;
+    await this._disposeWatcher();
+    return await this._startWatcherWithRollback();
+  }
 
+  private async _ensureStarted(): Promise<StartedWatcher> {
+    assert.ok(!this._watcherReady, 'OMS watcher is already started');
+    if (this._startPromise) {
+      return await this._startPromise;
+    }
+    const startPromise = this._taskQueue.queueTask({
+      type: 'start',
+      exec: async () => await this._startWatcherWithRollback(),
+    });
+    this._startPromise = startPromise;
+    try {
+      return await startPromise;
+    } finally {
+      if (this._startPromise === startPromise) {
+        this._startPromise = undefined;
+      }
+    }
+  }
+
+  private async _startWatcherWithRollback() {
+    try {
+      return await this._startWatcher();
+    } catch (err) {
+      this._watcherReady = false;
+      await this._disposeWatcher();
+      throw err;
+    }
+  }
+
+  private async _startWatcher(): Promise<StartedWatcher> {
     const configWatcher = await this._initializeConfigWatcher();
 
     const config = await configWatcher.ready();
@@ -192,15 +283,25 @@ export class OmsBuilder extends EventEmitter<{
     this._watcher.on('passive-build-end', (buildResult) => {
       this.emit('passive-build-end', buildResult);
     });
+    this._watcher.on('passive-profile-build-end', (buildResult) => {
+      this.emit('passive-profile-build-end', buildResult);
+    });
 
     configWatcher.on('configUpdated', (config) => {
       watcher.updateConfig(config).catch((err) => {
+        if (err instanceof OmsWatcherClosedError) {
+          return;
+        }
         logger.error(err);
       });
     });
 
-    await this._watcher.start();
-    return await this._watcher.build();
+    const initialBuild = await watcher.start();
+    this._watcherReady = true;
+    return {
+      watcher,
+      initialBuild,
+    };
   }
 
   private async _initializeConfigWatcher() {
@@ -210,6 +311,11 @@ export class OmsBuilder extends EventEmitter<{
       context: developmentConfigContext,
     });
   }
+}
+
+interface StartedWatcher {
+  watcher: OmsWatcher;
+  initialBuild: ProfileBuildBatch;
 }
 
 interface BuildProfile {
@@ -320,7 +426,31 @@ async function ensureEmptyDirSafe(dir: string) {
 }
 
 interface BuildState {
-  fullPassive: boolean;
+  hasPassiveRequest: boolean;
+  activeProfiles: Set<BuildProfileId>;
+  requests: ProfileBuildRequest[];
+  profiles: Set<BuildProfileId>;
+}
+
+interface WatchBuildOptions {
+  profiles?: BuildProfileId[];
+}
+
+interface ProfileBuildRequest {
+  profile: BuildProfileId;
+  passive: boolean;
+  result: PromiseWithResolvers<BuildProfileResult>;
+  settled: boolean;
+}
+
+interface ProfileBuildBatch {
+  waitFor(profiles: BuildProfileId[]): Promise<BuildProfileResults>;
+}
+
+interface ActiveBuildRevision {
+  state: BuildState;
+  profileResults: ReadonlyMap<BuildProfileId, Promise<BuildProfileResult>>;
+  settledProfiles: Set<BuildProfileId>;
 }
 
 enum FileWatcherPhase {
@@ -329,8 +459,16 @@ enum FileWatcherPhase {
   Closed = 'closed',
 }
 
+class OmsWatcherClosedError extends Error {
+  constructor() {
+    super('OMS watcher closed');
+    this.name = 'OmsWatcherClosedError';
+  }
+}
+
 class OmsWatcher extends EventEmitter<{
   'passive-build-end': [PassiveBuildEndInfo];
+  'passive-profile-build-end': [PassiveProfileBuildEndInfo];
 }> {
   constructor(options: {
     projectPath: string;
@@ -386,11 +524,28 @@ class OmsWatcher extends EventEmitter<{
     await this._updateDomains();
     await this._loadCentralizedUUIDs();
     this._fileQueueConsumerScheduled = true;
+    this._fileQueueConsumerProfiles = new Set(allBuildProfileIds);
     await this._restartFileWatcher();
     await this._collectInitialSourceFiles();
+    const initialBuild = this._requestProfiles('initial full build', false, allBuildProfileIds);
+    void initialBuild.waitFor(allBuildProfileIds).then((profileResults) => {
+      for (const [profile, result] of Object.entries(profileResults)) {
+        if (!result.ok) {
+          logger.error(`Initial ${profile} profile build failed: ${result.error.message}`);
+        }
+      }
+    }).catch((err) => {
+      if (err instanceof OmsWatcherClosedError) {
+        return;
+      }
+      logger.error(`Initial full build failed: %o`, err);
+    });
+    return initialBuild;
   }
 
   async close(options: CloseOptions = {}) {
+    this._closing = true;
+    this._rejectProfileBuildRequests(new OmsWatcherClosedError());
     const abortPromise = this._taskQueue.abort();
     if (options.waitForTasks ?? true) {
       await abortPromise;
@@ -400,11 +555,13 @@ class OmsWatcher extends EventEmitter<{
       });
     }
     await this._closeFileWatcher();
+    this._profileBuildExtras = {};
     await Promise.all(Object.values(this._domainConfigWatchers).map((watcher) => watcher.close()));
     this._domainConfigWatchers = {};
   }
 
   async updateBuildOptions(options: BuildOptions) {
+    this._assertOpen();
     await this._taskQueue.queueTask({
       type: 'update-build-options',
       exec: async () => {
@@ -416,6 +573,7 @@ class OmsWatcher extends EventEmitter<{
   }
 
   async updateConfig(config: OmsProjectConfig) {
+    this._assertOpen();
     await this._taskQueue.queueTask({
       type: 'update-config',
       exec: async () => {
@@ -428,6 +586,7 @@ class OmsWatcher extends EventEmitter<{
   }
 
   async inlineUUIDs() {
+    this._assertOpen();
     await this._taskQueue.queueTask({
       type: 'inlineUUIDs',
       exec: async () => {
@@ -436,17 +595,13 @@ class OmsWatcher extends EventEmitter<{
     });
   }
 
-  async build() {
-    return await this._queueBuild('build', false).catch((err) => {
-      if (err instanceof MergedTaskExecError) {
-        throw err.cause;
-      } else {
-        throw err;
-      }
-    });
+  async build(options: WatchBuildOptions = {}) {
+    const profiles = normalizeBuildProfiles(options.profiles);
+    return await this._requestProfiles('build', false, profiles).waitFor(profiles);
   }
 
   async buildProd(opts: InvocationParams<'build-prod'>) {
+    this._assertOpen();
     logger.debug(`Performing production build. Options: %o`, opts);
 
     const outDir = join(opts.buildDir, 'oms');
@@ -463,6 +618,7 @@ class OmsWatcher extends EventEmitter<{
         await configWatcher.close();
       }
     })();
+    this._assertOpen();
 
     const headless = opts.headless ?? false;
 
@@ -488,7 +644,7 @@ class OmsWatcher extends EventEmitter<{
       exec: async () => {
         const productionDomains = await this._createProductionDomains(config);
         const { entries } = await this._makeEntries(
-          headless ? headlessProfileId : defaultProfileId,
+          headless ? BuildProfileId.headless : BuildProfileId.default,
           headless ? { dynamicExports: false } : undefined,
           productionDomains,
         );
@@ -524,9 +680,9 @@ class OmsWatcher extends EventEmitter<{
   private _fileWatcher: chokidar.FSWatcher | undefined;
   private _fileWatcherPhase = FileWatcherPhase.Closed;
   private _fileQueueConsumerScheduled = false;
+  private _fileQueueConsumerProfiles = new Set<BuildProfileId>();
   private _sourceFiles = new Set<string>();
   private _passiveWatchedFiles = new Set<string>();
-  private _nBuildEnds = 0;
   private _domains: Record<string, Domain> = {};
   private _domainSourceRootMap: Array<{
     domainId: string;
@@ -535,10 +691,24 @@ class OmsWatcher extends EventEmitter<{
   private _domainConfigWatchers: Record<string, OmsDomainConfigWatcher> = {};
 
   private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
-  private _lastBuildExtras: BuildExtras | undefined;
+  private _profileBuildExtras: Partial<Record<BuildProfileId, BuildExtras>> = {};
+  private _profileDependencySnapshots: Record<BuildProfileId, ProfileDependencySnapshot> = {
+    [BuildProfileId.default]: {
+      inferredFiles: [],
+      entryFiles: new Set(),
+    },
+    [BuildProfileId.headless]: {
+      inferredFiles: [],
+      entryFiles: new Set(),
+    },
+  };
+  private _activeBuildRevision: ActiveBuildRevision | undefined;
+  private _profileBuildRequests = new Set<ProfileBuildRequest>();
+  private _closing = false;
+  private _revisionInProgress = false;
+  private _followupRevisionQueued = false;
   private _taskQueue: TaskQueue<{
-    'build': () => BuildResult;
-    'rebuild': () => void;
+    'build': () => void;
     'inlineUUIDs': () => void;
     'build-prod': () => void;
     'update-build-options': () => void;
@@ -603,15 +773,17 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private async _reloadDomainsAndFileWatcher() {
-    this._lastBuildExtras = undefined;
+    this._profileBuildExtras = {};
     this._fileWatcherPhase = FileWatcherPhase.Starting;
     this._fileQueueConsumerScheduled = true;
+    this._fileQueueConsumerProfiles = new Set(allBuildProfileIds);
     this._fileQueue = {};
     await this._closeFileWatcher();
     await this._updateDomains();
     await this._restartFileWatcher();
     await this._collectInitialSourceFiles();
     this._fileQueueConsumerScheduled = false;
+    this._fileQueueConsumerProfiles.clear();
   }
 
   private async _addDomain(domainId: string, domainRoot: string, preferredDomainSourceRoot: string) {
@@ -702,6 +874,9 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private async _queueDomainConfigUpdate(domainId: string) {
+    if (this._closing) {
+      return;
+    }
     await this._taskQueue.queueTask({
       type: 'update-domain-configs',
       exec: async () => {
@@ -883,25 +1058,88 @@ class OmsWatcher extends EventEmitter<{
     return undefined;
   }
 
-  private _queueBuild(reason: string, passive: boolean) {
-    logger.debug(`Will queue build. Reason: ${reason}`);
+  private _requestProfiles(
+    reason: string,
+    passive: boolean,
+    profiles: BuildProfileId[],
+  ): ProfileBuildBatch {
+    this._assertOpen();
+    const requestedProfiles = normalizeBuildProfiles(profiles);
+    const activeRevision = this._activeBuildRevision;
+    const attachToActiveRevision = !passive
+      && !this._followupRevisionQueued
+      && activeRevision !== undefined
+      && requestedProfiles.every((profile) => activeRevision.profileResults.has(profile)
+        && !activeRevision.settledProfiles.has(profile));
+    if (attachToActiveRevision) {
+      requestedProfiles.forEach((profile) => activeRevision.state.activeProfiles.add(profile));
+    }
+    const profileResults = new Map<BuildProfileId, Promise<BuildProfileResult>>();
+    for (const profile of requestedProfiles) {
+      const profileBuild = attachToActiveRevision
+        ? activeRevision.profileResults.get(profile)
+        : this._queueProfileBuild(reason, passive, profile);
+      assert.ok(profileBuild);
+      profileResults.set(profile, profileBuild);
+    }
+    return {
+      waitFor: async (requestedProfiles) => {
+        const profilePromises = [...new Set(requestedProfiles)].map((profile) => {
+          const result = profileResults.get(profile);
+          assert.ok(result, `Profile ${profile} was not requested in this build batch`);
+          return result.then((profileResult) => [profile, profileResult] as const);
+        });
+        const resultsByProfile: BuildProfileResults = {};
+        for (const [profile, result] of await Promise.all(profilePromises)) {
+          resultsByProfile[profile] = result;
+        }
+        return resultsByProfile;
+      },
+    };
+  }
+
+  private _assertOpen() {
+    if (this._closing) {
+      throw new OmsWatcherClosedError();
+    }
+  }
+
+  private _queueProfileBuild(reason: string, passive: boolean, profile: BuildProfileId) {
+    logger.debug(`Will queue ${profile} profile build. Reason: ${reason}`);
     this._fileQueueConsumerScheduled = true;
-    return this._taskQueue.queueTask({
+    this._fileQueueConsumerProfiles.add(profile);
+    const request: ProfileBuildRequest = {
+      profile,
+      passive,
+      result: promiseWithResolvers<BuildProfileResult>(),
+      settled: false,
+    };
+    this._profileBuildRequests.add(request);
+    const taskPromise = this._taskQueue.queueTask({
       type: 'build',
-      mergeArgs: [passive],
+      mergeArgs: [request],
       exec: async (ctx) => {
         ctx.acceptMerge = true;
         const state: BuildState = {
-          fullPassive: passive,
+          hasPassiveRequest: passive,
+          activeProfiles: new Set(passive ? [] : [profile]),
+          requests: [request],
+          profiles: new Set([profile]),
         };
-        const applyMergeArgs = (mergeArgs: readonly unknown[]) => {
-          const [inputPassive] = mergeArgs;
-          if (inputPassive === false) {
-            state.fullPassive = false;
+        const applyRequest = (input: ProfileBuildRequest | undefined) => {
+          if (!input) {
+            return;
+          }
+          state.requests.push(input);
+          state.profiles.add(input.profile);
+          if (input.passive) {
+            state.hasPassiveRequest = true;
+          } else {
+            state.activeProfiles.add(input.profile);
           }
         };
         for (const mergeArgs of ctx.initialMergeArgs) {
-          applyMergeArgs(mergeArgs);
+          applyRequest(mergeArgs[0] as ProfileBuildRequest | undefined);
         }
 
         let interruptedByAbort = false;
@@ -909,7 +1147,7 @@ class OmsWatcher extends EventEmitter<{
           const timerInterruptController = new AbortController();
           let interruptedByMerge = false;
           const onMerge = (mergeArgs: unknown[]) => {
-            applyMergeArgs(mergeArgs);
+            applyRequest(mergeArgs[0] as ProfileBuildRequest | undefined);
             interruptedByMerge = true;
             timerInterruptController.abort();
           };
@@ -944,153 +1182,182 @@ class OmsWatcher extends EventEmitter<{
 
         logger.info(`Build started. Reason: ${reason}`);
         ctx.acceptMerge = false;
-
         return await this._execBuild(state);
       },
     });
+    void taskPromise.catch((err) => {
+      this._rejectProfileBuildRequest(request, err instanceof MergedTaskExecError ? err.cause : err);
+    });
+    return request.result.promise;
   }
 
   private _queuePassiveBuild(reason: string) {
+    if (this._closing) {
+      return;
+    }
     if (this._fileWatcherPhase !== FileWatcherPhase.Ready) {
       return;
     }
-    if (this._fileQueueConsumerScheduled) {
+    if (this._fileQueueConsumerScheduled
+      && allBuildProfileIds.every((profile) => this._fileQueueConsumerProfiles.has(profile))) {
       return;
     }
-    this._queueBuild(reason, true).catch((err) => {
-      if (err instanceof MergedTaskExecError) {
-        logger.debug(`Ignored merged task exec error: ${err}`);
-      } else {
-        logger.error(`Build failed: ${err}`);
+    if (this._revisionInProgress) {
+      this._followupRevisionQueued = true;
+    }
+    this._requestProfiles(reason, true, allBuildProfileIds).waitFor(allBuildProfileIds).catch((err) => {
+      if (err instanceof OmsWatcherClosedError) {
+        return;
       }
+      logger.error(`Build failed: ${err}`);
     });
   }
 
-  private async _execBuild(state: BuildState): Promise<BuildResult> {
-    const startState = {
-      time: Date.now(),
+  private async _execBuild(state: BuildState): Promise<void> {
+    this._followupRevisionQueued = false;
+    this._revisionInProgress = true;
+    const activeBuildRevision: ActiveBuildRevision = {
+      state,
+      profileResults: new Map([...state.profiles].map((profile) => {
+        const request = state.requests.find((request) => request.profile === profile);
+        assert.ok(request, `Missing ${profile} profile request for active revision`);
+        return [profile, request.result.promise];
+      })),
+      settledProfiles: new Set(),
     };
-    await this._ctx.ipc.invoke('build-start', startState);
-
-    const [buildResult, buildExtras] = await this._doExecBuild();
-
-    await this._ctx.ipc.invoke('build-end', {
-      time: Date.now(),
-      startState,
-    });
-
-    const publicBuildResult = await this._onBuildEnd(buildResult, buildExtras);
-    const elapsedMs = Date.now() - startState.time;
-    if (publicBuildResult.ok) {
-      logger.info(`Build done in ${elapsedMs}ms`);
-    } else {
-      logger.error(`Build failed in ${elapsedMs}ms: ${publicBuildResult.error.message}`);
-    }
-    if (state.fullPassive) {
-      this.emit('passive-build-end', { result: publicBuildResult });
-    }
-    return publicBuildResult;
-  }
-
-  private async _doExecBuild() {
-    const prepareStart = Date.now();
-    const entryChanged = await this._executeFileQueue();
-
-    await this._uuidManager.emit();
-    logger.info(`Build prepare done in ${Date.now() - prepareStart}ms`);
-
-    let defaultProfileBuildResult: InternalBuildResult;
-    let headlessBuildResult: InternalBuildResult | undefined;
-    const profileBuildStart = Date.now();
-    const runProfileBuild = async <T extends InternalBuildResult | undefined>(title: string, action: () => Promise<T>) => {
-      const start = Date.now();
-      try {
-        return await action();
-      } finally {
-        logger.info(`${title} done in ${Date.now() - start}ms`);
-      }
-    };
-    if (this._lastBuildExtras && !entryChanged) {
-      const defaultProfileBuildPromise = runProfileBuild(
-        'default profile build',
-        async () => await this._buildRecord.build(),
-      );
-      const headlessBuildRecord = this._headlessBuildRecord;
-      const headlessProfileBuildPromise = headlessBuildRecord
-        ? runProfileBuild('headless profile build', async () => await headlessBuildRecord.build())
-        : undefined;
-      ([
-        defaultProfileBuildResult,
-        headlessBuildResult,
-      ] = await promiseSequential([
-        defaultProfileBuildPromise,
-        headlessProfileBuildPromise,
-      ]));
-    } else {
-      this._lastBuildExtras = undefined;
-
-      const buildExtras: BuildExtras = {
-        entryFiles: new Set(),
+    this._activeBuildRevision = activeBuildRevision;
+    try {
+      const startState = {
+        time: Date.now(),
+        profiles: [...state.profiles],
       };
+      await this._ctx.ipc.invoke('build-start', startState);
 
-      const defaultProfileBuildPromise = runProfileBuild('default profile rebuild', async () => {
-        const profileBuildOptions = { editor: true };
-        const { entries } = await this._makeEntries(defaultProfileId, profileBuildOptions);
-        for (const domain of Object.values(this._domains)) {
-          for (const implicitEntry of domain.getImplicitEntries(defaultProfileId, profileBuildOptions)) {
-            buildExtras.entryFiles.add(implicitEntry);
-          }
+      const profileResults = new Map<BuildProfileId, BuildProfileResult>();
+      const profileBuildStart = Date.now();
+      try {
+        const prepareStart = Date.now();
+        const entryChanged = await this._executeFileQueue();
+        if (entryChanged) {
+          this._profileBuildExtras = {};
         }
-        return this._buildRecord.rebuild({
-          entries: entries,
-          uuidProvider: this._uuidProvider,
-          domains: this._domains,
-          projectRoot: this._projectPath,
-          config: this._config,
-          profileBuildConfig: undefined,
-        });
-      });
+        await this._uuidManager.emit();
+        logger.info(`Build prepare done in ${Date.now() - prepareStart}ms`);
 
-      const headlessBuildRecord = this._headlessBuildRecord;
-      const headlessBuildPromise = headlessBuildRecord
-        ? runProfileBuild('headless profile rebuild', async () => {
-          const profileBuildOptions = { dynamicExports: false };
-          const { entries } = await this._makeEntries(headlessProfileId, profileBuildOptions);
-          for (const domain of Object.values(this._domains)) {
-            for (const implicitEntry of domain.getImplicitEntries(headlessProfileId, profileBuildOptions)) {
-              buildExtras.entryFiles.add(implicitEntry);
+        const profileBuilds: Promise<BuildProfileResult>[] = [];
+        for (const profile of state.profiles) {
+          const profileBuild = (async () => {
+            const result = await this._runProfileBuild(profile);
+            profileResults.set(profile, result);
+            activeBuildRevision.settledProfiles.add(profile);
+            this._resolveProfileRequests(state.requests, profile, result);
+            if (state.hasPassiveRequest && !state.activeProfiles.has(profile)) {
+              this.emit('passive-profile-build-end', { profile, result });
+            }
+            return result;
+          })();
+          profileBuilds.push(profileBuild);
+        }
+        await Promise.all(profileBuilds);
+      } catch (err) {
+        const preparationFailure = makeBuildFailureResult('OMS build preparation failed', err);
+        for (const profile of state.profiles) {
+          profileResults.set(profile, preparationFailure);
+          activeBuildRevision.settledProfiles.add(profile);
+        }
+        this._resolveAllProfileRequests(state.requests, preparationFailure);
+        if (state.hasPassiveRequest) {
+          for (const profile of state.profiles) {
+            if (!state.activeProfiles.has(profile)) {
+              this.emit('passive-profile-build-end', { profile, result: preparationFailure });
             }
           }
-          return await headlessBuildRecord.rebuild({
-            entries: entries,
-            uuidProvider: this._uuidProvider,
-            domains: this._domains,
-            projectRoot: this._projectPath,
-            config: this._config,
-            profileBuildConfig: this._config.profiles.headless?.build,
-          });
-        })
-        : undefined;
+        }
+      }
 
-      ([
-        defaultProfileBuildResult,
-        headlessBuildResult,
-      ] = await promiseSequential([
-        defaultProfileBuildPromise,
-        headlessBuildPromise,
-      ]));
+      await this._ctx.ipc.invoke('build-end', {
+        time: Date.now(),
+        startState,
+      });
+      logger.info(`Profile builds done in ${Date.now() - profileBuildStart}ms`);
 
-      this._lastBuildExtras = buildExtras;
+      const elapsedMs = Date.now() - startState.time;
+      const failureMessages: string[] = [];
+      for (const [profile, result] of profileResults) {
+        if (!result.ok) {
+          failureMessages.push(`${profile}: ${result.error.message}`);
+        }
+      }
+      if (failureMessages.length === 0) {
+        logger.info(`Build done in ${elapsedMs}ms`);
+      } else {
+        logger.error(`Build failed in ${elapsedMs}ms:\n${failureMessages.join('\n')}`);
+      }
+      if (state.hasPassiveRequest && !state.activeProfiles.has(BuildProfileId.default)) {
+        const defaultResult = profileResults.get(BuildProfileId.default);
+        const headlessResult = profileResults.get(BuildProfileId.headless);
+        assert.ok(defaultResult, 'Passive revision is missing the default profile result');
+        assert.ok(headlessResult, 'Passive revision is missing the headless profile result');
+        this.emit('passive-build-end', {
+          profileResults: {
+            default: defaultResult,
+            headless: headlessResult,
+          },
+        });
+      }
+    } finally {
+      if (this._activeBuildRevision === activeBuildRevision) {
+        this._activeBuildRevision = undefined;
+      }
+      this._revisionInProgress = false;
     }
-    logger.info(`Profile builds done in ${Date.now() - profileBuildStart}ms`);
-
-    const mergedBuildResult = headlessBuildResult ? mergeBuildResults(defaultProfileBuildResult, headlessBuildResult) : defaultProfileBuildResult;
-    return [mergedBuildResult, this._lastBuildExtras] as const;
   }
 
-  private async _onBuildEnd(buildResult: InternalBuildResult, extras: BuildExtras): Promise<BuildResult> {
-    this._nBuildEnds++;
+  private async _runProfileBuild(profile: BuildProfileId): Promise<BuildProfileResult> {
+    const start = Date.now();
+    try {
+      switch (profile) {
+      case BuildProfileId.default:
+        return await this._runDefaultProfileBuild();
+      case BuildProfileId.headless:
+        return await this._runHeadlessProfileBuild();
+      default:
+        throw new Error(`Unknown OMS build profile: ${String(profile)}`);
+      }
+    } catch (err) {
+      return makeBuildFailureResult(`${profile} profile build failed`, err);
+    } finally {
+      logger.info(`${profile} profile build done in ${Date.now() - start}ms`);
+    }
+  }
 
+  private async _runDefaultProfileBuild(): Promise<BuildProfileResult> {
+    let extras = this._profileBuildExtras[BuildProfileId.default];
+    let newExtras: BuildExtras | undefined;
+    let buildResult: InternalBuildResult;
+    if (extras) {
+      buildResult = await this._buildRecord.build();
+    } else {
+      extras = {
+        entryFiles: new Set(),
+      };
+      newExtras = extras;
+      const profileBuildOptions = { editor: true };
+      const { entries } = await this._makeEntries(BuildProfileId.default, profileBuildOptions);
+      for (const domain of Object.values(this._domains)) {
+        for (const implicitEntry of domain.getImplicitEntries(BuildProfileId.default, profileBuildOptions)) {
+          extras.entryFiles.add(implicitEntry);
+        }
+      }
+      buildResult = await this._buildRecord.rebuild({
+        entries,
+        uuidProvider: this._uuidProvider,
+        domains: this._domains,
+        projectRoot: this._projectPath,
+        config: this._config,
+        profileBuildConfig: undefined,
+      });
+    }
     if (!buildResult.ok) {
       return {
         ok: false,
@@ -1098,50 +1365,179 @@ class OmsWatcher extends EventEmitter<{
       };
     }
 
-    const affectedFiles: string[] = [];
-    {
-      const mainFile = join(this._projectPath, 'assets/oms.ts');
-      const mainFileContent = await this._renderMainFile();
-      let existingContent = '';
-      try {
-        existingContent = await fs.readFile(mainFile, 'utf8');
-      } catch (err) {
-        void err;
-      }
-      if (existingContent !== mainFileContent) {
-        await fs.outputFile(mainFile, mainFileContent, 'utf8');
-      }
-      affectedFiles.push(mainFile);
+    if (newExtras) {
+      this._profileBuildExtras[BuildProfileId.default] = newExtras;
+    }
+    this._publishProfileDependencies(BuildProfileId.default, buildResult.inferredFiles, extras.entryFiles);
+    const affectedFiles = await this._writeRuntimeLoaderAssets();
+    await this._saveCentralizedUUIDs();
+    return {
+      ok: true,
+      affectedFiles,
+    };
+  }
+
+  private async _runHeadlessProfileBuild(): Promise<BuildProfileResult> {
+    const buildRecord = this._headlessBuildRecord;
+    if (!buildRecord) {
+      this._publishProfileDependencies(BuildProfileId.headless, [], new Set());
+      return {
+        ok: true,
+        affectedFiles: [],
+      };
     }
 
-    logger.debug(`[Build x ${this._nBuildEnds}] Build end, inferred files: %s`, buildResult.inferredFiles);
+    let extras = this._profileBuildExtras[BuildProfileId.headless];
+    let newExtras: BuildExtras | undefined;
+    let buildResult: InternalBuildResult;
+    if (extras) {
+      buildResult = await buildRecord.build();
+    } else {
+      extras = {
+        entryFiles: new Set(),
+      };
+      newExtras = extras;
+      const profileBuildOptions = { dynamicExports: false };
+      const { entries } = await this._makeEntries(BuildProfileId.headless, profileBuildOptions);
+      for (const domain of Object.values(this._domains)) {
+        for (const implicitEntry of domain.getImplicitEntries(BuildProfileId.headless, profileBuildOptions)) {
+          extras.entryFiles.add(implicitEntry);
+        }
+      }
+      buildResult = await buildRecord.rebuild({
+        entries,
+        uuidProvider: this._uuidProvider,
+        domains: this._domains,
+        projectRoot: this._projectPath,
+        config: this._config,
+        profileBuildConfig: this._config.profiles.headless?.build,
+      });
+    }
+    if (!buildResult.ok) {
+      return {
+        ok: false,
+        error: buildResult.error,
+      };
+    }
+
+    if (newExtras) {
+      this._profileBuildExtras[BuildProfileId.headless] = newExtras;
+    }
+    this._publishProfileDependencies(BuildProfileId.headless, buildResult.inferredFiles, extras.entryFiles);
+    return {
+      ok: true,
+      affectedFiles: [],
+    };
+  }
+
+  private _resolveProfileRequests(
+    requests: ProfileBuildRequest[],
+    profile: BuildProfileId,
+    result: BuildProfileResult,
+  ) {
+    for (const request of requests) {
+      if (request.profile !== profile || request.settled) {
+        continue;
+      }
+      request.settled = true;
+      this._profileBuildRequests.delete(request);
+      request.result.resolve(result);
+    }
+  }
+
+  private _resolveAllProfileRequests(requests: ProfileBuildRequest[], result: BuildProfileResult) {
+    for (const request of requests) {
+      if (request.settled) {
+        continue;
+      }
+      request.settled = true;
+      this._profileBuildRequests.delete(request);
+      request.result.resolve(result);
+    }
+  }
+
+  private _rejectProfileBuildRequest(request: ProfileBuildRequest, error: unknown) {
+    if (request.settled) {
+      return;
+    }
+    request.settled = true;
+    this._profileBuildRequests.delete(request);
+    request.result.reject(error);
+  }
+
+  private _rejectProfileBuildRequests(error: unknown) {
+    for (const request of [...this._profileBuildRequests]) {
+      this._rejectProfileBuildRequest(request, error);
+    }
+  }
+
+  private async _writeRuntimeLoaderAssets() {
+    const affectedFiles: string[] = [];
+    const mainFile = join(this._projectPath, 'assets/oms.ts');
+    const mainFileContent = await this._renderMainFile();
+    let existingContent = '';
+    try {
+      existingContent = await fs.readFile(mainFile, 'utf8');
+    } catch (err) {
+      void err;
+    }
+    if (existingContent !== mainFileContent) {
+      await fs.outputFile(mainFile, mainFileContent, 'utf8');
+    }
+    affectedFiles.push(mainFile);
+    return affectedFiles;
+  }
+
+  /**
+   * Publishes a profile's dependencies only after Rollup has successfully written its output.
+   *
+   * Known caveats:
+   * - A newly discovered passive dependency can change after Rollup reads it but before this
+   *   method adds it to Chokidar, so that change can be missed.
+   * - Chokidar does not expose per-path readiness for add(), leaving a smaller activation window
+   *   between add() and the underlying file subscription becoming active.
+   *
+   * We accept these windows so failed writes retain the previous successful snapshot and files
+   * added by output-phase Rollup plugins are included in inferredFiles.
+   */
+  private _publishProfileDependencies(
+    profile: BuildProfileId,
+    inferredFiles: readonly string[],
+    entryFiles: ReadonlySet<string>,
+  ) {
+    this._profileDependencySnapshots[profile] = {
+      inferredFiles: [...inferredFiles],
+      entryFiles: new Set(entryFiles),
+    };
+    const allInferredFiles = new Set(
+      Object.values(this._profileDependencySnapshots).flatMap((snapshot) => [...snapshot.inferredFiles]),
+    );
+    const allEntryFiles = new Set(
+      Object.values(this._profileDependencySnapshots).flatMap((snapshot) => [...snapshot.entryFiles]),
+    );
+
+    logger.debug(`${profile} profile dependencies published: %s`, [...inferredFiles]);
     const passiveWatchedFiles = this._passiveWatchedFiles;
     const watcher = this._fileWatcher;
     assert.ok(watcher, 'OMS file watcher is not started');
     for (const file of passiveWatchedFiles) {
-      if (!buildResult.inferredFiles.includes(file)) {
+      if (!allInferredFiles.has(file) || allEntryFiles.has(file)) {
         logger.debug('Unwatch file: %s', file);
         watcher.unwatch(file);
+        passiveWatchedFiles.delete(file);
       }
     }
-    for (const file of buildResult.inferredFiles) {
+    for (const file of allInferredFiles) {
       if (passiveWatchedFiles.has(file)) {
         continue;
       }
-      if (extras.entryFiles.has(file)) {
+      if (allEntryFiles.has(file)) {
         continue;
       }
       logger.debug('Passive watch file: %s', file);
       watcher.add(file);
       passiveWatchedFiles.add(file);
     }
-
-    await this._saveCentralizedUUIDs();
-
-    return {
-      ok: true,
-      affectedFiles,
-    };
   }
 
   private async _renderMetadataFile(autoRunInfos: AutoRunInfos, exportEntries: Record<string, string>) {
@@ -1190,6 +1586,7 @@ class OmsWatcher extends EventEmitter<{
     const fileQueue = this._fileQueue;
     this._fileQueue = {};
     this._fileQueueConsumerScheduled = false;
+    this._fileQueueConsumerProfiles.clear();
     let entryChanged = false;
     for (const [file, operation] of Object.entries(fileQueue)) {
       if (operation === 'add') {
@@ -1259,15 +1656,6 @@ class OmsWatcher extends EventEmitter<{
   }
 }
 
-async function promiseSequential<T extends readonly unknown[] | []>(promises: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]>; }> {
-  type ResultType = { -readonly [P in keyof T]: Awaited<T[P]>; };
-  const result: ResultType = new Array(promises.length) as ResultType;
-  for (let i = 0; i < promises.length; i++) {
-    result[i] = await promises[i];
-  }
-  return result;
-}
-
 function shouldIgnoreWatchedPath(path: string, stats?: Stats) {
   if (stats?.isFile()) {
     return !shouldWatchFile(path);
@@ -1315,6 +1703,43 @@ async function* walkWatchableFiles(root: string): AsyncGenerator<string> {
 
 interface BuildExtras {
   entryFiles: Set<string>;
+}
+
+interface ProfileDependencySnapshot {
+  inferredFiles: readonly string[];
+  entryFiles: ReadonlySet<string>;
+}
+
+function normalizeBuildProfiles(profiles: BuildProfileId[] | undefined): BuildProfileId[] {
+  const requestedProfiles = [...new Set(profiles ?? allBuildProfileIds)];
+  if (requestedProfiles.length === 0) {
+    throw new Error('OMS build requires at least one profile');
+  }
+  for (const profile of requestedProfiles) {
+    if (!allBuildProfileIds.includes(profile)) {
+      throw new Error(`Unknown OMS build profile: ${String(profile)}`);
+    }
+  }
+  return requestedProfiles;
+}
+
+function makeBuildFailureResult(title: string, error: unknown): BuildProfileResult {
+  if (error instanceof Error) {
+    return {
+      ok: false,
+      error: {
+        message: `${title}: ${error.message}`,
+        stack: error.stack,
+      },
+    };
+  }
+  return {
+    ok: false,
+    error: {
+      message: `${title}: ${String(error)}`,
+      stack: undefined,
+    },
+  };
 }
 
 type AutoRunInfos = Array<{

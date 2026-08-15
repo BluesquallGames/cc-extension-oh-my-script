@@ -16,7 +16,7 @@ const globalScriptRuntime = (() => {
       }
       scriptRuntime = new OmsScriptRuntime({
         label: 'scene',
-        ensureBuild: async () => await requestSelfWorkerMessage('ensure-runtime-build'),
+        ensureBuild: async () => await requestSelfWorkerMessage('ensure-default-profile'),
       });
       scriptRuntime.installGlobalImport();
       return scriptRuntime;

@@ -1,12 +1,12 @@
 import { logger } from '../../logger.js';
-import type { BuildResult } from '../../worker/worker-message-descriptions.js';
+import type { BuildProfileResult } from '@oms/build-core/protocol';
 import { ReloadInterruptError, SceneModuleSystem } from './module-system.js';
 
 type OmsGlobalImport = (moduleId: string) => Promise<unknown>;
 
 export interface OmsScriptRuntimeOptions {
   label: string;
-  ensureBuild?: () => Promise<BuildResult | undefined>;
+  ensureBuild?: () => Promise<BuildProfileResult | undefined>;
 }
 
 export class OmsScriptRuntimeError extends Error {
@@ -132,7 +132,7 @@ export class OmsScriptRuntime {
   }
 
   private _label: string;
-  private _ensureBuild: (() => Promise<BuildResult | undefined>) | undefined;
+  private _ensureBuild: (() => Promise<BuildProfileResult | undefined>) | undefined;
   private _moduleSystem: SceneModuleSystem;
   private _ready = false;
   private _lastError: unknown;

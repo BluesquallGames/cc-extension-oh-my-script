@@ -3,7 +3,17 @@ import { logger } from './logger.js';
 
 export { setLogger } from './logger.js';
 
-export type BuildResult = {
+export enum BuildProfileId {
+  default = 'default',
+  headless = 'headless',
+}
+
+export const allBuildProfileIds: BuildProfileId[] = [
+  BuildProfileId.default,
+  BuildProfileId.headless,
+];
+
+export type BuildProfileResult = {
   ok: true;
   affectedFiles: string[];
 } | {
@@ -14,12 +24,16 @@ export type BuildResult = {
   };
 };
 
+export type BuildProfileResults = Partial<Record<BuildProfileId, BuildProfileResult>>;
+
 export interface ClientInvocationMap {
   'setup': (options: {
     project: string;
   }) => void;
 
-  'rebuild': (opts: BuildOptions) => BuildResult;
+  'rebuild': (opts: RebuildOptions) => BuildProfileResults;
+
+  'clean-rebuild': (opts: RebuildOptions) => BuildProfileResults;
 
   'inline-uuids': () => void;
 
@@ -40,6 +54,10 @@ export interface BuildOptions {
   extensionBuildOptions: ExtensionBuildOptions[];
 }
 
+export interface RebuildOptions {
+  profiles?: BuildProfileId[];
+}
+
 export interface ExtensionBuildOptions {
   name: string;
   path: string;
@@ -48,7 +66,17 @@ export interface ExtensionBuildOptions {
 export type ClientInvocationMethodId = keyof ClientInvocationMap;
 
 export interface PassiveBuildEndInfo {
-  result: BuildResult;
+  profileResults: Record<BuildProfileId, BuildProfileResult>;
+}
+
+export interface PassiveProfileBuildEndInfo {
+  profile: BuildProfileId;
+  result: BuildProfileResult;
+}
+
+export interface BuildStartInfo {
+  time: number;
+  profiles: BuildProfileId[];
 }
 
 export interface ServerInvocationMap {
@@ -58,15 +86,13 @@ export interface ServerInvocationMap {
 
   'passive-build-end': (info: PassiveBuildEndInfo) => void;
 
-  'build-start': (state: {
-    time: number;
-  }) => void;
+  'passive-profile-build-end': (info: PassiveProfileBuildEndInfo) => void;
+
+  'build-start': (state: BuildStartInfo) => void;
 
   'build-end': (state: {
     time: number;
-    startState: {
-      time: number;
-    };
+    startState: BuildStartInfo;
   }) => void;
 }
 
@@ -138,6 +164,9 @@ export class Ipc<
   }
 
   dispatch<T extends InvocationMethodId>(message: InvocationMessage<T>) {
+    if (this._closedError) {
+      return;
+    }
     if (message.direction === InvocationDirection.call) {
       this._handleCall(message as unknown as InvocationCallMessage<TIncomingMessageId>);
     } else if (message.direction === InvocationDirection.returns) {
@@ -154,6 +183,9 @@ export class Ipc<
   }
 
   invoke<T extends TOutgoingMessageId>(methodId: T, args: InvocationParams<T>): Promise<InvocationReturnValue<T>> {
+    if (this._closedError) {
+      return Promise.reject(this._closedError);
+    }
     const invocationId = this._nextInvocationId++;
     const message: InvocationCallMessage<T> = {
       direction: InvocationDirection.call,
@@ -161,25 +193,46 @@ export class Ipc<
       method: methodId,
       args,
     };
-    // logger.debug(`Sending message: ${JSON.stringify(message)}`);
-    this._transport.send(message);
     return new Promise<InvocationReturnValue<T>>((resolve, reject) => {
-      this._invocations.set(invocationId, (response: InvocationResultMessage<TOutgoingMessageId>) => {
-        this._invocations.delete(invocationId);
-        if (response.ok) {
-          resolve(response.returnValue as InvocationReturnValue<T>);
-        } else {
-          reject(new InvocationFailed(response));
-        }
+      this._invocations.set(invocationId, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
       });
+      try {
+        // logger.debug(`Sending message: ${JSON.stringify(message)}`);
+        this._transport.send(message);
+      } catch (error) {
+        this._invocations.delete(invocationId);
+        reject(error);
+      }
     });
   }
 
+  close(reason: string) {
+    if (this._closedError) {
+      return;
+    }
+    const error = new Error(reason);
+    this._closedError = error;
+    for (const invocation of this._invocations.values()) {
+      invocation.reject(error);
+    }
+    this._invocations.clear();
+    this._listeners.clear();
+  }
+
   private _nextInvocationId = 0;
-  private _invocations: Map<number, (response: InvocationResultMessage<TOutgoingMessageId>) => void> = new Map();
+  private _invocations = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: (reason?: unknown) => void;
+  }>();
   private _listeners: Map<TIncomingMessageId, (args: InvocationParams<TIncomingMessageId>) => Serializable | undefined | void | Promise<Serializable | undefined | void>> = new Map();
+  private _closedError: Error | undefined;
 
   private _sendInvocationResult<T extends TIncomingMessageId>(invocationId: number, result: InvocationResultMessage<T>) {
+    if (this._closedError) {
+      return;
+    }
     this._transport.send(result);
   }
 
@@ -239,10 +292,10 @@ export class Ipc<
       return;
     }
     this._invocations.delete(message.invocationId);
-    try {
-      invocation(message as InvocationResultMessage<TOutgoingMessageId>);
-    } catch (error) {
-      logger.error(`Error handling invocation ${message.invocationId}: ${error}`);
+    if (message.ok) {
+      invocation.resolve(message.returnValue);
+    } else {
+      invocation.reject(new InvocationFailed(message as Extract<InvocationResultMessage<TOutgoingMessageId>, { ok: false }>));
     }
   }
 }

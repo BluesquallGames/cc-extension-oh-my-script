@@ -22,7 +22,7 @@ export class TaskQueue<TTaskMap extends {
     exec: (ctx: TaskExecuteContext) => Promise<ReturnType<TTaskMap[TType]>>;
     mergeArgs?: any[];
   }): Promise<ReturnType<TTaskMap[TType]>> {
-    if (this._runningTask && this._runningTask.type === task.type) {
+    if (this._runningTask && !this._runningTask.aborting && this._runningTask.type === task.type) {
       if (this._runningTask.ctx.acceptMerge) {
         logger.debug(`Queuing task [${task.type}] merged with running task ${this._runningTask.id}[${this._runningTask.type}].`);
         this._runningTask.ctx.emit('merge', task.mergeArgs);
@@ -64,14 +64,15 @@ export class TaskQueue<TTaskMap extends {
   }
 
   abort() {
-    this._pendingTasks.length = 0;
-    if (this._runningTask) {
+    const pendingTasks = this._pendingTasks.splice(0);
+    for (const pendingTask of pendingTasks) {
+      pendingTask.execPromiseWithResolvers.reject(new Error('Task queue aborted'));
+    }
+    if (this._runningTask && !this._runningTask.aborting) {
+      this._runningTask.aborting = true;
       this._runningTask.ctx.emit('abort');
     }
-    this._runningTask = undefined;
-    const runningPromise = this._runningPromise;
-    this._runningPromise = undefined;
-    return runningPromise ? runningPromise : Promise.resolve();
+    return this._runningPromise ?? Promise.resolve();
   }
 
   private _nextTaskId = 1;
@@ -87,6 +88,7 @@ export class TaskQueue<TTaskMap extends {
     id: number;
     type: string;
     ctx: TaskExecuteContext;
+    aborting: boolean;
     execPromiseWithResolvers: PromiseWithResolvers<any>;
   };
 
@@ -94,28 +96,27 @@ export class TaskQueue<TTaskMap extends {
 
   private _executeTasks() {
     assert.ok(!this._runningPromise);
-    const tasks = this._pendingTasks.slice();
-    this._pendingTasks.length = 0;
+    const task = this._pendingTasks.shift();
+    assert.ok(task);
     this._runningPromise = (async () => {
-      for (const task of tasks) {
-        const ctx = new TaskExecuteContext(task.initialMergeArgs);
-        this._runningTask = {
-          id: task.id,
-          type: task.type,
-          ctx,
-          execPromiseWithResolvers: task.execPromiseWithResolvers,
-        };
-        try {
-          logger.debug(`Execute task ${task.id}[${task.type}]`);
-          const result = await task.exec(ctx);
-          task.execPromiseWithResolvers.resolve(result);
-          logger.debug(`Task ${task.id}[${task.type}] done`);
-        } catch (err) {
-          logger.debug(`Task ${task.id}[${task.type}] failed: %o`, err);
-          task.execPromiseWithResolvers.reject(err);
-        } finally {
-          this._runningTask = undefined;
-        }
+      const ctx = new TaskExecuteContext(task.initialMergeArgs);
+      this._runningTask = {
+        id: task.id,
+        type: task.type,
+        ctx,
+        aborting: false,
+        execPromiseWithResolvers: task.execPromiseWithResolvers,
+      };
+      try {
+        logger.debug(`Execute task ${task.id}[${task.type}]`);
+        const result = await task.exec(ctx);
+        task.execPromiseWithResolvers.resolve(result);
+        logger.debug(`Task ${task.id}[${task.type}] done`);
+      } catch (err) {
+        logger.debug(`Task ${task.id}[${task.type}] failed: %o`, err);
+        task.execPromiseWithResolvers.reject(err);
+      } finally {
+        this._runningTask = undefined;
       }
     })()
       .catch((err) => {

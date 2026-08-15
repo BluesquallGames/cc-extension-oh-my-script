@@ -1,4 +1,5 @@
 import { selfExtensionName } from './self-info.js';
+import type { BuildProfileId } from '@oms/build-core/protocol';
 
 export enum InnerPackageMessageId {
   buildStart = 'build-start',
@@ -8,11 +9,13 @@ export enum InnerPackageMessageId {
 interface InnerPackageMessageMap {
   [InnerPackageMessageId.buildStart]: [{
     time: number;
+    profiles: BuildProfileId[];
   }];
   [InnerPackageMessageId.buildEnd]: [{
     time: number;
     startState: {
       time: number;
+      profiles: BuildProfileId[];
     };
   }];
 }
