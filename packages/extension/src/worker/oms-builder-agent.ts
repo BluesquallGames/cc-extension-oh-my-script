@@ -115,6 +115,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     logger.debug(`${logTag}Rebuild ok in ${Date.now() - t0}ms, let's handle the result`);
     await this._handleBuildResult(rebuildResult, reason, {
       reloadAssetDbRuntime: opts.reloadAssetDbRuntime ?? true,
+      reloadSceneRuntime: opts.reloadSceneRuntime ?? true,
       profiles: opts.profiles,
     });
     logger.info(`${logTag}Rebuild done in ${Date.now() - t0}ms`);
@@ -641,14 +642,17 @@ export class OmsBuilderAgent extends EventEmitter<{
       return;
     }
     const reloadAssetDbRuntime = opts.reloadAssetDbRuntime ?? true;
-    // 不要在这里 await，因为场景进程可能正在等待 db，而 db 又在等待我们，造成死循环。
-    Editor.Message.request('scene', 'execute-scene-script', {
-      name: selfPackageName,
-      method: 'reloadScripts' satisfies keyof SceneMethods,
-      args: [reason] as Parameters<SceneMethods['reloadScripts']>,
-    }).catch((err) => {
-      logger.error(`execute-scene-script failed: ${err}`);
-    });
+    const reloadSceneRuntime = opts.reloadSceneRuntime ?? true;
+    if (reloadSceneRuntime) {
+      // 不要在这里 await，因为场景进程可能正在等待 db，而 db 又在等待我们，造成死循环。
+      Editor.Message.request('scene', 'execute-scene-script', {
+        name: selfPackageName,
+        method: 'reloadScripts' satisfies keyof SceneMethods,
+        args: [reason] as Parameters<SceneMethods['reloadScripts']>,
+      }).catch((err) => {
+        logger.error(`execute-scene-script failed: ${err}`);
+      });
+    }
     if (reloadAssetDbRuntime) {
       Editor.Message.request('asset-db', 'execute-script', {
         name: selfPackageName,
@@ -697,6 +701,7 @@ interface BuilderRuntime {
 
 interface HandleBuildResultOptions {
   reloadAssetDbRuntime?: boolean;
+  reloadSceneRuntime?: boolean;
   profiles?: BuildProfileId[];
 }
 

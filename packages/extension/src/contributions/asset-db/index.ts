@@ -69,6 +69,7 @@ export const methods = {
         requestSelfWorkerMessage('rebuild', {
           reason: 'asset-db startup build',
           reloadAssetDbRuntime: false,
+          reloadSceneRuntime: false,
           profiles: [BuildProfileId.default],
         }),
         setTimeout(firstBuildTimeoutSec * 1000).then(() => {

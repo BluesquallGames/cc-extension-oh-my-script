@@ -4,7 +4,7 @@ import { OmsScriptRuntime } from './oms-script-runtime.js';
 import { requestSelfWorkerMessage } from '../../utils/request-self.js';
 
 export async function load() {
-  globalScriptRuntime.ensure();
+  await globalScriptRuntime.ensure().ensureReady('scene contribution load');
 }
 
 const globalScriptRuntime = (() => {

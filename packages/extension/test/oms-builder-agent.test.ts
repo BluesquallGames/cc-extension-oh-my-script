@@ -995,27 +995,29 @@ describe('OMS builder agent default profile ensure', () => {
     await builder.agent.close();
   });
 
-  it('can skip asset-db runtime reload for startup rebuild without dropping other side effects', async () => {
+  it('can skip startup runtime reloads without dropping asset refresh', async () => {
     /// @case
     /// 1. asset-db startup asks for a rebuild while it owns the first runtime readiness check.
     /// 2. The build succeeds with one affected file.
     /// @expect
-    /// The builder reloads scene scripts and refreshes affected assets, but does not ask asset-db to reload its runtime.
+    /// The builder refreshes affected assets without starting scene or asset-db runtime reloads outside their startup barriers.
     const builder = setupControlledBuilder();
     const request = vi.mocked(Editor.Message.request);
 
     const rebuildPromise = builder.agent.rebuild({
       reason: 'asset-db startup build',
       reloadAssetDbRuntime: false,
+      reloadSceneRuntime: false,
     });
     await builder.waitForRebuildCalls(1);
     builder.respondToNextRebuild(okBuild(['db://assets/a']));
     await rebuildPromise;
 
-    expect(request).toHaveBeenCalledWith('scene', 'execute-scene-script', expect.objectContaining({
-      method: 'reloadScripts',
-      args: ['asset-db startup build'],
-    }));
+    expect(request.mock.calls.some(([target, method, payload]) => {
+      return target === 'scene'
+        && method === 'execute-scene-script'
+        && (payload as { method?: string } | undefined)?.method === 'reloadScripts';
+    })).toBe(false);
     expect(request).toHaveBeenCalledWith('asset-db', 'refresh-asset', 'db://assets/a');
     expect(request.mock.calls.some(([target, method, payload]) => {
       return target === 'asset-db'

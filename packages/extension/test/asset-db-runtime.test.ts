@@ -256,6 +256,7 @@ describe('asset-db OMS runtime startup', () => {
       args: [{
         reason: 'asset-db startup build',
         reloadAssetDbRuntime: false,
+        reloadSceneRuntime: false,
         profiles: ['default'],
       }],
     });

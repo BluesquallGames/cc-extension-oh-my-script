@@ -14,6 +14,7 @@ function defineWorkerMessage<TSignature extends (...args: any) => any>() {
 export interface RebuildOptions {
   reason?: string;
   reloadAssetDbRuntime?: boolean;
+  reloadSceneRuntime?: boolean;
   profiles?: BuildProfileId[];
 }
 
