@@ -1,0 +1,19 @@
+{
+  "name": "@oms/plugin",
+  "version": "0.0.0",
+  "description": "OMS public plugin API",
+  "type": "module",
+  "files": ["lib"],
+  "exports": "./lib/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit",
+    "prepublishOnly": "node --run build"
+  },
+  "dependencies": {
+    "rollup": "^4.60.1"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}

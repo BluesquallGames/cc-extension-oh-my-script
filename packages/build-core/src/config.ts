@@ -2,29 +2,31 @@ import { platform } from 'node:process';
 import picomatch from 'picomatch';
 import { logger } from './logger.js';
 import { getBarePackageName } from './utils/package-name.js';
+import type { OmsPlugin } from '@oms/plugin';
 
 export interface OmsConfigContext {
   mode: string;
 }
 
 export interface OmsProjectUserConfig {
+  plugins?: readonly OmsPlugin[];
   resolve?: {
     alias?: Record<string, string>;
-    projectPeers?: string[];
+    projectPeers?: readonly string[];
   };
 
   define?: Record<string, unknown>;
   mode?: string;
   envDir?: string;
-  envPrefix?: string | unknown[];
+  envPrefix?: string | readonly unknown[];
 
   profiles?: {
     default?: {
-      exclude?: string[];
+      exclude?: readonly string[];
     };
     headless?: {
-      include?: string[];
-      exclude?: string[];
+      include?: readonly string[];
+      exclude?: readonly string[];
       build?: {
         target?: string;
       };
@@ -33,6 +35,7 @@ export interface OmsProjectUserConfig {
 }
 
 export interface OmsProjectConfig {
+  plugins: readonly OmsPlugin[];
   resolve: {
     alias?: Record<string, string>;
     projectPeers: string[];
@@ -62,13 +65,28 @@ export interface ProfileBuildConfig {
 }
 
 export function normalizeProjectUserConfig(userConfig: OmsProjectUserConfig): OmsProjectConfig {
+  const plugins = [...(userConfig.plugins ?? [])];
+  const supported = new Set(['name', 'enforce', 'buildStart', 'resolveId', 'load']);
+  for (const plugin of plugins) {
+    if (!plugin.name) throw new Error('OMS plugin name must be non-empty');
+    for (const key of Object.keys(plugin)) if (!supported.has(key)) throw new Error(`OMS plugin ${plugin.name}: unsupported plugin option ${key}`);
+    if (plugin.enforce !== undefined && plugin.enforce !== 'pre') throw new Error(`OMS plugin ${plugin.name}: invalid enforce value`);
+    for (const hook of ['buildStart', 'resolveId', 'load'] as const) {
+      if (plugin[hook] !== undefined && typeof plugin[hook] !== 'function') throw new Error(`OMS plugin ${plugin.name}: ${hook} must be a function`);
+    }
+  }
+  plugins.sort((a, b) => Number(b.enforce === 'pre') - Number(a.enforce === 'pre'));
   return {
+    plugins,
     resolve: userConfig.resolve
       ? {
         alias: userConfig.resolve.alias,
         projectPeers: normalizeProjectPeers(userConfig.resolve.projectPeers),
       }
-      : { alias: undefined, projectPeers: [] },
+      : {
+        alias: undefined,
+        projectPeers: [],
+      },
 
     define: normalizeDefine(userConfig.define),
     mode: normalizeMode(userConfig.mode),
@@ -204,7 +222,7 @@ function normalizeUserProfilesConfig(profiles: OmsProjectUserConfig['profiles'])
   };
 }
 
-function normalizeProfileFilter(filter: string[] | undefined) {
+function normalizeProfileFilter(filter: readonly string[] | undefined) {
   if (filter === undefined) {
     return undefined;
   }

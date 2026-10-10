@@ -1,13 +1,14 @@
 import type * as rollup from 'rollup';
+import { join } from 'node:path';
 import rollupPluginCommonJS_ from '@rollup/plugin-commonjs';
 import rollupPluginNodeResolve_ from '@rollup/plugin-node-resolve';
 import rollupPluginBabel_ from '@rollup/plugin-babel';
 import rollupPluginJson_ from '@rollup/plugin-json';
 import rollupPluginAlias from '@rollup/plugin-alias';
 import babelPresetEnv, { type TargetsOptions } from '@babel/preset-env';
-// @ts-expect-error
+// @ts-expect-error Babel's published CJS package does not provide a declaration entry.
 import babelPluginProposalDecorators from '@babel/plugin-proposal-decorators';
-// @ts-expect-error
+// @ts-expect-error Babel's published CJS package does not provide a declaration entry.
 import babelPresetTypescript from '@babel/preset-typescript';
 import { transformCCComponent, type UUIDProvider } from './features/babel-plugin-cc-component.js';
 import { rollupPluginDefine } from './features/rollup-plugin-define.js';
@@ -19,6 +20,8 @@ import type { OmsProjectConfig } from './config.js';
 import type { Domain } from './domain.js';
 import type { ProjectDefineResult } from './env.js';
 import { logger } from './logger.js';
+import type { OmsPlugin, OmsPluginContext } from '@oms/plugin';
+import { rollupPluginAssetUUID } from './features/rollup-plugin-asset-uuid.js';
 
 const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
 const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
@@ -40,7 +43,7 @@ const omsRuntimeCommonJsExtensions = [
 ];
 
 interface OmsRuntimePluginOptions {
-  projectRoot: string | undefined;
+  projectRoot: string;
   config: OmsProjectConfig;
   domains: Record<string, Domain>;
   allowEditorOnlyImports: boolean;
@@ -65,7 +68,19 @@ export function createOmsRuntimePlugins(options: OmsRuntimePluginOptions): rollu
       : {}),
   };
 
+  // Follow Vite's alias/pre/core/normal groups and preserve existing core plugin order.
   return [
+    rollupPluginAlias({
+      entries: options.config.resolve.alias,
+    }),
+
+    ...options.config.plugins.filter((plugin) => plugin.enforce === 'pre').map(adaptOmsPlugin),
+
+    // Recognize the query before domain and format-specific resolvers see the specifier.
+    rollupPluginAssetUUID({
+      assetDirs: [join(options.projectRoot, 'assets')],
+    }),
+
     rollupPluginDomain({
       domains: options.domains,
       allowEditorOnlyImports: options.allowEditorOnlyImports,
@@ -85,10 +100,6 @@ export function createOmsRuntimePlugins(options: OmsRuntimePluginOptions): rollu
       extensions: omsRuntimeCommonJsExtensions,
     }),
 
-    rollupPluginAlias({
-      entries: options.config.resolve.alias,
-    }),
-
     rollupPluginProjectPeerImports({
       projectPeers: options.config.resolve.projectPeers,
       projectRoot: options.projectRoot,
@@ -102,12 +113,40 @@ export function createOmsRuntimePlugins(options: OmsRuntimePluginOptions): rollu
       babelTarget: toBabelEnvTarget(options.target),
     }),
 
+    ...options.config.plugins.filter((plugin) => plugin.enforce === undefined).map(adaptOmsPlugin),
+
     rollupPluginDefine({
       define: options.projectDefine.define,
       watchFiles: options.projectDefine.watchFiles,
       sourcemap: options.sourcemap,
     }),
   ];
+}
+
+/** Narrow the public context while preserving native plugin identity and skipSelf. */
+function adaptOmsPlugin(plugin: OmsPlugin): rollup.Plugin {
+  const adapted: rollup.Plugin = {
+    name: plugin.name,
+  };
+  for (const stage of ['buildStart', 'resolveId', 'load'] as const) {
+    const hook = plugin[stage];
+    if (!hook) continue;
+    Object.assign(adapted, {
+      [stage](this: rollup.PluginContext, ...args: unknown[]) {
+        const context: OmsPluginContext = {
+          addWatchFile: this.addWatchFile.bind(this),
+          resolve: this.resolve.bind(this),
+          error: this.error.bind(this),
+          cache: {
+            get: this.cache.get.bind(this.cache),
+            set: this.cache.set.bind(this.cache),
+          },
+        };
+        return Reflect.apply(hook, context, args);
+      },
+    });
+  }
+  return adapted;
 }
 
 function createOmsRuntimeBabelPlugin({
@@ -121,7 +160,10 @@ function createOmsRuntimeBabelPlugin({
 }) {
   logger.debug(`Babel target: ${JSON.stringify(babelTarget)}`);
   return rollupPluginBabel({
-    extensions: omsRuntimeModuleExtensions,
+    // An empty suffix matches every loaded module, including custom filenames.
+    extensions: [''],
+    // Babel's default filter excludes \0 virtual IDs; their JavaScript also needs target lowering.
+    filter: () => true,
     babelHelpers: 'bundled',
     babelrc: false,
     skipPreflightCheck: true,
@@ -142,9 +184,15 @@ function createOmsRuntimeBabelPlugin({
         modules: false,
         targets: babelTarget,
         include: [
-          decorators ? '@babel/plugin-transform-class-properties' : undefined,
+          // Legacy decorators require class field lowering, which also requires private method/accessor lowering.
+          ...(decorators
+            ? [
+              '@babel/plugin-transform-class-properties',
+              '@babel/plugin-transform-private-methods',
+            ]
+            : []),
           '@babel/plugin-transform-class-static-block',
-        ].filter((p): p is string => !!p),
+        ],
       } satisfies babelPresetEnv.Options],
       [babelPresetTypescript, {
         allowDeclareFields: true,

@@ -41,6 +41,9 @@ importers:
 
   packages/build-core:
     dependencies:
+      '@oms/plugin':
+        specifier: workspace:*
+        version: link:../plugin
       '@babel/core':
         specifier: ^7.28.0
         version: 7.28.0
@@ -232,6 +235,16 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 3.2.4(@types/node@25.6.0)(less@4.6.4)(yaml@2.8.0)
+
+  packages/plugin:
+    dependencies:
+      rollup:
+        specifier: ^4.60.1
+        version: 4.60.1
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
 
   packages/task-queue:
     devDependencies:

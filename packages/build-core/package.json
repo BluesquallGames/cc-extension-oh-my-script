@@ -33,6 +33,7 @@
     "vitest": "catalog:"
   },
   "dependencies": {
+    "@oms/plugin": "workspace:*",
     "@babel/core": "^7.28.0",
     "@babel/plugin-proposal-decorators": "^7.28.0",
     "@babel/preset-env": "^7.28.0",

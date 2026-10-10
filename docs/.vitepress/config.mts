@@ -38,6 +38,7 @@ export default defineConfig({
                 ],
               },
               { text: '模块解析', link: '/module-resolution' },
+              { text: '插件 API', link: '/plugins-api' },
               { text: '模块热更', link: '/hot-reload' },
               { text: 'Headless 模式', link: '/headless-mode' },
             ],

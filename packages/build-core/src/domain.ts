@@ -7,6 +7,7 @@ import { logger } from './logger.js';
 import { domainURLProtocol } from './constants.js';
 import { isOmsConfigFileName, loadOmsConfigModule } from './config-loader.js';
 import { makeOmsExportEntryId } from './utils/entry-id.js';
+import { isPathInside } from './utils/path.js';
 import type { InternalBuildEntry } from './build-record.js';
 import type { OmsConfigContext } from './config.js';
 
@@ -198,7 +199,7 @@ export class Domain {
 
   private _getSourceFileBundles(path: string): Bundle[] {
     const sourceRoots = this.sourceRoots;
-    if (!sourceRoots.some((sourceRoot) => path.startsWith(sourceRoot))) {
+    if (!sourceRoots.some((sourceRoot) => isPathInside(sourceRoot, path))) {
       throw new Error(`Bundle for ${path} not found in domain ${this._id}, root dirs: ${sourceRoots.join(', ')}`);
     }
 

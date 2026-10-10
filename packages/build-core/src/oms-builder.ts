@@ -1,4 +1,4 @@
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import type { Dirent, Stats } from 'node:fs';
 import fs from 'fs-extra';
 import { logger } from './logger.js';
@@ -30,6 +30,7 @@ import type { OmsConfigContext, OmsProjectConfig, ProfileConfig } from './config
 import { BuildRecord, type InternalBuildEntry, type InternalBuildResult } from './build-record.js';
 import { OmsDomainConfigWatcher } from './domain-config-watcher.js';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
+import { isPathInside } from './utils/path.js';
 import { isDeepStrictEqual } from 'node:util';
 
 const mainDomainId = 'main';
@@ -498,6 +499,7 @@ class OmsWatcher extends EventEmitter<{
     this._config = config;
     const treeShake = false;
     const buildRecord = new BuildRecord({
+      projectRoot: projectPath,
       title: `default-build`,
       outDir: defaultProfile.outDir,
       config,
@@ -623,6 +625,7 @@ class OmsWatcher extends EventEmitter<{
     const headless = opts.headless ?? false;
 
     const buildRecord = new BuildRecord({
+      projectRoot: this._projectPath,
       title: `prod-build`,
       outDir,
       sourceMaps: opts.sourceMaps,
@@ -653,7 +656,6 @@ class OmsWatcher extends EventEmitter<{
           entries,
           uuidProvider: this._uuidProvider,
           domains: productionDomains,
-          projectRoot: this._projectPath,
           config,
           profileBuildConfig: headless ? config.profiles.headless?.build : undefined,
         });
@@ -688,6 +690,7 @@ class OmsWatcher extends EventEmitter<{
     domainId: string;
     sourceRoot: string;
   }> = [];
+
   private _domainConfigWatchers: Record<string, OmsDomainConfigWatcher> = {};
 
   private _fileQueue: Record<string, 'add' | 'delete' | 'change'> = {};
@@ -702,6 +705,7 @@ class OmsWatcher extends EventEmitter<{
       entryFiles: new Set(),
     },
   };
+
   private _activeBuildRevision: ActiveBuildRevision | undefined;
   private _profileBuildRequests = new Set<ProfileBuildRequest>();
   private _closing = false;
@@ -718,6 +722,7 @@ class OmsWatcher extends EventEmitter<{
 
   private _createHeadlessBuildRecord(config: OmsProjectConfig) {
     return new BuildRecord({
+      projectRoot: this._projectPath,
       title: `headless-build`,
       outDir: this._headlessProfile.outDir,
       config,
@@ -896,7 +901,14 @@ class OmsWatcher extends EventEmitter<{
     const sourceRoots = this._domainSourceRootMap.map(({ sourceRoot }) => sourceRoot);
     const watcher = this._fileWatcher = chokidar.watch(sourceRoots, {
       ignoreInitial: true,
-      ignored: (path, stats) => shouldIgnoreWatchedPath(path, stats),
+      ignored: (path, stats) => {
+        // Chokidar supplies forward slashes, even on Windows; dependency keys use native separators.
+        // Explicit build dependencies (e.g. asset .meta files) must bypass the source-extension filter.
+        if (this._passiveWatchedFiles.has(normalize(path))) {
+          return false;
+        }
+        return shouldIgnoreWatchedPath(path, stats);
+      },
       persistent: true,
     });
     watcher
@@ -916,6 +928,10 @@ class OmsWatcher extends EventEmitter<{
         logger.debug('Watcher event: %s, Path: %s', event, path);
       })
       .on('add', (path) => {
+        if (this._passiveWatchedFiles.has(path)) {
+          this._queuePassiveBuild('dependency added');
+          return;
+        }
         if (this._queueFileAdd(path)) {
           this._queuePassiveBuild('file added');
         }
@@ -969,9 +985,6 @@ class OmsWatcher extends EventEmitter<{
   }
 
   private _queueFileAdd(path: string) {
-    if (this._passiveWatchedFiles.has(path)) {
-      return false;
-    }
     if (!this._getDomainId(path)) {
       return false;
     }
@@ -1015,7 +1028,7 @@ class OmsWatcher extends EventEmitter<{
       isEditorEntry: boolean;
     }> = [];
     const exportEntries: Record<string, string> = {};
-    for (const [domainId, domain] of Object.entries(domains)) {
+    for (const domain of Object.values(domains)) {
       const domainEntrySpecs = domain.getEntrySpecs(profileId, opts);
       for (const [domainEntrySpecId, domainEntrySpec] of Object.entries(domainEntrySpecs)) {
         if (domainEntrySpecId in entries) {
@@ -1051,7 +1064,7 @@ class OmsWatcher extends EventEmitter<{
 
   private _getDomainId(path: string): string | undefined {
     for (const { domainId, sourceRoot } of this._domainSourceRootMap) {
-      if (path.startsWith(sourceRoot)) {
+      if (isPathInside(sourceRoot, path)) {
         return domainId;
       }
     }
@@ -1353,12 +1366,15 @@ class OmsWatcher extends EventEmitter<{
         entries,
         uuidProvider: this._uuidProvider,
         domains: this._domains,
-        projectRoot: this._projectPath,
         config: this._config,
         profileBuildConfig: undefined,
       });
     }
     if (!buildResult.ok) {
+      this._publishProfileDependencies(BuildProfileId.default, [
+        ...this._profileDependencySnapshots[BuildProfileId.default].inferredFiles,
+        ...(buildResult.inferredFiles ?? []),
+      ], extras.entryFiles);
       return {
         ok: false,
         error: buildResult.error,
@@ -1408,12 +1424,15 @@ class OmsWatcher extends EventEmitter<{
         entries,
         uuidProvider: this._uuidProvider,
         domains: this._domains,
-        projectRoot: this._projectPath,
         config: this._config,
         profileBuildConfig: this._config.profiles.headless?.build,
       });
     }
     if (!buildResult.ok) {
+      this._publishProfileDependencies(BuildProfileId.headless, [
+        ...this._profileDependencySnapshots[BuildProfileId.headless].inferredFiles,
+        ...(buildResult.inferredFiles ?? []),
+      ], extras.entryFiles);
       return {
         ok: false,
         error: buildResult.error,
@@ -1489,16 +1508,11 @@ class OmsWatcher extends EventEmitter<{
   }
 
   /**
-   * Publishes a profile's dependencies only after Rollup has successfully written its output.
+   * Publishes dependencies at profile completion. Successful output replaces the snapshot;
+   * failed compilation retains the successful snapshot plus newly discovered dependencies.
    *
-   * Known caveats:
-   * - A newly discovered passive dependency can change after Rollup reads it but before this
-   *   method adds it to Chokidar, so that change can be missed.
-   * - Chokidar does not expose per-path readiness for add(), leaving a smaller activation window
-   *   between add() and the underlying file subscription becoming active.
-   *
-   * We accept these windows so failed writes retain the previous successful snapshot and files
-   * added by output-phase Rollup plugins are included in inferredFiles.
+   * As before, a dependency can change between its first read and listener registration,
+   * or while watcher.add() activates; Chokidar has no public per-path readiness event.
    */
   private _publishProfileDependencies(
     profile: BuildProfileId,

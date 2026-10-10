@@ -48,6 +48,21 @@ export default {
 };
 ```
 
+### plugins
+
+项目根配置可以注册 `plugins` 数组。`@oms/plugin` 提供 `defineConfig` helper 和 Vite 兼容的源码加载插件子集；构建 hooks 由 Rollup 调度，default/headless 保持各自的构建缓存。
+
+```js
+import { defineConfig } from '@oms/plugin';
+import sourcePlugin from './plugins/source-plugin.js';
+
+export default defineConfig({
+  plugins: [sourcePlugin()],
+});
+```
+
+插件的钩子、顺序、编译依赖和首版范围见[插件 API](./plugins-api)。扩展 domain 配置不注册插件。
+
 ### resolve.alias
 
 `resolve.alias` 用来配置导入别名。适合给项目源码、共享目录或本地包起一个稳定名字。

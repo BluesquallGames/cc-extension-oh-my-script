@@ -5,7 +5,7 @@ import { generateCCEnvModuleSource, type CCEnvParams } from './features/generate
 import type { OmsProjectConfig, ProfileBuildConfig } from './config.js';
 import { logger } from './logger.js';
 import type { Domain } from './domain.js';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import fs from 'fs-extra';
 import { makeOmsEntryFileName } from './utils/entry-id.js';
 import { makeFileSystemAbsoluteImportSpecifier } from './utils/import-specifier.js';
@@ -20,7 +20,6 @@ export type InternalBuildEntry = string | {
 export interface InternalBuildOptions {
   entries: Record<string, InternalBuildEntry>;
   domains: Record<string, Domain>;
-  projectRoot?: string;
   uuidProvider: UUIDProvider | undefined;
   config: OmsProjectConfig;
   profileBuildConfig: ProfileBuildConfig | undefined;
@@ -31,6 +30,7 @@ export type InternalBuildResult = {
   inferredFiles: string[];
 } | {
   ok: false;
+  inferredFiles?: string[];
   error: {
     message: string;
     stack: string | undefined;
@@ -63,6 +63,7 @@ export function mergeBuildResults(a: InternalBuildResult, b: InternalBuildResult
 
 export class BuildRecord {
   constructor(options: {
+    projectRoot: string;
     title: string;
     outDir: string;
     sourceMaps?: boolean | 'inline';
@@ -73,6 +74,7 @@ export class BuildRecord {
     treeShake?: boolean;
     mode?: string;
   }) {
+    this._projectRoot = options.projectRoot;
     this._title = options.title;
     this._outDir = options.outDir;
     this._headless = options.headless;
@@ -97,24 +99,41 @@ export class BuildRecord {
 
   async build(): Promise<InternalBuildResult> {
     logger.debug(`${this._title} Build with options: %o`, this._buildOptions);
+    let result: InternalBuildResult;
     try {
+      if (this._cacheConfig !== this._buildOptions.config) {
+        this._cache = undefined;
+        this._cacheConfig = this._buildOptions.config;
+      }
       const {
         entries,
         ...passthroughBuildOptions
       } = this._buildOptions;
-      const buildResult = await this._doBuild({
+      result = await this._doBuild({
         entries: { ...entries },
         ...passthroughBuildOptions,
       });
-      return buildResult;
     } catch (error) {
       logger.debug(`${this._title} Build failed: %o`, error);
-      return buildFailureResult(this._title, error);
+      result = {
+        ...buildFailureResult(this._title, error),
+        inferredFiles: error && typeof error === 'object' && 'watchFiles' in error && Array.isArray(error.watchFiles)
+          ? error.watchFiles
+          : [],
+      };
     }
+    // Rollup preserves addWatchFile() paths verbatim, including relative paths and mixed separators.
+    // Normalize at the Rollup-to-OMS boundary so inferredFiles contain absolute native paths.
+    return {
+      ...result,
+      inferredFiles: (result.inferredFiles ?? []).map((file) => resolve(file)),
+    };
   }
 
+  private readonly _projectRoot: string;
   private _title: string;
   private _cache: rollup.RollupCache | undefined;
+  private _cacheConfig: OmsProjectConfig | undefined;
   private _emittedFiles = new Set<string>();
   private _outDir: string;
   private _headless: boolean;
@@ -137,14 +156,10 @@ export class BuildRecord {
       logger.debug(`${this._title} No entry found, skip build`);
       this._cache = undefined;
       await this._reconcileEmittedFiles(new Set());
-      return {
-        ok: true,
-        inferredFiles: [],
-      };
+      return { ok: true, inferredFiles: [] };
     }
 
-    const mainPart = await this._doBuildUnchecked(options);
-    return mainPart;
+    return await this._doBuildUnchecked(options);
   }
 
   private async _doBuildUnchecked(options: InternalBuildOptions): Promise<InternalBuildResult> {
@@ -187,7 +202,7 @@ export class BuildRecord {
 
     const projectDefine = await createProjectDefine({
       config: options.config,
-      projectRoot: options.projectRoot,
+      projectRoot: this._projectRoot,
       mode: this._mode,
     });
     const projectDefineSignature = JSON.stringify(projectDefine.define);
@@ -230,7 +245,7 @@ export class BuildRecord {
       {
         name: 'oms:load-entry-modules',
 
-        resolveId(id, parent, info) {
+        resolveId(id, _parent, info) {
           if (info.isEntry && id.startsWith(ENTRY_MODULE_PREFIX)) {
             return id;
           }
@@ -256,8 +271,8 @@ export class BuildRecord {
       }),
 
       ...createOmsRuntimePlugins({
-        projectRoot: options.projectRoot,
-        config: this._buildOptions.config,
+        projectRoot: this._projectRoot,
+        config: options.config,
         domains: options.domains,
         allowEditorOnlyImports: this._mode !== 'production',
         projectDefine,
@@ -272,7 +287,7 @@ export class BuildRecord {
       {
         name: 'oms:perf-watch',
 
-        transform: (code, id) => {
+        transform: (_code, id) => {
           logger.debug(`Transforming ${id}`);
         },
       },
@@ -282,7 +297,7 @@ export class BuildRecord {
     const rollupBuild = await rollup.rollup({
       cache: this._cache,
       input: rollupEntries,
-      external(source, importer, isResolved) {
+      external(source, _importer, _isResolved) {
         if (externals.includes(source)) {
           return true;
         }
@@ -298,54 +313,56 @@ export class BuildRecord {
           logger.debug(`${this._title} Rollup warning [${warning.code}]: ${message}`);
           return;
         }
-        logger.warn(`${this._title} Rollup warning${warning.code ? ` [${warning.code}]` : ''}: ${message}`);
+        logger.warn(`${this._title} Rollup warning${warning.plugin ? ` (${warning.plugin})` : ''}${warning.code ? ` [${warning.code}]` : ''}: ${message}`);
       },
       perf: true,
       treeshake: this._treeShake,
     });
-    logger.info(`${this._title} Rollup build done in ${Date.now() - rollupStart}ms`);
+    try {
+      logger.info(`${this._title} Rollup build done in ${Date.now() - rollupStart}ms`);
 
-    this._cache = rollupBuild.cache;
+      const outputPlugins: rollup.Plugin[] = [
+        ...(this._minify ? [rollupPluginMinify()] : []),
+      ];
 
-    const outputPlugins: rollup.Plugin[] = [
-      ...(this._minify ? [rollupPluginMinify()] : []),
-    ];
+      const preserveModules = !!this._headless;
+      const outputOptions: rollup.OutputOptions = {
+        dir: join(this._outDir),
+        format: this._headless ? 'es' : 'systemjs',
+        entryFileNames: (chunkInfo) => `${makeOmsEntryFileName(chunkInfo.name)}.js`,
+        chunkFileNames: '_chunks/[name]-[hash].js',
+        assetFileNames: '_assets/[name]-[hash][extname]',
+        sourcemap: this._sourceMaps,
+        plugins: outputPlugins,
+        // onlyExplicitManualChunks: true,
+        manualChunks: preserveModules
+          ? undefined
+          : (id, _meta) => {
+            if (id === 'cc/env') {
+              return 'cc-env';
+            }
+            return null;
+          },
+        preserveModules: !!this._headless,
+      };
 
-    const preserveModules = !!this._headless;
-    const outputOptions: rollup.OutputOptions = {
-      dir: join(this._outDir),
-      format: this._headless ? 'es' : 'systemjs',
-      entryFileNames: (chunkInfo) => `${makeOmsEntryFileName(chunkInfo.name)}.js`,
-      chunkFileNames: '_chunks/[name]-[hash].js',
-      assetFileNames: '_assets/[name]-[hash][extname]',
-      sourcemap: this._sourceMaps,
-      plugins: outputPlugins,
-      // onlyExplicitManualChunks: true,
-      manualChunks: preserveModules
-        ? undefined
-        : (id, _meta) => {
-          if (id === 'cc/env') {
-            return 'cc-env';
-          }
-          return null;
-        },
-      preserveModules: !!this._headless,
-    };
-
-    const writeStart = Date.now();
-    const writeResult = await rollupBuild.write(outputOptions);
-    const emittedFiles = new Set(writeResult.output.map((output) => output.fileName));
-    await this._reconcileEmittedFiles(emittedFiles);
-    const outputSummary = await summarizeOutputDir(this._outDir);
-    logger.info(`${this._title} Rollup write done in ${Date.now() - writeStart}ms (${outputSummary.files} files, ${formatBytes(outputSummary.bytes)})`);
-    if (rollupBuild.getTimings) {
-      logger.debug(`${this._title} Rollup timings: %o`, rollupBuild.getTimings());
+      const writeStart = Date.now();
+      const writeResult = await rollupBuild.write(outputOptions);
+      const emittedFiles = new Set(writeResult.output.map((output) => output.fileName));
+      await this._reconcileEmittedFiles(emittedFiles);
+      const outputSummary = await summarizeOutputDir(this._outDir);
+      logger.info(`${this._title} Rollup write done in ${Date.now() - writeStart}ms (${outputSummary.files} files, ${formatBytes(outputSummary.bytes)})`);
+      if (rollupBuild.getTimings) {
+        logger.debug(`${this._title} Rollup timings: %o`, rollupBuild.getTimings());
+      }
+      this._cache = rollupBuild.cache;
+      return { ok: true, inferredFiles: rollupBuild.watchFiles };
+    } catch (error) {
+      logger.debug(`${this._title} Build failed: %o`, error);
+      return { ...buildFailureResult(this._title, error), inferredFiles: rollupBuild.watchFiles };
+    } finally {
+      await rollupBuild.close();
     }
-
-    return {
-      ok: true,
-      inferredFiles: rollupBuild.watchFiles,
-    };
   }
 
   private async _reconcileEmittedFiles(emittedFiles: Set<string>) {

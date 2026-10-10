@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import fs from 'fs-extra';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { Domain, type DomainProfile, readOmsDomainConfig } from '../src/domain.js';
 import { UUIDManager } from '../src/uuid-manager.js';
@@ -232,6 +232,29 @@ it('uses exportPackageName as the public OMS package name', async () => {
   expect(entrySpecs['some-plugin:.']).toBeUndefined();
 });
 
+it('rejects source files in a sibling directory sharing the source root prefix', async () => {
+  /// @case
+  /// A domain accepts files under src, but a sibling src-extra directory shares its path prefix.
+  /// @expect
+  /// Adding a file under src succeeds; adding a sibling file fails before it enters any bundle.
+  const domainRoot = await makeTempDir();
+  const source = join(domainRoot, 'src/constants.ts');
+  const sibling = join(domainRoot, 'src-extra/constants.ts');
+  await fs.outputFile(source, 'export const value = 1;');
+  await fs.outputFile(sibling, 'export const value = 2;');
+  const domain = new Domain(
+    'test-domain',
+    domainRoot,
+    [{ rootDir: 'src' }],
+    {},
+    new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
+    [testDomainProfile],
+  );
+
+  await expect(domain.addSourceFile(source, true)).resolves.toBe(false);
+  await expect(domain.addSourceFile(sibling, true)).rejects.toThrow('not found in domain');
+});
+
 it('normalizes project peer import package names from project config', () => {
   const config = normalizeProjectUserConfig({
     resolve: {
@@ -443,6 +466,7 @@ it('maps colon export entry ids into portable export file names', () => {
 it('writes colon export entry ids under exports/domain', async () => {
   const outDir = join(await makeTempDir(), 'out');
   const buildRecord = new BuildRecord({
+    projectRoot: dirname(outDir),
     title: 'test-build',
     outDir,
     sourceMaps: false,
@@ -475,6 +499,7 @@ it('removes obsolete JavaScript and sourcemap outputs across rebuilds', async ()
   const outDir = join(await makeTempDir(), 'out');
   const config = normalizeProjectUserConfig({});
   const buildRecord = new BuildRecord({
+    projectRoot: dirname(outDir),
     title: 'test-build',
     outDir,
     sourceMaps: true,
@@ -535,6 +560,7 @@ it('resolves npm-style OMS import specifiers in bundle sources', async () => {
     'friendly-plugin',
   );
   const buildRecord = new BuildRecord({
+    projectRoot: dirname(outDir),
     title: 'test-build',
     outDir,
     sourceMaps: false,
@@ -583,6 +609,7 @@ it('builds public export entries without adding a synthetic default export', asy
     [testDomainProfile],
   );
   const buildRecord = new BuildRecord({
+    projectRoot: dirname(outDir),
     title: 'test-build',
     outDir,
     sourceMaps: false,
@@ -623,6 +650,7 @@ it('preserves public export entry default exports', async () => {
     [testDomainProfile],
   );
   const buildRecord = new BuildRecord({
+    projectRoot: dirname(outDir),
     title: 'test-build',
     outDir,
     sourceMaps: false,
@@ -657,6 +685,7 @@ it('reports the original Rollup load error instead of wrapping it as unexpected'
     },
   });
   const buildRecord = new BuildRecord({
+    projectRoot: dirname(outDir),
     title: 'test-build',
     outDir,
     sourceMaps: false,
@@ -684,8 +713,13 @@ it('reports the original Rollup load error instead of wrapping it as unexpected'
 });
 
 it('reports syntax errors from entry source without wrapping them as unexpected', async () => {
+  /// @case
+  /// An in-memory entry contains invalid JavaScript and is parsed by the same Babel stage as other loaded modules.
+  /// @expect
+  /// The build reports the entry, original syntax error and offending source without replacing them with a generic error.
   const outDir = join(await makeTempDir(), 'out');
   const buildRecord = new BuildRecord({
+    projectRoot: dirname(outDir),
     title: 'test-build',
     outDir,
     sourceMaps: false,
@@ -706,10 +740,11 @@ it('reports syntax errors from entry source without wrapping them as unexpected'
 
   expect(result.ok).toBe(false);
   if (!result.ok) {
-    expect(result.error.message).toContain('test-build failed: oms-entry');
+    expect(result.error.message).toContain('test-build failed:');
+    expect(result.error.message).toContain('oms-entry');
     expect(result.error.message).toContain('Unexpected token');
-    expect(result.error.stack).toContain('RollupError');
-    expect(result.error.stack).toContain('Caused by:');
+    expect(result.error.message).toContain('export const = ;');
+    expect(result.error.stack).toContain('SyntaxError');
     expect(result.error.message).not.toContain('Unexpected build error');
   }
 });

@@ -11,7 +11,7 @@ export function rollupPluginProjectPeerImports({
   projectRoot,
 }: {
   projectPeers: string[];
-  projectRoot: string | undefined;
+  projectRoot: string;
 }): Plugin {
   const projectPeerSet = new Set(projectPeers);
 
@@ -23,10 +23,6 @@ export function rollupPluginProjectPeerImports({
         return null;
       }
       const importerText = importer ?? '<entry>';
-      if (!projectRoot) {
-        this.error(`OMS peer import ${source} from ${importerText} requires a project root`);
-      }
-
       const projectPeerSource = source.slice(OMS_PEER_IMPORT_PREFIX.length);
       const packageName = getBarePackageName(projectPeerSource);
       if (!packageName) {

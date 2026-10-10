@@ -1,5 +1,10 @@
 /// <reference types="node" />
 
+declare module '*?uuid' {
+  const uuid: string;
+  export default uuid;
+}
+
 interface OmsConfigContext {
   mode: string;
 }

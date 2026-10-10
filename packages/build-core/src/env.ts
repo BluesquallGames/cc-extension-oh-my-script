@@ -11,7 +11,7 @@ export interface ProjectDefineResult {
 
 export async function createProjectDefine(options: {
   config: OmsProjectConfig;
-  projectRoot: string | undefined;
+  projectRoot: string;
   mode?: string;
 }): Promise<ProjectDefineResult> {
   const { config, projectRoot } = options;
@@ -60,14 +60,12 @@ export async function createProjectDefine(options: {
 }
 
 async function loadProjectEnv(options: {
-  projectRoot: string | undefined;
+  projectRoot: string;
   envDir: string | undefined;
   mode: string;
   prefixes: string[];
 }) {
-  const files = options.projectRoot
-    ? getProjectEnvFiles(options.projectRoot, options.envDir, options.mode)
-    : [];
+  const files = getProjectEnvFiles(options.projectRoot, options.envDir, options.mode);
   const parsed: Record<string, string> = {};
   for (const file of files) {
     if (!(await fs.pathExists(file))) {
