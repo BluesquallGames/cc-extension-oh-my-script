@@ -968,6 +968,12 @@ class OmsWatcher extends EventEmitter<{
       })
       .on('unlink', (path) => {
         if (this._passiveWatchedFiles.has(path)) {
+          // Re-arm deleted inode watches after Chokidar finishes closing the old path.
+          queueMicrotask(() => {
+            if (!watcher.closed && this._passiveWatchedFiles.has(path)) {
+              watcher.add(path);
+            }
+          });
           this._queuePassiveBuild('file deleted');
           return;
         }
