@@ -1,8 +1,10 @@
 import process from 'node:process';
-import { Ipc,
+import {
+  Ipc,
   type InvocationMessage,
   type ClientInvocationMethodId,
-  type ServerInvocationMethodId } from './protocol.js';
+  type ServerInvocationMethodId,
+} from './protocol.js';
 import { registerMessageHandlers } from './message-handlers.js';
 import { logger } from './logger.js';
 import { ServerContext } from './server-context.js';

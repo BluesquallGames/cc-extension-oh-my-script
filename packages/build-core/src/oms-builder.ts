@@ -22,10 +22,12 @@ import {
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
-import { Domain,
+import {
+  Domain,
   readOmsDomainConfig,
   type DomainProfile,
-  type ProfileBuildOptions } from './domain.js';
+  type ProfileBuildOptions,
+} from './domain.js';
 import { MergedTaskExecError, TaskQueue } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';

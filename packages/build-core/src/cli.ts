@@ -1,10 +1,12 @@
 import process from 'node:process';
 import { logger } from './logger.js';
 import { OmsBuilder } from './oms-builder.js';
-import { Ipc,
+import {
+  Ipc,
   type ServerInvocationMethodId,
   type ClientInvocationMethodId,
-  InvocationDirection } from './protocol.js';
+  InvocationDirection,
+} from './protocol.js';
 
 const ipc = new Ipc<ServerInvocationMethodId, ClientInvocationMethodId>({
   send(message) {

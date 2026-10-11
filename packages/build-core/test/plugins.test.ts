@@ -6,9 +6,11 @@ import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { OmsBuilder } from '../src/oms-builder.js';
 import { ServerContext } from '../src/server-context.js';
-import type { PassiveBuildEndInfo,
+import type {
+  PassiveBuildEndInfo,
   ClientInvocationMethodId,
-  ServerInvocationMethodId } from '../src/protocol.js';
+  ServerInvocationMethodId,
+} from '../src/protocol.js';
 import { Ipc, InvocationDirection } from '../src/protocol.js';
 import { build as buildVite } from 'vite';
 
