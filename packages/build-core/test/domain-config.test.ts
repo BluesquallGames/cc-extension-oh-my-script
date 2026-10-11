@@ -27,15 +27,19 @@ afterEach(async () => {
   tempDirs.length = 0;
 });
 
-it('loads object, synchronous function, and asynchronous function configs with the supplied context', async () => {
+it(('loads object, synchronous function, and asynchronous function configs '
+  + 'with the supplied context'), async () => {
   /// @case
-  /// Three domains export an object, a synchronous config function, and an asynchronous config function; function configs read a custom mode string.
+  /// Three domains export an object, a synchronous config function, and an asynchronous config
+  /// function; function configs read a custom mode string.
   /// @expect
-  /// Every export form remains compatible and both function forms receive the exact caller-provided mode without enum coercion or fallback.
+  /// Every export form remains compatible and both function forms receive the exact caller-provided
+  /// mode without enum coercion or fallback.
   const objectDomain = await makeTempDir();
   const syncDomain = await makeTempDir();
   const asyncDomain = await makeTempDir();
-  await fs.outputFile(join(objectDomain, 'oms.config.mjs'), 'export default { exports: { object: "./object.ts" } };');
+  await fs.outputFile(join(objectDomain, 'oms.config.mjs'),
+    'export default { exports: { object: "./object.ts" } };');
   await fs.outputFile(join(syncDomain, 'oms.config.mjs'), [
     'export default ({ mode }) => ({',
     '  exports: { sync: `./${mode}.ts` },',
@@ -92,16 +96,15 @@ it('reads legacy package.json OMS partitions but ignores package.json exports', 
   });
 });
 
-it('lets oms.config.js provide exports and override legacy package.json partitions', async () => {
+it(('lets oms.config.js provide exports and override legacy package.json '
+  + 'partitions'), async () => {
   const domainRoot = await makeTempDir();
   await fs.outputJson(join(domainRoot, 'package.json'), {
     exports: {
       './shared': './oms/src/package-shared.ts',
     },
     oms: {
-      partitions: [
-        { rootDir: 'legacy-src' },
-      ],
+      partitions: [{ rootDir: 'legacy-src' }],
     },
   });
   await fs.outputFile(join(domainRoot, 'oms.config.mjs'), [
@@ -120,9 +123,7 @@ it('lets oms.config.js provide exports and override legacy package.json partitio
   });
 
   expect(config).toEqual({
-    partitions: [
-      { rootDir: 'domain-src' },
-    ],
+    partitions: [{ rootDir: 'domain-src' }],
     exports: {
       shared: 'domain-src/config-shared.ts',
       fresh: 'domain-src/fresh.ts',
@@ -148,7 +149,7 @@ it('normalizes npm-style oms.config.js export keys for package-like imports', as
 
   expect(config.exports).toEqual({
     '.': 'oms/src/index.ts',
-    abc: 'oms/src/abc.ts',
+    'abc': 'oms/src/abc.ts',
   });
 
   const domain = new Domain(
@@ -198,7 +199,7 @@ it('uses exportPackageName as the public OMS package name', async () => {
     ],
     exports: {
       '.': 'oms/src/index.ts',
-      abc: 'oms/src/abc.ts',
+      'abc': 'oms/src/abc.ts',
     },
   });
 
@@ -258,7 +259,13 @@ it('rejects source files in a sibling directory sharing the source root prefix',
 it('normalizes project peer import package names from project config', () => {
   const config = normalizeProjectUserConfig({
     resolve: {
-      projectPeers: ['peer-pkg', '@scope/shared', 'peer-pkg', './invalid', '@scope/shared/runtime'],
+      projectPeers: [
+        'peer-pkg',
+        '@scope/shared',
+        'peer-pkg',
+        './invalid',
+        '@scope/shared/runtime',
+      ],
     },
   });
 
@@ -273,11 +280,18 @@ it('normalizes project define and env options', () => {
   /// 1. A project config declares Vite-like define values and env loading options.
   /// 2. The env prefix includes a duplicate, an empty prefix, and a non-string value.
   /// @expect
-  /// Define values are converted to JavaScript expressions and env options keep only usable prefixes.
+  /// Define values are converted to JavaScript expressions and env options keep only usable
+  /// prefixes.
   const config = normalizeProjectUserConfig({
     mode: 'staging',
     envDir: 'config-env',
-    envPrefix: ['OMS_', 'PUBLIC_', 'OMS_', '', 1],
+    envPrefix: [
+      'OMS_',
+      'PUBLIC_',
+      'OMS_',
+      '',
+      1,
+    ],
     define: {
       __OMS_STRING__: JSON.stringify('value'),
       __OMS_BOOL__: true,
@@ -297,12 +311,15 @@ it('normalizes project define and env options', () => {
   });
 });
 
-it('normalizes default and headless profiles without accepting the legacy top-level headless option', () => {
+it(('normalizes default and headless profiles without accepting the legacy '
+  + 'top-level headless option'), () => {
   /// @case
-  /// 1. A project config declares a default exclusion, an unsupported default include, and an explicitly empty headless include.
+  /// 1. A project config declares a default exclusion, an unsupported default include, and an
+  /// explicitly empty headless include.
   /// 2. A second config uses only the removed top-level headless option.
   /// @expect
-  /// The normalized profiles preserve the new filtering semantics, keep default.include undefined, and do not enable legacy headless.
+  /// The normalized profiles preserve the new filtering semantics, keep default.include undefined,
+  /// and do not enable legacy headless.
   const config = normalizeProjectUserConfig({
     profiles: {
       default: {
@@ -347,7 +364,7 @@ it('creates public export entry specs for __oms_import__', async () => {
     [{ rootDir: 'oms/src' }],
     {
       '.': 'oms/src/index.ts',
-      a: 'oms/src/abc.ts',
+      'a': 'oms/src/abc.ts',
     },
     new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
     [testDomainProfile],
@@ -362,13 +379,16 @@ it('creates public export entry specs for __oms_import__', async () => {
   });
 });
 
-it('uses arbitrary profile descriptors and selects editor entries per build request', async () => {
+it(('uses arbitrary profile descriptors and selects editor entries per '
+  + 'build request'), async () => {
   /// @case
   /// 1. A domain registers profiles whose ids and entry stems are unrelated to default or headless.
-  /// 2. The same profile is requested once without editor entries and once with its full editor overlay.
+  /// 2. The same profile is requested once without editor entries and once with its full editor
+  /// overlay.
   /// 3. Dynamic exports are requested with undefined, true, and false.
   /// @expect
-  /// Primary source matching uses only each descriptor, editor overlays restore unmatched and editor-only components, and dynamic exports follow the explicit switch.
+  /// Primary source matching uses only each descriptor, editor overlays restore unmatched and
+  /// editor-only components, and dynamic exports follow the explicit switch.
   const domainRoot = await makeTempDir();
   const profile = {
     id: 'server',
@@ -410,26 +430,39 @@ it('uses arbitrary profile descriptors and selects editor entries per build requ
   }
 
   const runtimeEntries = domain.getEntrySpecs(profile.id);
-  expect(runtimeEntries['bundle-arbitrary.server']?.source).toEqual(expect.stringContaining(files.runtimeIndex.replace(/\\/g, '/')));
-  expect(runtimeEntries['bundle-arbitrary.server']?.source).toEqual(expect.stringContaining(files.runtimeComponent.replace(/\\/g, '/')));
-  expect(runtimeEntries['bundle-arbitrary.server']?.source).not.toEqual(expect.stringContaining(files.excludedComponent.replace(/\\/g, '/')));
+  expect(runtimeEntries['bundle-arbitrary.server']?.source).toEqual(expect
+    .stringContaining(files.runtimeIndex.replace(/\\/g, '/')));
+  expect(runtimeEntries['bundle-arbitrary.server']?.source).toEqual(expect
+    .stringContaining(files.runtimeComponent.replace(/\\/g, '/')));
+  expect(runtimeEntries['bundle-arbitrary.server']?.source).not.toEqual(expect
+    .stringContaining(files.excludedComponent.replace(/\\/g, '/')));
   expect(runtimeEntries['bundle-arbitrary.server.editor']).toBeUndefined();
   expect(runtimeEntries['arbitrary:.']?.exportId).toBe('arbitrary:.');
 
   const editorEntries = domain.getEntrySpecs(profile.id, { editor: true, dynamicExports: true });
-  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.editorIndex.replace(/\\/g, '/')));
-  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.editorComponent.replace(/\\/g, '/')));
-  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.excludedComponent.replace(/\\/g, '/')));
-  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect.stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
-  expect(editorEntries['bundle-arbitrary.server.editor']?.source).not.toEqual(expect.stringContaining(files.runtimeComponent.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect
+    .stringContaining(files.editorIndex.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect
+    .stringContaining(files.editorComponent.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect
+    .stringContaining(files.excludedComponent.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).toEqual(expect
+    .stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
+  expect(editorEntries['bundle-arbitrary.server.editor']?.source).not.toEqual(expect
+    .stringContaining(files.runtimeComponent.replace(/\\/g, '/')));
   expect(editorEntries['arbitrary:.']?.exportId).toBe('arbitrary:.');
   expect(domain.getImplicitEntries(profile.id)).not.toContain(files.editorComponent);
   expect(domain.getImplicitEntries(profile.id, { editor: true })).toContain(files.editorComponent);
-  const clientEditorEntry = domain.getEntrySpecs(clientProfile.id, { editor: true })['bundle-arbitrary.client.editor']?.source;
-  expect(clientEditorEntry).toEqual(expect.stringContaining(files.runtimeComponent.replace(/\\/g, '/')));
-  expect(clientEditorEntry).toEqual(expect.stringContaining(files.editorComponent.replace(/\\/g, '/')));
-  expect(clientEditorEntry).toEqual(expect.stringContaining(files.clientEditorComponent.replace(/\\/g, '/')));
-  expect(clientEditorEntry).not.toEqual(expect.stringContaining(files.excludedComponent.replace(/\\/g, '/')));
+  const clientEditorEntry = domain.getEntrySpecs(clientProfile.id, { editor: true })[
+    'bundle-arbitrary.client.editor']?.source;
+  expect(clientEditorEntry).toEqual(expect.stringContaining(files.runtimeComponent
+    .replace(/\\/g, '/')));
+  expect(clientEditorEntry).toEqual(expect.stringContaining(files.editorComponent
+    .replace(/\\/g, '/')));
+  expect(clientEditorEntry).toEqual(expect.stringContaining(files.clientEditorComponent
+    .replace(/\\/g, '/')));
+  expect(clientEditorEntry).not.toEqual(expect.stringContaining(files.excludedComponent
+    .replace(/\\/g, '/')));
 
   const entriesWithoutDynamicExports = domain.getEntrySpecs(profile.id, { dynamicExports: false });
   expect(entriesWithoutDynamicExports['arbitrary:.']).toBeUndefined();
@@ -438,9 +471,11 @@ it('uses arbitrary profile descriptors and selects editor entries per build requ
 it('emits dynamic exports independently from profile registration', async () => {
   /// @case
   /// 1. A domain registers one component profile and exposes a dynamic export.
-  /// 2. A build requests a different profile id with dynamic exports omitted, enabled, and disabled.
+  /// 2. A build requests a different profile id with dynamic exports omitted, enabled, and
+  /// disabled.
   /// @expect
-  /// The unknown profile contributes no component bundle, while dynamic exports are emitted unless explicitly disabled.
+  /// The unknown profile contributes no component bundle, while dynamic exports are emitted unless
+  /// explicitly disabled.
   const domainRoot = await makeTempDir();
   const domain = new Domain(
     'extension',
@@ -454,8 +489,10 @@ it('emits dynamic exports independently from profile registration', async () => 
   const defaultEntries = domain.getEntrySpecs('unregistered');
   expect(defaultEntries['bundle-extension']).toBeUndefined();
   expect(defaultEntries['extension:.']?.exportId).toBe('extension:.');
-  expect(domain.getEntrySpecs('unregistered', { dynamicExports: true })['extension:.']?.exportId).toBe('extension:.');
-  expect(domain.getEntrySpecs('unregistered', { dynamicExports: false })['extension:.']).toBeUndefined();
+  expect(domain.getEntrySpecs('unregistered', { dynamicExports: true })['extension:.']
+    ?.exportId).toBe('extension:.');
+  expect(domain.getEntrySpecs('unregistered', { dynamicExports: false })['extension:.'])
+    .toBeUndefined();
 });
 
 it('maps colon export entry ids into portable export file names', () => {
@@ -495,7 +532,8 @@ it('removes obsolete JavaScript and sourcemap outputs across rebuilds', async ()
   /// 1. A build with external sourcemaps emits a first entry.
   /// 2. A non-empty rebuild replaces it with a second entry, followed by an empty rebuild.
   /// @expect
-  /// Every JavaScript file and external sourcemap owned by the prior build is removed after it becomes obsolete.
+  /// Every JavaScript file and external sourcemap owned by the prior build is removed after it
+  /// becomes obsolete.
   const outDir = join(await makeTempDir(), 'out');
   const config = normalizeProjectUserConfig({});
   const buildRecord = new BuildRecord({
@@ -553,7 +591,7 @@ it('resolves npm-style OMS import specifiers in bundle sources', async () => {
     [{ rootDir: 'oms/src' }],
     {
       '.': 'oms/src/index.ts',
-      abc: 'oms/src/abc.ts',
+      'abc': 'oms/src/abc.ts',
     },
     new UUIDManager(domainRoot, join(domainRoot, 'uuids.json')),
     [testDomainProfile],
@@ -597,7 +635,8 @@ it('resolves npm-style OMS import specifiers in bundle sources', async () => {
 it('builds public export entries without adding a synthetic default export', async () => {
   const domainRoot = await makeTempDir();
   const outDir = join(await makeTempDir(), 'out');
-  await fs.outputFile(join(domainRoot, 'oms', 'src', 'font.ts'), 'export const bakeTextFieldFont = 42;');
+  await fs.outputFile(join(domainRoot, 'oms', 'src', 'font.ts'),
+    'export const bakeTextFieldFont = 42;');
   const domain = new Domain(
     'some-plugin',
     domainRoot,
@@ -619,7 +658,8 @@ it('builds public export entries without adding a synthetic default export', asy
   });
 
   const result = await buildRecord.rebuild({
-    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id, { editor: true })).map(([key, spec]) => [key, spec.source])),
+    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id,
+      { editor: true })).map(([key, spec]) => [key, spec.source])),
     domains: {},
     uuidProvider: undefined,
     config: normalizeProjectUserConfig({}),
@@ -660,7 +700,8 @@ it('preserves public export entry default exports', async () => {
   });
 
   const result = await buildRecord.rebuild({
-    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id, { editor: true })).map(([key, spec]) => [key, spec.source])),
+    entries: Object.fromEntries(Object.entries(domain.getEntrySpecs(testDomainProfile.id,
+      { editor: true })).map(([key, spec]) => [key, spec.source])),
     domains: {},
     uuidProvider: undefined,
     config: normalizeProjectUserConfig({}),
@@ -714,9 +755,11 @@ it('reports the original Rollup load error instead of wrapping it as unexpected'
 
 it('reports syntax errors from entry source without wrapping them as unexpected', async () => {
   /// @case
-  /// An in-memory entry contains invalid JavaScript and is parsed by the same Babel stage as other loaded modules.
+  /// An in-memory entry contains invalid JavaScript and is parsed by the same Babel stage as other
+  /// loaded modules.
   /// @expect
-  /// The build reports the entry, original syntax error and offending source without replacing them with a generic error.
+  /// The build reports the entry, original syntax error and offending source without replacing them
+  /// with a generic error.
   const outDir = join(await makeTempDir(), 'out');
   const buildRecord = new BuildRecord({
     projectRoot: dirname(outDir),
@@ -751,9 +794,11 @@ it('reports syntax errors from entry source without wrapping them as unexpected'
 
 it('watches domain oms.config.js changes', async () => {
   /// @case
-  /// A development-mode domain watcher reloads a changed function config that selects its export path from context.mode.
+  /// A development-mode domain watcher reloads a changed function config that selects its export
+  /// path from context.mode.
   /// @expect
-  /// Both the initial read and hot reload receive the watcher's creation mode instead of changing context or using a fallback.
+  /// Both the initial read and hot reload receive the watcher's creation mode instead of changing
+  /// context or using a fallback.
   const domainRoot = await makeTempDir();
   await fs.outputFile(join(domainRoot, 'oms.config.mjs'), [
     'export default ({ mode }) => ({',

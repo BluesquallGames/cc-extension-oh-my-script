@@ -6,7 +6,8 @@ describe('Oh My Script project settings contribution', () => {
     /// @case
     /// 1. Cocos Creator or Vortex loads the extension manifest.
     /// @expect
-    /// Project Settings exposes a default-enabled boolean RunAsNode option under the Oh My Script tab.
+    /// Project Settings exposes a default-enabled boolean RunAsNode option under the Oh My Script
+    /// tab.
     expect(extensionPackage).toMatchObject({
       contributions: {
         profile: {

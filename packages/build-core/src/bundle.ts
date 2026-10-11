@@ -213,7 +213,6 @@ export class Bundle {
     this._invalidateEntry();
     return true;
   }
-
 }
 
 enum SourceFileType {

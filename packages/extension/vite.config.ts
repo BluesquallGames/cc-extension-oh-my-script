@@ -5,24 +5,26 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import useEditorModules from '@cyclonium/cc-extension-utils/vite-plugins/use-editor-modules';
-import { contributionModules } from '@cyclonium/cc-extension-utils/vite-plugins/contribution-modules';
+import {
+  contributionModules,
+} from '@cyclonium/cc-extension-utils/vite-plugins/contribution-modules';
 
-const readDirEntries = (() => {
-  async function* r(root: string, currentDir: string = ''): AsyncGenerator<string> {
+const _readDirEntries = (() => {
+  async function* r(root: string, currentDir = ''): AsyncGenerator<string> {
     const dir = resolve(root, currentDir);
     for (const filename of await readdir(dir)) {
       const file = resolve(dir, filename);
       const stats = await stat(file);
       const subpath = `${currentDir ? `${currentDir}/` : ''}${filename}`;
       if (stats.isDirectory()) {
-        yield * r(root, subpath);
+        yield* r(root, subpath);
       } else if (stats.isFile()) {
         yield subpath;
       }
     }
   }
 
-  return async (root: string, currentDir: string = '') => {
+  return async (root: string, currentDir = '') => {
     if (!existsSync(resolve(root, currentDir))) {
       return [];
     }
@@ -120,13 +122,13 @@ function styleLocation(): Plugin {
       });
     },
 
-    resolveId(source, importer, options) {
+    resolveId(source, _importer, _options) {
       if (source === styleModuleId) {
         return styleModuleId;
       }
     },
 
-    load(id, options) {
+    load(id, _options) {
       if (id === styleModuleId) {
         return `export default require('path').resolve(__dirname, import.meta.ROLLUP_FILE_URL_${helperFileId}, '../style.css')`;
       }

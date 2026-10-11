@@ -34,7 +34,10 @@ export function rollupPluginDefine(options: {
         sourcemap: options.sourcemap !== false,
       });
       if (result.errors.length > 0) {
-        this.error(result.errors.map((err) => err.codeframe || err.message).join('\n'));
+        this.error(result.errors.map((err) => err.codeframe?.length
+          ? err.codeframe
+          : err.message)
+          .join('\n'));
       }
       return {
         code: result.code,

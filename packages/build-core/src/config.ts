@@ -66,13 +66,29 @@ export interface ProfileBuildConfig {
 
 export function normalizeProjectUserConfig(userConfig: OmsProjectUserConfig): OmsProjectConfig {
   const plugins = [...(userConfig.plugins ?? [])];
-  const supported = new Set(['name', 'enforce', 'buildStart', 'resolveId', 'load']);
+  const supported = new Set([
+    'name',
+    'enforce',
+    'buildStart',
+    'resolveId',
+    'load',
+  ]);
   for (const plugin of plugins) {
-    if (!plugin.name) throw new Error('OMS plugin name must be non-empty');
-    for (const key of Object.keys(plugin)) if (!supported.has(key)) throw new Error(`OMS plugin ${plugin.name}: unsupported plugin option ${key}`);
-    if (plugin.enforce !== undefined && plugin.enforce !== 'pre') throw new Error(`OMS plugin ${plugin.name}: invalid enforce value`);
+    if (!plugin.name) {
+      throw new Error('OMS plugin name must be non-empty');
+    }
+    for (const key of Object.keys(plugin)) {
+      if (!supported.has(key)) {
+        throw new Error(`OMS plugin ${plugin.name}: unsupported plugin option ${key}`);
+      }
+    }
+    if (plugin.enforce !== undefined && plugin.enforce !== 'pre') {
+      throw new Error(`OMS plugin ${plugin.name}: invalid enforce value`);
+    }
     for (const hook of ['buildStart', 'resolveId', 'load'] as const) {
-      if (plugin[hook] !== undefined && typeof plugin[hook] !== 'function') throw new Error(`OMS plugin ${plugin.name}: ${hook} must be a function`);
+      if (plugin[hook] !== undefined && typeof plugin[hook] !== 'function') {
+        throw new Error(`OMS plugin ${plugin.name}: ${hook} must be a function`);
+      }
     }
   }
   plugins.sort((a, b) => Number(b.enforce === 'pre') - Number(a.enforce === 'pre'));
@@ -120,7 +136,8 @@ function normalizeDefine(define: unknown) {
     }
     const expression = JSON.stringify(value);
     if (expression === undefined) {
-      logger.error(`define entry ${key} should be JSON serializable or a JavaScript expression string`);
+      logger.error(
+        `define entry ${key} should be JSON serializable or a JavaScript expression string`);
       continue;
     }
     normalized[key] = expression;
@@ -200,7 +217,8 @@ export type OmsConfig = OmsProjectConfig;
 
 export const normalizeUserConfig = normalizeProjectUserConfig;
 
-function normalizeUserProfilesConfig(profiles: OmsProjectUserConfig['profiles']): ProjectProfilesConfig {
+function normalizeUserProfilesConfig(profiles: OmsProjectUserConfig['profiles']):
+ProjectProfilesConfig {
   const headless = profiles?.headless;
   return {
     default: {

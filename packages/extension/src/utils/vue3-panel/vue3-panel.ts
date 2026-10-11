@@ -2,13 +2,13 @@ import * as vue from 'vue';
 
 type PromiseLike<T> = Promise<T> | T;
 
-export interface PanelSetupOptions<TPanelSetupOptions extends any[] = never> {
+export interface PanelSetupOptions<TPanelSetupOptions extends unknown[] = never> {
   container: HTMLElement;
   clientWidth: number;
   args: TPanelSetupOptions;
 }
 
-export abstract class VuePanel<TPanelSetupOptions extends any[] = never> {
+export abstract class VuePanel<TPanelSetupOptions extends unknown[] = never> {
   async setup(
     opts: PanelSetupOptions<TPanelSetupOptions>,
   ) {
@@ -45,9 +45,13 @@ export abstract class VuePanel<TPanelSetupOptions extends any[] = never> {
 
   protected abstract onSetup(opts: PanelSetupOptions<TPanelSetupOptions>): PromiseLike<vue.App>;
 
-  protected onBeforeClose(): PromiseLike<void> {}
+  protected onBeforeClose(): PromiseLike<void> {
+    // Panels may override this hook to prevent closing.
+  }
 
-  protected onClose(): PromiseLike<void> {}
+  protected onClose(): PromiseLike<void> {
+    // Panels may override this hook to release their resources.
+  }
 
   private _vueApp: vue.App | undefined = undefined;
 }
@@ -87,11 +91,13 @@ export interface DefinedVuePanelThis {
   clientWidth: number;
 }
 
-export function defineVuePanel<TVuePanel extends VuePanel, TVuePanelType extends (new (...args: any[]) => TVuePanel) & VuePanelClassRequirements>(panelClass: TVuePanelType) {
+export function defineVuePanel<TVuePanel extends VuePanel, TVuePanelType extends (new (
+  ...args: never[]) => TVuePanel) & VuePanelClassRequirements>(panelClass: TVuePanelType) {
   let vuePanel: TVuePanel | undefined = undefined;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const wrapMethod = (f: (this: TVuePanel, ...args: any[]) => PromiseLike<void>, methodKey: string) => {
+  const wrapMethod = (f: (this: TVuePanel, ...args: any[]) => PromiseLike<void>,
+    methodKey: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return function (this: DefinedVuePanelThis, ...args: any[]) {
       const vuePanel = this.vuePanel;
@@ -125,17 +131,23 @@ export function defineVuePanel<TVuePanel extends VuePanel, TVuePanelType extends
 
     $: { container: '.vue3-panel-container' },
 
-    style: containerStyle + '\n' + (panelClass.containerStyle || '') + '\n' + panelClass.style,
+    style: containerStyle + '\n' + (panelClass.containerStyle ?? '') + '\n' + panelClass.style,
 
-    methods: panelClass.exposedMethods ? Object.fromEntries(Object.entries(panelClass.exposedMethods).map(([key, value]) => [key, wrapMethod(value, key)])) : {},
+    methods: panelClass.exposedMethods
+      ? Object.fromEntries(Object.entries(panelClass
+        .exposedMethods).map(([key, value]) => [key, wrapMethod(value, key)]))
+      : {},
 
-    listeners: panelClass.exposedListeners ? Object.fromEntries(Object.entries(panelClass.exposedListeners).map(([key, value]) => [key, wrapListener(value, key)])) : {},
+    listeners: panelClass.exposedListeners
+      ? Object.fromEntries(Object.entries(panelClass
+        .exposedListeners).map(([key, value]) => [key, wrapListener(value, key)]))
+      : {},
 
     async ready(this: DefinedVuePanelThis, ...args: ConstructorParameters<TVuePanelType>) {
       vuePanel = new panelClass(...args);
       await vuePanel.setup({
         container: this.$.container,
-        // @ts-expect-error
+        // @ts-expect-error Creator panel setup and constructor arguments differ.
         args,
         clientWidth: this.clientWidth,
       });

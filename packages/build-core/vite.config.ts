@@ -24,7 +24,7 @@ export default defineConfig((env) => {
           if (resolved) {
             return false;
           }
-          if (/^node:/.test(id)) {
+          if (id.startsWith('node:')) {
             return true;
           }
           if (id.startsWith('./') || id.startsWith('../')) {

@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -23,12 +24,20 @@ try {
   mkdirSync(installDir, { recursive: true });
   cpSync(join(packageDir, 'package.json'), join(installDir, 'package.json'));
   cpSync(join(packageDir, 'lib'), join(installDir, 'lib'), { recursive: true });
-  for (const file of ['plugin.ts', 'isolated.ts', 'commonjs.cts', 'javascript.js', 'runtime.js']) {
+  for (const file of [
+    'plugin.ts',
+    'isolated.ts',
+    'commonjs.cts',
+    'javascript.js',
+    'runtime.js',
+  ]) {
     cpSync(join(artifactsDir, file), join(temporaryDir, file));
   }
-  cpSync(dirname(require.resolve('rollup/package.json')), join(temporaryDir, 'node_modules/rollup'), { recursive: true });
+  cpSync(dirname(require.resolve('rollup/package.json')), join(temporaryDir,
+    'node_modules/rollup'), { recursive: true });
   const rollupRequire = createRequire(require.resolve('rollup/package.json'));
-  cpSync(dirname(rollupRequire.resolve('@types/estree/package.json')), join(temporaryDir, 'node_modules/@types/estree'), { recursive: true });
+  cpSync(dirname(rollupRequire.resolve('@types/estree/package.json')), join(temporaryDir,
+    'node_modules/@types/estree'), { recursive: true });
   writeFileSync(join(temporaryDir, 'package.json'), JSON.stringify({ type: 'module' }));
 
   let checks = 0;
@@ -37,10 +46,18 @@ try {
     ['NodeNext', ts.ModuleKind.NodeNext, ts.ModuleResolutionKind.NodeNext],
     ['Bundler', ts.ModuleKind.Preserve, ts.ModuleResolutionKind.Bundler],
   ]) {
-    for (const scenario of ['plugin', 'isolated', 'commonjs', 'javascript']) {
-      const roots = [join(temporaryDir, `${scenario}.${scenario === 'commonjs' ? 'cts' : scenario === 'javascript' ? 'js' : 'ts'}`)];
+    for (const scenario of [
+      'plugin',
+      'isolated',
+      'commonjs',
+      'javascript',
+    ]) {
+      const roots = [join(temporaryDir, `${scenario}.${scenario === 'commonjs'
+        ? 'cts'
+        : scenario === 'javascript' ? 'js' : 'ts'}`)];
       const options = {
-        module, moduleResolution,
+        module,
+        moduleResolution,
         target: ts.ScriptTarget.ES2022,
         lib: ['lib.es2022.d.ts', 'lib.esnext.disposable.d.ts'],
         types: [],
@@ -69,7 +86,8 @@ try {
     }
   }
   await import(pathToFileURL(join(temporaryDir, 'runtime.js')).href);
-  process.stdout.write(`Passed ${checks} independent public type-consumption checks (TypeScript ${ts.version}).\n`);
+  process.stdout.write(
+    `Passed ${checks} independent public type-consumption checks (TypeScript ${ts.version}).\n`);
 } finally {
   // The absolute temp directory is created by mkdtemp above and never user-supplied.
   assert.equal(dirname(resolve(temporaryDir)), resolve(tmpdir()));

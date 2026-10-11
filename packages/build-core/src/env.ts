@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { isAbsolute, resolve } from 'node:path';
 import fs from 'fs-extra';
 import { parse } from 'dotenv';

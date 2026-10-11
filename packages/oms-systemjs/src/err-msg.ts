@@ -1,5 +1,5 @@
-export function errMsg(code: number, message: string) {
+export function errMsg(_code: number, message: string) {
   return message;
 }
 
-export const USE_ERROR_CODE: boolean = false;
+export const USE_ERROR_CODE = false;

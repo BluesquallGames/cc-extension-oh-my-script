@@ -13,14 +13,14 @@ export class TaskExecuteContext extends EventEmitter<{
 type PromiseResolveValue<T> = T extends Promise<infer U> ? U : T;
 
 export class TaskQueue<TTaskMap extends {
-  [x: string]: (ctx: TaskExecuteContext) => any;
+  [K in keyof TTaskMap]: (ctx: TaskExecuteContext) => unknown;
 }> {
   queueTask<TType extends Extract<keyof TTaskMap, string>>(task: {
     type: TType;
     exec: (ctx: TaskExecuteContext) => Promise<PromiseResolveValue<ReturnType<TTaskMap[TType]>>>;
     mergeArgs?: any[];
   }): Promise<PromiseResolveValue<ReturnType<TTaskMap[TType]>>> {
-    if (this._runningTask && this._runningTask.type === task.type) {
+    if (this._runningTask?.type === task.type) {
       if (this._runningTask.ctx.acceptMerge) {
         this._runningTask.ctx.emit('merge', task.mergeArgs);
         return this._runningTask.execPromiseWithResolvers.promise.then(
@@ -38,7 +38,8 @@ export class TaskQueue<TTaskMap extends {
         return pendingTask.execPromiseWithResolvers.promise;
       }
     }
-    const execPromiseWithResolvers = promiseWithResolvers<PromiseResolveValue<ReturnType<TTaskMap[TType]>>>();
+    const execPromiseWithResolvers
+      = promiseWithResolvers<PromiseResolveValue<ReturnType<TTaskMap[TType]>>>();
     const taskId = this._nextTaskId++;
     this._pendingTasks.push({
       id: taskId,
@@ -60,7 +61,7 @@ export class TaskQueue<TTaskMap extends {
     this._runningTask = undefined;
     const runningPromise = this._runningPromise;
     this._runningPromise = undefined;
-    return runningPromise ? runningPromise : Promise.resolve();
+    return runningPromise ?? Promise.resolve();
   }
 
   private _nextTaskId = 1;

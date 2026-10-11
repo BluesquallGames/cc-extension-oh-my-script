@@ -13,7 +13,7 @@ export class RegistryManagement {
 
   get(id: string) {
     const load = this._systemJS[REGISTRY][id];
-    if (load && load.e === null && !load.E) {
+    if (load?.e === null && !load.E) {
       if (load.er) {
         return null;
       }
@@ -27,8 +27,9 @@ export class RegistryManagement {
       ns = module;
     } else {
       ns = Object.assign(Object.create(null), module);
-      if (toStringTag)
+      if (toStringTag) {
         Object.defineProperty(ns, toStringTag, { value: 'Module' });
+      }
     }
 
     const done = Promise.resolve(ns);
@@ -43,8 +44,9 @@ export class RegistryManagement {
       E: undefined,
     };
 
-    if (load.e || load.E)
+    if (load.e || load.E) {
       return false;
+    }
 
     Object.assign(load, {
       n: ns,
@@ -60,25 +62,29 @@ export class RegistryManagement {
     const load = registry[id];
     // in future we can support load.E case by failing load first
     // but that will require TLA callbacks to be implemented
-    if (!load || (load.p && load.p.e !== null) || load.E)
+    if (!load || (load.p && load.p.e !== null) || load.E) {
       return false;
+    }
 
     let importerSetters: typeof load.i | null = load.i;
     // remove from importerSetters
     // (release for gc)
-    if (load.d)
+    if (load.d) {
       load.d.forEach((depLoad) => {
-        // @ts-expect-error
+        // @ts-expect-error Upstream deletion compares load records against importer setters.
         const importerIndex = depLoad.i.indexOf(load);
-        if (importerIndex !== -1)
+        if (importerIndex !== -1) {
           depLoad.i.splice(importerIndex, 1);
+        }
       });
+    }
     delete registry[id];
     return function () {
       const load = registry[id];
-      if (!load || !importerSetters || load.e !== null || load.E)
+      if (!load || !importerSetters || load.e !== null || load.E) {
         return false;
-        // add back the old setters
+      }
+      // add back the old setters
       importerSetters.forEach((setter) => {
         load.i.push(setter);
         setter(load.n);
@@ -98,7 +104,9 @@ export class RegistryManagement {
         while (
           (key = keys[index++]) !== undefined
           && (ns = this.get(key)) === undefined
-        );
+        ) {
+          ;
+        }
         return {
           done: key === undefined,
           value: key !== undefined && [key, ns],

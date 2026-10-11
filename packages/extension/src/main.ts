@@ -4,8 +4,8 @@ import { selfExtensionName } from './self-info.js';
 import { openOmsDevtools, startWorker, workerMethods } from './worker/start.js';
 
 export const methods = {
-  'open-devtools': async () => {
-    await openOmsDevtools();
+  'open-devtools': () => {
+    openOmsDevtools();
   },
 
   ...workerMethods,

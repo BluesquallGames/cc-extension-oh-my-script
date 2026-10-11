@@ -23,8 +23,10 @@ import { logger } from './logger.js';
 import type { OmsPlugin, OmsPluginContext } from '@oms/plugin';
 import { rollupPluginAssetUUID } from './features/rollup-plugin-asset-uuid.js';
 
-const rollupPluginCommonJS = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
-const rollupPluginNodeResolve = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
+const rollupPluginCommonJS
+  = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
+const rollupPluginNodeResolve
+  = rollupPluginNodeResolve_ as unknown as typeof rollupPluginNodeResolve_.default;
 const rollupPluginBabel = rollupPluginBabel_ as unknown as typeof rollupPluginBabel_.default;
 const rollupPluginJson = rollupPluginJson_ as unknown as typeof rollupPluginJson_.default;
 
@@ -86,7 +88,7 @@ export function createOmsRuntimePlugins(options: OmsRuntimePluginOptions): rollu
       allowEditorOnlyImports: options.allowEditorOnlyImports,
     }),
 
-    rollupPluginWasm({}),
+    rollupPluginWasm(),
 
     rollupPluginNodeBuiltinModules({
       supportsNativeModules: options.supportsNativeModules,
@@ -130,7 +132,9 @@ function adaptOmsPlugin(plugin: OmsPlugin): rollup.Plugin {
   };
   for (const stage of ['buildStart', 'resolveId', 'load'] as const) {
     const hook = plugin[stage];
-    if (!hook) continue;
+    if (!hook) {
+      continue;
+    }
     Object.assign(adapted, {
       [stage](this: rollup.PluginContext, ...args: unknown[]) {
         const context: OmsPluginContext = {
@@ -174,29 +178,35 @@ function createOmsRuntimeBabelPlugin({
         })]
         : undefined,
       decorators
-        ? [babelPluginProposalDecorators, {
-          version: 'legacy',
-        }]
+        ? [babelPluginProposalDecorators,
+          {
+            version: 'legacy',
+          }]
         : undefined,
     ].filter((p) => !!p),
     presets: [
-      [babelPresetEnv, {
-        modules: false,
-        targets: babelTarget,
-        include: [
-          // Legacy decorators require class field lowering, which also requires private method/accessor lowering.
-          ...(decorators
-            ? [
-              '@babel/plugin-transform-class-properties',
-              '@babel/plugin-transform-private-methods',
-            ]
-            : []),
-          '@babel/plugin-transform-class-static-block',
-        ],
-      } satisfies babelPresetEnv.Options],
-      [babelPresetTypescript, {
-        allowDeclareFields: true,
-      }],
+      [
+        babelPresetEnv,
+{
+  modules: false,
+  targets: babelTarget,
+  include: [
+    // Legacy decorators require class field lowering, which also requires private method/accessor
+    // lowering.
+    ...(decorators
+      ? [
+        '@babel/plugin-transform-class-properties',
+        '@babel/plugin-transform-private-methods',
+      ]
+      : []),
+    '@babel/plugin-transform-class-static-block',
+  ],
+} satisfies babelPresetEnv.Options,
+      ],
+      [babelPresetTypescript,
+        {
+          allowDeclareFields: true,
+        }],
     ],
   });
 }

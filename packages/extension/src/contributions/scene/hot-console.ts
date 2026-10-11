@@ -8,7 +8,8 @@ const logTagRegex = new RegExp(logTag);
 
 type RemoteLogLevel = 'log' | 'info' | 'warn' | 'error';
 
-const consoleVendorMethods = '_vendor' in console && typeof console._vendor === 'object' && console._vendor
+const consoleVendorMethods = '_vendor' in console && typeof console._vendor === 'object'
+  && console._vendor
   ? console._vendor as Partial<typeof console>
   : undefined;
 
@@ -24,7 +25,7 @@ const remoteLogger = (() => {
       clear: (regex?: RegExp) => void;
     };
   } catch (err) {
-    logger.error(`Failed to get editor remote logger: ${err}`);
+    logger.error('Failed to get editor remote logger: %o', err);
     return undefined;
   }
 })();

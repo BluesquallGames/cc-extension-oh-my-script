@@ -40,7 +40,8 @@ export class Domain {
 
     const indexModuleDirs = this.sourceRoots;
     for (const profile of profiles) {
-      assert.ok(!this._profileStates[profile.id], `Duplicate profile ${profile.id} in domain ${this._id}`);
+      assert.ok(!this._profileStates[profile.id], `Duplicate profile ${profile
+        .id} in domain ${this._id}`);
       const bundleId = `${this._id}${profile.bundle.idSuffix}`;
       this._profileStates[profile.id] = {
         sourceMatcher: profile.sourceMatcher,
@@ -68,7 +69,8 @@ export class Domain {
     return this._partitions.map((p) => join(this._domainRoot, p.rootDir));
   }
 
-  getEntrySpecs(profileId: string, opts: ProfileBuildOptions = {}): Record<string, BundleEntrySpec> {
+  getEntrySpecs(profileId: string, opts: ProfileBuildOptions = {}): Record<string,
+    BundleEntrySpec> {
     const entrySpecs: Record<string, BundleEntrySpec> = {};
 
     const profileState = this._profileStates[profileId];
@@ -135,7 +137,8 @@ export class Domain {
     if (this._isComponentModule(path)) {
       if (!allowUpdateUUID) {
         if (!this._isEditorModule(path) && !await this._uuidManager.hasUUIDForPath(path)) {
-          throw new Error(`Production component ${path} has no project UUID. Production UUID discovery is read-only; run an OMS development build or add the component to the centralized UUID map before building production.`);
+          throw new Error(
+            `Production component ${path} has no project UUID. Production UUID discovery is read-only; run an OMS development build or add the component to the centralized UUID map before building production.`);
         }
       } else {
         await this._ensureUUID(path);
@@ -200,7 +203,8 @@ export class Domain {
   private _getSourceFileBundles(path: string): Bundle[] {
     const sourceRoots = this.sourceRoots;
     if (!sourceRoots.some((sourceRoot) => isPathInside(sourceRoot, path))) {
-      throw new Error(`Bundle for ${path} not found in domain ${this._id}, root dirs: ${sourceRoots.join(', ')}`);
+      throw new Error(`Bundle for ${path} not found in domain ${this
+        ._id}, root dirs: ${sourceRoots.join(', ')}`);
     }
 
     const bundles: Bundle[] = [];
@@ -208,7 +212,8 @@ export class Domain {
     const relativePath = relative(this._domainRoot, path);
     for (const profileState of Object.values(this._profileStates)) {
       if (isEditorModule) {
-        if (profileState.editorBundle.isIndexModule(path) || profileState.editorBundle.isComponentModule(path)) {
+        if (profileState.editorBundle.isIndexModule(path) || profileState.editorBundle
+          .isComponentModule(path)) {
           bundles.push(profileState.editorBundle);
         }
         continue;
@@ -290,8 +295,10 @@ export async function readOmsDomainConfig(domainRoot: string, options: {
     fileConfig.partitions ?? packageConfig.partitions ?? [{ rootDir: options.preferredSourceRoot }],
     domainRoot,
   );
-  const exportPackageName = normalizeExportPackageName(fileConfig.exportPackageName, `In ${configFile ?? 'oms.config.js'}`);
-  const fileExports = normalizeDomainExports(fileConfig.exports ?? {}, `In ${configFile ?? 'oms.config.js'}`);
+  const exportPackageName = normalizeExportPackageName(fileConfig.exportPackageName,
+    `In ${configFile ?? 'oms.config.js'}`);
+  const fileExports = normalizeDomainExports(fileConfig.exports ?? {}, `In ${configFile
+    ?? 'oms.config.js'}`);
 
   const config: OmsDomainConfig = {
     partitions,
@@ -303,7 +310,8 @@ export async function readOmsDomainConfig(domainRoot: string, options: {
   return config;
 }
 
-async function readLegacyPackageDomainConfig(domainRoot: string): Promise<Partial<OmsDomainConfig>> {
+async function readLegacyPackageDomainConfig(domainRoot: string):
+Promise<Partial<OmsDomainConfig>> {
   const domainPackageJson = await readDomainPackageJson(domainRoot);
   if (!domainPackageJson) {
     return {};
@@ -322,7 +330,8 @@ async function findOmsDomainConfigFile(domainRoot: string) {
   return entries.filter(isOmsConfigFileName).sort()[0] ?? null;
 }
 
-async function readOmsDomainConfigFile(path: string, context: OmsConfigContext): Promise<OmsDomainUserConfig> {
+async function readOmsDomainConfigFile(path: string, context: OmsConfigContext):
+Promise<OmsDomainUserConfig> {
   try {
     const config = await loadOmsConfigModule<OmsDomainUserConfig>(path, context);
     if (typeof config !== 'object' || !config) {
@@ -366,7 +375,8 @@ function normalizeDomainExports(exports: Record<string, string>, logPrefix: stri
   const normalizedExports: Record<string, string> = {};
   for (const [rawKey, rawValue] of Object.entries(exports)) {
     if (typeof rawValue !== 'string') {
-      logger.error(`${logPrefix}, Export { ${rawKey}:${String(rawValue)} } should name a string path`);
+      logger.error(`${logPrefix}, Export { ${rawKey}:${String(
+        rawValue)} } should name a string path`);
       continue;
     }
     const key = normalizeExportId(rawKey);
@@ -376,7 +386,8 @@ function normalizeDomainExports(exports: Record<string, string>, logPrefix: stri
     }
     const expectedHead = './';
     if (!rawValue.startsWith(expectedHead)) {
-      logger.error(`${logPrefix}, Export { ${rawKey}:${rawValue} } should name a path starting with ${expectedHead}`);
+      logger.error(
+        `${logPrefix}, Export { ${rawKey}:${rawValue} } should name a path starting with ${expectedHead}`);
       continue;
     }
     normalizedExports[key] = rawValue.slice(expectedHead.length);

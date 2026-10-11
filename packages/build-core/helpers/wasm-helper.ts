@@ -4,7 +4,7 @@ export async function importWasmBinary(input: string) {
   if (EDITOR || NODEJS) {
     const { createRequire } = await import('node:module');
     const r = createRequire(typeof __dirname === 'string' ? __dirname : import.meta.url);
-    const ps = r('path');
+    const _ps = r('path');
     const fs = r('fs/promises');
     const { fileURLToPath } = r('url');
     const binary = await fs.readFile(fileURLToPath(input));
@@ -23,7 +23,7 @@ export async function importWasmBinary(input: string) {
 export async function importWasmInstance(input: string, imports?: WebAssembly.Imports) {
   if (EDITOR || NODEJS) {
     const r = require;
-    const ps = r('path');
+    const _ps = r('path');
     const fs = r('fs/promises');
     const { fileURLToPath } = r('url');
     const binary = await fs.readFile(fileURLToPath(input));

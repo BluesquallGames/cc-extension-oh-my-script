@@ -104,17 +104,18 @@ export type InvocationMethodId = keyof InvocationMap;
 
 export type InvocationParams<T extends InvocationMethodId> = Parameters<InvocationMap[T]>[0];
 
-export type InvocationReturnValue<T extends InvocationMethodId> = InvocationMap[T] extends (...args: any[]) => infer R ? (R extends Promise<infer U> ? U : R) : never;
+export type InvocationReturnValue<T extends InvocationMethodId>
+  = Awaited<ReturnType<InvocationMap[T]>>;
 
 export enum InvocationDirection {
   call = 'call',
   returns = 'returns',
 }
 
-export type InvocationError = {
+export interface InvocationError {
   message: string;
   stack?: string;
-};
+}
 
 export type InvocationResultMessage<T extends InvocationMethodId> = {
   direction: InvocationDirection.returns;
@@ -135,7 +136,8 @@ export interface InvocationCallMessage<T extends InvocationMethodId = Invocation
   args: InvocationParams<T>;
 }
 
-export type InvocationMessage<T extends InvocationMethodId = InvocationMethodId> = InvocationCallMessage<T> | InvocationResultMessage<T>;
+export type InvocationMessage<T extends InvocationMethodId = InvocationMethodId>
+  = InvocationCallMessage<T> | InvocationResultMessage<T>;
 
 export interface IpcTransport {
   send<T extends InvocationMethodId>(message: InvocationMessage<T>): void;
@@ -174,7 +176,11 @@ export class Ipc<
     }
   }
 
-  listen<T extends TIncomingMessageId>(methodId: T, callback: (args: InvocationParams<T>) => (Serializable | undefined | void) | Promise<Serializable | undefined | void>) {
+  listen<T extends TIncomingMessageId>(
+    methodId: T,
+    callback: (args: InvocationParams<T>) => Serializable | undefined | void
+      | Promise<Serializable | undefined | void>,
+  ) {
     if (this._listeners.has(methodId)) {
       logger.error(`Listener for method ${methodId} already exists`);
       return;
@@ -182,7 +188,10 @@ export class Ipc<
     this._listeners.set(methodId, callback);
   }
 
-  invoke<T extends TOutgoingMessageId>(methodId: T, args: InvocationParams<T>): Promise<InvocationReturnValue<T>> {
+  invoke<T extends TOutgoingMessageId>(
+    methodId: T,
+    args: InvocationParams<T>,
+  ): Promise<InvocationReturnValue<T>> {
     if (this._closedError) {
       return Promise.reject(this._closedError);
     }
@@ -203,6 +212,8 @@ export class Ipc<
         this._transport.send(message);
       } catch (error) {
         this._invocations.delete(invocationId);
+        // Preserve the transport's original rejection value for the caller.
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
         reject(error);
       }
     });
@@ -226,10 +237,17 @@ export class Ipc<
     resolve: (value: unknown) => void;
     reject: (reason?: unknown) => void;
   }>();
-  private _listeners: Map<TIncomingMessageId, (args: InvocationParams<TIncomingMessageId>) => Serializable | undefined | void | Promise<Serializable | undefined | void>> = new Map();
+
+  private _listeners = new Map<
+    TIncomingMessageId,
+    (args: InvocationParams<TIncomingMessageId>) => Serializable | undefined | void
+      | Promise<Serializable | undefined | void>
+  >();
+
   private _closedError: Error | undefined;
 
-  private _sendInvocationResult<T extends TIncomingMessageId>(invocationId: number, result: InvocationResultMessage<T>) {
+  private _sendInvocationResult<T extends TIncomingMessageId>(_invocationId: number,
+    result: InvocationResultMessage<T>) {
     if (this._closedError) {
       return;
     }
@@ -295,7 +313,7 @@ export class Ipc<
     if (message.ok) {
       invocation.resolve(message.returnValue);
     } else {
-      invocation.reject(new InvocationFailed(message as Extract<InvocationResultMessage<TOutgoingMessageId>, { ok: false }>));
+      invocation.reject(new InvocationFailed(message));
     }
   }
 }
@@ -312,7 +330,7 @@ function stringifyResponseError(error: InvocationError) {
 }
 
 function errorToInvocationError(error: unknown): InvocationError {
-  let message = '';
+  let message: string;
   let stack: string | undefined = undefined;
   if (typeof error === 'string') {
     message = error;
@@ -326,7 +344,7 @@ function errorToInvocationError(error: unknown): InvocationError {
   } else {
     try {
       message = JSON.stringify(error);
-    } catch (err) {
+    } catch (_err) {
       message = 'unknown';
     }
   }

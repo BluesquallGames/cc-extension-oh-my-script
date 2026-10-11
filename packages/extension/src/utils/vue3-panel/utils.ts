@@ -5,10 +5,10 @@ export function createReactiveVueApp<TComponent extends object, TProps extends o
   data: TProps,
   container: HTMLElement,
 ): {
-    app: App;
-    data: Reactive<TProps>;
-    exposedMethods: InstanceType<typeof rootComponent>;
-  } {
+  app: App;
+  data: Reactive<TProps>;
+  exposedMethods: InstanceType<typeof rootComponent>;
+} {
   const appData = reactive(data);
 
   let vNode: VNode = undefined!;

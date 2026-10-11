@@ -21,9 +21,7 @@ export class OmsWorker {
     if (this._ready) {
       return;
     }
-    if (!this._readyPromiseWithResolvers) {
-      this._readyPromiseWithResolvers = promiseWithResolvers();
-    }
+    this._readyPromiseWithResolvers ??= promiseWithResolvers();
     return this._readyPromiseWithResolvers.promise;
   }
 
@@ -31,10 +29,11 @@ export class OmsWorker {
     this._nodeWorker.debug(true);
   }
 
-  async request<TMethod extends keyof typeof workerMessageDescriptions>(method: TMethod, ...args: unknown[]) {
+  async request<TMethod extends keyof typeof workerMessageDescriptions>(method: TMethod,
+    ...args: unknown[]) {
     logger.debug(`Request to worker "${method}", with arguments: [${args.join(', ')}]`);
     const result = await this._nodeWorker.send(method, ...args);
-    console.debug(`Response from worker "${method}": ${result}`);
+    console.debug('Response from worker "%s": %o', method, result);
     return result;
   }
 

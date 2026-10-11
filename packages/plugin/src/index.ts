@@ -1,7 +1,8 @@
 import type { FunctionPluginHooks, PluginContext } from 'rollup';
 
 /** Native Rollup operations needed by source loaders. */
-export interface OmsPluginContext extends Pick<PluginContext, 'addWatchFile' | 'error' | 'resolve'> {
+export interface OmsPluginContext extends Pick<PluginContext, 'addWatchFile' | 'error'
+  | 'resolve'> {
   cache: Pick<PluginContext['cache'], 'get' | 'set'>;
 }
 
@@ -43,7 +44,8 @@ export interface OmsUserConfig {
   };
 }
 
-type OmsUserConfigExport = OmsUserConfig | ((context: { mode: string }) => OmsUserConfig | Promise<OmsUserConfig>);
+type OmsUserConfigExport = OmsUserConfig | ((context: { mode: string }) => OmsUserConfig
+  | Promise<OmsUserConfig>);
 
 /** Type inference helper; returns the original configuration without wrapping it. */
 export function defineConfig<T extends OmsUserConfigExport>(config: T): T {

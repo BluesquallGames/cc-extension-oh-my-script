@@ -1,3 +1,6 @@
-export function addEditorBroadcastListener(eventName: string, listener: (...args: any[]) => void) {
+export function addEditorBroadcastListener<TArgs extends unknown[]>(
+  eventName: string,
+  listener: (...args: TArgs) => void,
+) {
   Editor.Message.__protected__.addBroadcastListener(eventName, listener);
 }

@@ -1,3 +1,5 @@
+import process from 'node:process';
+import { format } from 'node:util';
 import { dirname, join } from 'node:path';
 import winston from 'winston';
 import Transport from 'winston-transport';
@@ -7,12 +9,12 @@ import { selfExtensionName, selfPackageJson } from './self-info.js';
 const printf = (withEntry: boolean) => winston.format.printf(({ level, message, timestamp }) => {
   let output = '';
   if (timestamp) {
-    output += `${timestamp}[${timestamp instanceof Date ? timestamp.valueOf() : ''}] `;
+    output += format('%s[%s] ', timestamp, timestamp instanceof Date ? timestamp.valueOf() : '');
   }
   if (withEntry) {
     output += `[@<where?>] `;
   }
-  output += `${level}: ${message}`;
+  output += format('%s: %s', level, message);
   return output;
 });
 
@@ -26,8 +28,10 @@ export function createLogFile() {
 }
 
 class EditorTransport extends Transport {
-  override log(info: any, next: () => void) {
-    const consoleMethod = console[info.level as ('info' | 'error' | 'warn' | 'debug')] ?? console.log;
+  override log(info: { level: string; message: string }, next: () => void) {
+    const consoleMethod = (console[info.level as ('info' | 'error' | 'warn' | 'debug')]
+      ?? console.log)
+      .bind(console);
     consoleMethod.call(console, `[${selfExtensionName}] ` + info.message);
     next();
   }

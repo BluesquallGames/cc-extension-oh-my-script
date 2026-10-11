@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { basename, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import type { Dirent, Stats } from 'node:fs';
 import fs from 'fs-extra';
@@ -21,7 +22,10 @@ import {
 import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise-with-resolvers.js';
 import Ejs from 'ejs';
 import { helpersDir } from './helpers-dir.js';
-import { Domain, readOmsDomainConfig, type DomainProfile, type ProfileBuildOptions } from './domain.js';
+import { Domain,
+  readOmsDomainConfig,
+  type DomainProfile,
+  type ProfileBuildOptions } from './domain.js';
 import { MergedTaskExecError, TaskQueue } from './task-queue.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
@@ -65,7 +69,7 @@ function makeHeadlessDomainProfile(profileConfig: ProfileConfig | undefined): Do
 function makeProfileSourceMatcher(profileConfig: ProfileConfig | undefined) {
   return (relativePath: string) => {
     return (!profileConfig?.include || profileConfig.include(relativePath))
-      && (!profileConfig?.exclude || !profileConfig.exclude(relativePath));
+      && (!profileConfig?.exclude?.(relativePath));
   };
 }
 
@@ -246,7 +250,7 @@ export class OmsBuilder extends EventEmitter<{
   }
 
   private async _startWatcher(): Promise<StartedWatcher> {
-    const configWatcher = await this._initializeConfigWatcher();
+    const configWatcher = this._initializeConfigWatcher();
 
     const config = await configWatcher.ready();
 
@@ -305,7 +309,7 @@ export class OmsBuilder extends EventEmitter<{
     };
   }
 
-  private async _initializeConfigWatcher() {
+  private _initializeConfigWatcher() {
     assert.ok(!this._configWatcher);
     return this._configWatcher = new OmsProjectConfigWatcher({
       projectPath: this._projectPath,
@@ -349,7 +353,8 @@ async function writeOmsTypingDeclarations(typingOutDir: string, domains: Record<
   ];
   const omsRuntimeTypesPath = await resolveOmsRuntimeTypesPath();
   if (omsRuntimeTypesPath) {
-    declarationLines.push(`/// <reference path=${JSON.stringify(makePathImportSpecifier(typingOutDir, omsRuntimeTypesPath))} />`);
+    declarationLines.push(`/// <reference path=${JSON.stringify(makePathImportSpecifier(
+      typingOutDir, omsRuntimeTypesPath))} />`);
   }
   declarationLines.push('');
   await fs.outputJson(join(typingOutDir, 'package.json'), {
@@ -385,7 +390,11 @@ async function writeOmsTypingDeclarations(typingOutDir: string, domains: Record<
 
 async function resolveOmsRuntimeTypesPath() {
   const candidates = [
-    process.env[omsPackageRootEnvName] ? join(process.env[omsPackageRootEnvName], 'types', 'oms.d.ts') : undefined,
+    process.env[omsPackageRootEnvName]
+      ? join(process.env[omsPackageRootEnvName],
+        'types',
+        'oms.d.ts')
+      : undefined,
     join(import.meta.dirname, '..', '..', '..', 'types', 'oms.d.ts'),
     join(import.meta.dirname, '..', '..', '..', '..', 'types', 'oms.d.ts'),
   ].filter((path): path is string => path !== undefined);
@@ -394,7 +403,8 @@ async function resolveOmsRuntimeTypesPath() {
       return await fs.realpath(candidate);
     }
   }
-  logger.debug(`Failed to find OMS runtime types from ${omsPackageRootEnvName} or build-core location.`);
+  logger.debug(
+    `Failed to find OMS runtime types from ${omsPackageRootEnvName} or build-core location.`);
   return undefined;
 }
 
@@ -422,7 +432,7 @@ async function ensureEmptyDirSafe(dir: string) {
     await fs.ensureDir(dir);
     await fs.emptyDir(dir);
   } catch (err) {
-    logger.error(`Failed to clean directory ${dir}: ${err}`);
+    logger.error(`Failed to clean directory ${dir}: %o`, err);
   }
 }
 
@@ -530,7 +540,7 @@ class OmsWatcher extends EventEmitter<{
     await this._restartFileWatcher();
     await this._collectInitialSourceFiles();
     const initialBuild = this._requestProfiles('initial full build', false, allBuildProfileIds);
-    void initialBuild.waitFor(allBuildProfileIds).then((profileResults) => {
+    initialBuild.waitFor(allBuildProfileIds).then((profileResults) => {
       for (const [profile, result] of Object.entries(profileResults)) {
         if (!result.ok) {
           logger.error(`Initial ${profile} profile build failed: ${result.error.message}`);
@@ -711,14 +721,14 @@ class OmsWatcher extends EventEmitter<{
   private _closing = false;
   private _revisionInProgress = false;
   private _followupRevisionQueued = false;
-  private _taskQueue: TaskQueue<{
+  private _taskQueue = new TaskQueue<{
     'build': () => void;
     'inlineUUIDs': () => void;
     'build-prod': () => void;
     'update-build-options': () => void;
     'update-config': () => void;
     'update-domain-configs': () => void;
-  }> = new TaskQueue();
+  }>();
 
   private _createHeadlessBuildRecord(config: OmsProjectConfig) {
     return new BuildRecord({
@@ -759,12 +769,13 @@ class OmsWatcher extends EventEmitter<{
     this._domainConfigWatchers = {};
     this._domains = {};
     this._domainSourceRootMap.length = 0;
-    const domainPromises: Promise<void>[] = [];
+    const domainPromises: Array<Promise<void>> = [];
     const mainDomainRoot = join(this._projectPath);
     domainPromises.push(this._addDomain(
       mainDomainId, mainDomainRoot, 'src',
     ));
-    for (const { name: extensionName, path: extensionPath } of this._buildOptions.extensionBuildOptions) {
+    for (const { name: extensionName, path: extensionPath } of this._buildOptions
+      .extensionBuildOptions) {
       const extensionDomainRoot = join(extensionPath);
       domainPromises.push(this._addDomain(
         extensionName, extensionDomainRoot, 'oms/src',
@@ -791,7 +802,8 @@ class OmsWatcher extends EventEmitter<{
     this._fileQueueConsumerProfiles.clear();
   }
 
-  private async _addDomain(domainId: string, domainRoot: string, preferredDomainSourceRoot: string) {
+  private async _addDomain(domainId: string, domainRoot: string,
+    preferredDomainSourceRoot: string) {
     const domainConfigWatcher = new OmsDomainConfigWatcher({
       domainRoot,
       preferredSourceRoot: preferredDomainSourceRoot,
@@ -902,8 +914,10 @@ class OmsWatcher extends EventEmitter<{
     const watcher = this._fileWatcher = chokidar.watch(sourceRoots, {
       ignoreInitial: true,
       ignored: (path, stats) => {
-        // Chokidar supplies forward slashes, even on Windows; dependency keys use native separators.
-        // Explicit build dependencies (e.g. asset .meta files) must bypass the source-extension filter.
+        // Chokidar supplies forward slashes, even on Windows; dependency keys use native
+        // separators.
+        // Explicit build dependencies (e.g. asset .meta files) must bypass the source-extension
+        // filter.
         if (this._passiveWatchedFiles.has(normalize(path))) {
           return false;
         }
@@ -1159,8 +1173,8 @@ class OmsWatcher extends EventEmitter<{
         for (; ;) {
           const timerInterruptController = new AbortController();
           let interruptedByMerge = false;
-          const onMerge = (mergeArgs: unknown[]) => {
-            applyRequest(mergeArgs[0] as ProfileBuildRequest | undefined);
+          const onMerge = (mergeArgs: unknown[] | undefined) => {
+            applyRequest(mergeArgs?.[0] as ProfileBuildRequest | undefined);
             interruptedByMerge = true;
             timerInterruptController.abort();
           };
@@ -1176,7 +1190,8 @@ class OmsWatcher extends EventEmitter<{
               signal: timerInterruptController.signal,
             });
           } catch (err) {
-            if (typeof err === 'object' && err !== null && 'name' in err && err.name === 'AbortError') {
+            if (typeof err === 'object' && err !== null && 'name' in err && err
+              .name === 'AbortError') {
               if (interruptedByMerge) {
                 logger.debug(`Build merged.`);
                 continue;
@@ -1198,8 +1213,11 @@ class OmsWatcher extends EventEmitter<{
         return await this._execBuild(state);
       },
     });
-    void taskPromise.catch((err) => {
-      this._rejectProfileBuildRequest(request, err instanceof MergedTaskExecError ? err.cause : err);
+    taskPromise.catch((err) => {
+      this._rejectProfileBuildRequest(request, err instanceof MergedTaskExecError
+        ? err
+          .cause
+        : err);
     });
     return request.result.promise;
   }
@@ -1218,12 +1236,13 @@ class OmsWatcher extends EventEmitter<{
     if (this._revisionInProgress) {
       this._followupRevisionQueued = true;
     }
-    this._requestProfiles(reason, true, allBuildProfileIds).waitFor(allBuildProfileIds).catch((err) => {
-      if (err instanceof OmsWatcherClosedError) {
-        return;
-      }
-      logger.error(`Build failed: ${err}`);
-    });
+    this._requestProfiles(reason, true, allBuildProfileIds).waitFor(allBuildProfileIds)
+      .catch((err) => {
+        if (err instanceof OmsWatcherClosedError) {
+          return;
+        }
+        logger.error(`Build failed: ${err}`);
+      });
   }
 
   private async _execBuild(state: BuildState): Promise<void> {
@@ -1257,7 +1276,7 @@ class OmsWatcher extends EventEmitter<{
         await this._uuidManager.emit();
         logger.info(`Build prepare done in ${Date.now() - prepareStart}ms`);
 
-        const profileBuilds: Promise<BuildProfileResult>[] = [];
+        const profileBuilds: Array<Promise<BuildProfileResult>> = [];
         for (const profile of state.profiles) {
           const profileBuild = (async () => {
             const result = await this._runProfileBuild(profile);
@@ -1358,7 +1377,8 @@ class OmsWatcher extends EventEmitter<{
       const profileBuildOptions = { editor: true };
       const { entries } = await this._makeEntries(BuildProfileId.default, profileBuildOptions);
       for (const domain of Object.values(this._domains)) {
-        for (const implicitEntry of domain.getImplicitEntries(BuildProfileId.default, profileBuildOptions)) {
+        for (const implicitEntry of domain.getImplicitEntries(BuildProfileId.default,
+          profileBuildOptions)) {
           extras.entryFiles.add(implicitEntry);
         }
       }
@@ -1384,7 +1404,9 @@ class OmsWatcher extends EventEmitter<{
     if (newExtras) {
       this._profileBuildExtras[BuildProfileId.default] = newExtras;
     }
-    this._publishProfileDependencies(BuildProfileId.default, buildResult.inferredFiles, extras.entryFiles);
+    this._publishProfileDependencies(BuildProfileId.default,
+      buildResult.inferredFiles,
+      extras.entryFiles);
     const affectedFiles = await this._writeRuntimeLoaderAssets();
     await this._saveCentralizedUUIDs();
     return {
@@ -1416,7 +1438,8 @@ class OmsWatcher extends EventEmitter<{
       const profileBuildOptions = { dynamicExports: false };
       const { entries } = await this._makeEntries(BuildProfileId.headless, profileBuildOptions);
       for (const domain of Object.values(this._domains)) {
-        for (const implicitEntry of domain.getImplicitEntries(BuildProfileId.headless, profileBuildOptions)) {
+        for (const implicitEntry of domain.getImplicitEntries(BuildProfileId.headless,
+          profileBuildOptions)) {
           extras.entryFiles.add(implicitEntry);
         }
       }
@@ -1442,7 +1465,9 @@ class OmsWatcher extends EventEmitter<{
     if (newExtras) {
       this._profileBuildExtras[BuildProfileId.headless] = newExtras;
     }
-    this._publishProfileDependencies(BuildProfileId.headless, buildResult.inferredFiles, extras.entryFiles);
+    this._publishProfileDependencies(BuildProfileId.headless,
+      buildResult.inferredFiles,
+      extras.entryFiles);
     return {
       ok: true,
       affectedFiles: [],
@@ -1524,10 +1549,12 @@ class OmsWatcher extends EventEmitter<{
       entryFiles: new Set(entryFiles),
     };
     const allInferredFiles = new Set(
-      Object.values(this._profileDependencySnapshots).flatMap((snapshot) => [...snapshot.inferredFiles]),
+      Object.values(this._profileDependencySnapshots).flatMap((snapshot) => [...snapshot
+        .inferredFiles]),
     );
     const allEntryFiles = new Set(
-      Object.values(this._profileDependencySnapshots).flatMap((snapshot) => [...snapshot.entryFiles]),
+      Object.values(this._profileDependencySnapshots).flatMap((snapshot) => [...snapshot
+        .entryFiles]),
     );
 
     logger.debug(`${profile} profile dependencies published: %s`, [...inferredFiles]);
@@ -1554,7 +1581,8 @@ class OmsWatcher extends EventEmitter<{
     }
   }
 
-  private async _renderMetadataFile(autoRunInfos: AutoRunInfos, exportEntries: Record<string, string>) {
+  private async _renderMetadataFile(autoRunInfos: AutoRunInfos, exportEntries:
+  Record<string, string>) {
     const template = await fs.readFile(join(helpersDir, 'meta.ts.ejs'), 'utf8');
     const source = Ejs.render(template, {
       entries: autoRunInfos.map(({ bundleId, isEditorEntry }) => {
@@ -1606,7 +1634,7 @@ class OmsWatcher extends EventEmitter<{
       if (operation === 'add') {
         entryChanged = (await this._addWatchFile(file)) || entryChanged;
       } else if (operation === 'delete') {
-        entryChanged = (await this._removeWatchFile(file)) || entryChanged;
+        entryChanged = this._removeWatchFile(file) || entryChanged;
       } else if (operation === 'change') {
         await this._updateWatchFile(file);
       }
@@ -1626,14 +1654,14 @@ class OmsWatcher extends EventEmitter<{
     return shouldRebuildBundles;
   }
 
-  private async _removeWatchFile(path: string) {
+  private _removeWatchFile(path: string) {
     const domainId = this._getDomainId(path);
     if (!domainId) {
       return false;
     }
     const domain = this._domains[domainId];
     assert.ok(domain, `Domain ${domainId} not found`);
-    const shouldRebuildBundle = await domain.removeSourceFile(path);
+    const shouldRebuildBundle = domain.removeSourceFile(path);
     return shouldRebuildBundle;
   }
 
@@ -1650,7 +1678,7 @@ class OmsWatcher extends EventEmitter<{
 
   private async _execInlineUUIDs() {
     for (const [file, uuid] of this._uuidManager.centralizedModules()) {
-      let code = '';
+      let code: string;
       try {
         code = await fs.readFile(file, 'utf8');
       } catch (err) {
@@ -1708,7 +1736,7 @@ async function* walkWatchableFiles(root: string): AsyncGenerator<string> {
   for (const entry of entries) {
     const path = join(root, entry.name);
     if (entry.isDirectory()) {
-      yield * walkWatchableFiles(path);
+      yield* walkWatchableFiles(path);
     } else if (entry.isFile() && shouldWatchFile(path)) {
       yield path;
     }

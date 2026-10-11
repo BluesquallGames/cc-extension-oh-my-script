@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BuildProfileResult, BuildProfileResults } from '@oms/build-core/protocol';
+import type { BuildProfileResults } from '@oms/build-core/protocol';
 
 const mockState = vi.hoisted(() => {
   return {
@@ -18,8 +18,8 @@ const mockState = vi.hoisted(() => {
     installGlobalImportCalls: 0,
     rebuildResult: {
       default: { ok: true, affectedFiles: ['src/index.ts'] },
-    } as BuildProfileResults,
-    defaultProfileResult: { ok: true, affectedFiles: ['src/index.ts'] } as BuildProfileResult,
+    },
+    defaultProfileResult: { ok: true, affectedFiles: ['src/index.ts'] },
     rebuildPromise: undefined as Promise<BuildProfileResults> | undefined,
     rebuildError: undefined as Error | undefined,
   };
@@ -73,7 +73,8 @@ vi.mock(import('../src/utils/request-self.js'), () => {
 
 vi.mock(import('../src/contributions/scene/module-system.js'), () => {
   return {
-    ReloadInterruptError: class ReloadInterruptError extends Error {},
+    ReloadInterruptError: class ReloadInterruptError extends Error {
+    },
   };
 });
 
@@ -209,7 +210,8 @@ describe('asset-db OMS runtime startup', () => {
     /// 1. asset-db beforePreStart starts the OMS first build.
     /// 2. The worker rebuild request remains pending.
     /// @expect
-    /// The startup task remains visible before 120 seconds and is removed after the 120-second timeout.
+    /// The startup task remains visible before 120 seconds and is removed after the 120-second
+    /// timeout.
     vi.useFakeTimers();
     mockState.rebuildPromise = new Promise(() => undefined);
     const assetDb = await import('../src/contributions/asset-db/index');
@@ -237,28 +239,32 @@ describe('asset-db OMS runtime startup', () => {
     });
   });
 
-  it('lets afterPreStart own the first asset-db reload and accepts build reloads only after startup', async () => {
+  it(('lets afterPreStart own the first asset-db reload and accepts build '
+    + 'reloads only after startup'), async () => {
     /// @case
     /// 1. asset-db loads OMS and starts its first build in beforePreStart.
     /// 2. build success asks asset-db to reload before afterPreStart has run.
     /// 3. afterPreStart completes the startup runtime reload.
     /// 4. A later build success asks asset-db to reload after startup.
     /// @expect
-    /// asset-db executes project scripts once during startup, then accepts later build-triggered reloads.
+    /// asset-db executes project scripts once during startup, then accepts later build-triggered
+    /// reloads.
     const assetDb = await import('../src/contributions/asset-db/index');
 
-    await assetDb.load();
+    assetDb.load();
     await assetDb.methods.beforePreStart({});
     await assetDb.methods.reloadRuntime('rebuild()');
 
     expect(mockState.requestCalls).toContainEqual({
       messageId: 'rebuild',
-      args: [{
-        reason: 'asset-db startup build',
-        reloadAssetDbRuntime: false,
-        reloadSceneRuntime: false,
-        profiles: ['default'],
-      }],
+      args: [
+        {
+          reason: 'asset-db startup build',
+          reloadAssetDbRuntime: false,
+          reloadSceneRuntime: false,
+          profiles: ['default'],
+        },
+      ],
     });
     expect(mockState.reloadCalls).toEqual([]);
     expect(mockState.ensureReadyCalls).toEqual([]);
@@ -280,12 +286,13 @@ describe('asset-db OMS runtime startup', () => {
     /// 2. A build success asks asset-db to reload while the startup reload is still pending.
     /// 3. The startup reload finishes.
     /// @expect
-    /// The in-flight startup reload is not interrupted, and one pending build reload runs afterwards.
+    /// The in-flight startup reload is not interrupted, and one pending build reload runs
+    /// afterwards.
     const startupReload = deferred<void>();
     mockState.ensureReadyWaiters.push(startupReload.promise);
     const assetDb = await import('../src/contributions/asset-db/index');
 
-    await assetDb.load();
+    assetDb.load();
     await assetDb.methods.beforePreStart({});
     const afterPreStartPromise = assetDb.methods.afterPreStart({});
     await Promise.resolve();
@@ -322,7 +329,7 @@ describe('asset-db OMS runtime startup', () => {
     };
     const assetDb = await import('../src/contributions/asset-db/index');
 
-    await assetDb.load();
+    assetDb.load();
     await assetDb.methods.beforePreStart({});
     await assetDb.methods.afterPreStart({});
 

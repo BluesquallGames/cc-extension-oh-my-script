@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { afterEach, expect, it, vi } from 'vitest';
 import { installProcessDisconnectShutdown } from '../src/process-lifetime.js';
 
@@ -20,7 +21,7 @@ it('exits after cleaning up when the IPC channel disconnects', async () => {
   /// @expect
   /// The child process runs cleanup and exits successfully.
   const { disconnect, exit } = mockProcessLifetime();
-  const cleanup = vi.fn(async () => undefined);
+  const cleanup = vi.fn(() => Promise.resolve(undefined));
 
   installProcessDisconnectShutdown({
     cleanup,
@@ -39,8 +40,8 @@ it('still exits when disconnect cleanup fails', async () => {
   /// @expect
   /// The child process still exits instead of staying alive as an orphan.
   const { disconnect, exit } = mockProcessLifetime();
-  const cleanup = vi.fn(async () => {
-    throw new Error('cleanup failed');
+  const cleanup = vi.fn(() => {
+    return Promise.reject(new Error('cleanup failed'));
   });
 
   installProcessDisconnectShutdown({
@@ -76,13 +77,14 @@ it('forces exit when disconnect cleanup never settles', async () => {
 
 it('shuts down immediately if the IPC channel is already disconnected', async () => {
   /// @case
-  /// 1. build-core installs its process lifetime handler after the parent IPC channel is already closed.
+  /// 1. build-core installs its process lifetime handler after the parent IPC channel is already
+  /// closed.
   /// 2. No future `disconnect` event is guaranteed.
   /// @expect
   /// The child still runs cleanup and exits.
   const { exit } = mockProcessLifetime();
   setProcessConnected(false);
-  const cleanup = vi.fn(async () => undefined);
+  const cleanup = vi.fn(() => Promise.resolve(undefined));
 
   installProcessDisconnectShutdown({
     cleanup,
@@ -102,10 +104,10 @@ function mockProcessLifetime() {
     }
     return process.once(event, listener);
   }) as typeof process.once);
-  const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined as never) as typeof process.exit);
+  const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
   return {
-    disconnect() {
+    disconnect(this: void) {
       expect(disconnect).toBeDefined();
       disconnect?.();
     },

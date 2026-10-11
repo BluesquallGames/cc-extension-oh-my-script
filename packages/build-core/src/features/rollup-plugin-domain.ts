@@ -1,25 +1,26 @@
 import type { Plugin } from 'rollup';
 import type { Domain } from '../domain.js';
 
-const domainModuleURLRegex = /^oms:\/\/([^\/]+)(?:\/(.*))?$/;
+const domainModuleURLRegex = /^oms:\/\/([^/]+)(?:\/(.*))?$/;
 
 export function rollupPluginDomain({
   domains,
   allowEditorOnlyImports,
 }: {
-  domains: Record<string, Domain>,
-  allowEditorOnlyImports: boolean,
+  domains: Record<string, Domain>;
+  allowEditorOnlyImports: boolean;
 }): Plugin {
   return {
     name: 'oms:domain',
 
-    async resolveId(id) {
+    resolveId(id) {
       const parsed = parseDomainModuleURL(id);
       if (!parsed) {
         return null;
       }
       const { domainId, exportSubpath } = parsed;
-      const matchingDomains = Object.values(domains).filter((domain) => domain.exportPackageName === domainId);
+      const matchingDomains = Object.values(domains).filter((domain) => domain
+        .exportPackageName === domainId);
       if (matchingDomains.length > 1) {
         return this.error(`Duplicate OMS export package name: ${domainId}`);
       }

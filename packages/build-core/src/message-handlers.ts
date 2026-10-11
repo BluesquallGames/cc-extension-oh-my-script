@@ -10,16 +10,16 @@ export interface MessageHandlerRegistry {
 export function registerMessageHandlers(ctx: ServerContext) {
   let globalOmsBuilder: OmsBuilder | undefined = undefined;
 
-  ctx.ipc.listen('setup', async (args) => {
+  ctx.ipc.listen('setup', (args) => {
     assert(!globalOmsBuilder, 'omsBuilder already setup');
     globalOmsBuilder = new OmsBuilder(ctx, args);
     globalOmsBuilder.on('passive-build-end', (buildResult) => {
-      void ctx.ipc.invoke('passive-build-end', buildResult).catch((err) => {
+      ctx.ipc.invoke('passive-build-end', buildResult).catch((err) => {
         logger.error('Failed to deliver passive build result: %o', err);
       });
     });
     globalOmsBuilder.on('passive-profile-build-end', (buildResult) => {
-      void ctx.ipc.invoke('passive-profile-build-end', buildResult).catch((err) => {
+      ctx.ipc.invoke('passive-profile-build-end', buildResult).catch((err) => {
         logger.error(`Failed to deliver passive ${buildResult.profile} profile build result: %o`, err);
       });
     });
@@ -47,8 +47,8 @@ export function registerMessageHandlers(ctx: ServerContext) {
     await (ensureOmsBuilder()).updateBuildOptions(options);
   });
 
-  ctx.ipc.listen('ping', async () => {
-    void ctx.ipc.invoke('pong', undefined).catch((err) => {
+  ctx.ipc.listen('ping', () => {
+    ctx.ipc.invoke('pong', undefined).catch((err) => {
       logger.error('Failed to deliver pong: %o', err);
     });
   });

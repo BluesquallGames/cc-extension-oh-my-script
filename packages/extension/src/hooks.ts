@@ -2,7 +2,10 @@
 
 import { logger } from './logger.js';
 import { workerMessageDescriptions } from './worker/worker-message-descriptions.js';
-import { ExtensionContributions, mergeContributions } from '@cyclonium/cc-extension-utils/extension';
+import {
+  ExtensionContributions,
+  mergeContributions,
+} from '@cyclonium/cc-extension-utils/extension';
 import sceneContributionScript from './contributions/scene/index.ts?contribution-script';
 import serverContributionScript from './contributions/server.ts?contribution-script';
 import footerContributionScript from './contributions/footer/right.ts?contribution-script';
@@ -11,19 +14,22 @@ import assetDbContributionScript from './contributions/asset-db/index.ts?contrib
 import { relative } from 'node:path';
 import { selfPackagePath } from './self-info.js';
 
-export async function register(info: {
+export function register(info: {
   contributions: ExtensionContributions;
 }) {
-  const contributions = await getContributions();
+  const contributions = getContributions();
   mergeContributions(info.contributions ??= {}, contributions);
   logger.debug(`registered contributions: ${JSON.stringify(contributions, undefined, 2)}`);
 }
 
 type Methods = keyof typeof import('./main.js')['methods'];
 
-async function getContributions(): Promise<ExtensionContributions> {
+function getContributions(): ExtensionContributions {
   const workerMessagesContribution = Object.fromEntries(
-    Object.keys(workerMessageDescriptions).map((messageName) => [messageName, { methods: [messageName] }]),
+    Object.keys(workerMessageDescriptions).map((messageName) => [
+      messageName,
+      { methods: [messageName] },
+    ]),
   ) as {
     [x in keyof typeof workerMessageDescriptions]: {
       methods: x[];

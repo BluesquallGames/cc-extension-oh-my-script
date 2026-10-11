@@ -1,3 +1,4 @@
+import process from 'node:process';
 import cp from 'node:child_process';
 import assert from 'node:assert';
 import { logger } from '../logger.js';
@@ -15,12 +16,13 @@ import {
   type ServerInvocationMethodId,
 } from '@oms/build-core/protocol';
 import { addEditorBroadcastListener } from '../utils/editor/common.js';
-import { addListenerOnPackageEnabled, addListenerOnPackageDisabled } from '../utils/editor/extension.js';
+import { addListenerOnPackageEnabled,
+  addListenerOnPackageDisabled } from '../utils/editor/extension.js';
 import type { RebuildOptions } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';
 import { broadcastInner, InnerPackageMessageId } from '../inner-package-messaging.js';
-import { selfExtensionName, selfPackageName, selfPackagePath } from '../self-info.js';
+import { selfPackageName, selfPackagePath } from '../self-info.js';
 import { SceneMethods } from '../contributions/scene/index.js';
 import { createInterface } from 'node:readline/promises';
 import { resolve } from 'node:path';
@@ -30,16 +32,17 @@ import { promiseWithResolvers } from '../utils/promise-with-resolvers.js';
 setLogger(logger);
 
 const logTag = '[BuilderAgent] ';
-// Matches the strictest Node engine requirement among build-core runtime dependencies: oxc-transform@0.135.0.
+// Matches the strictest Node engine requirement among build-core runtime dependencies:
+// oxc-transform@0.135.0.
 const supportedNodeVersionRange = '^20.19.0 || >=22.12.0';
 const runAsNodeProbeTimeoutMs = 3_000;
 // Sandboxie Plus 1.18.0 injects its default Chromium compatibility flag,
-// `--disable-features=PrintCompositorLPAC`, into processes classified as Chrome. That includes Electron
-// when mapped through `SpecialImage=chrome`; see https://sandboxie-plus.com/sandboxie/customchromiumflags/.
-// ELECTRON_RUN_AS_NODE turns Electron into plain Node, which rejects that Chromium-only option and exits
-// before running the entry script. Sandboxie skips the injection when the command line contains " --type=".
-// Keep this deliberately nonstandard marker after the entry script: Sandboxie can see it, while RunAsNode
-// passes it to the script instead of parsing it as a Node option.
+// `--disable-features=PrintCompositorLPAC`, into processes classified as Chrome, including Electron
+// mapped through `SpecialImage=chrome`:
+// https://sandboxie-plus.com/sandboxie/customchromiumflags/.
+// ELECTRON_RUN_AS_NODE turns Electron into plain Node, which rejects that Chromium-only option
+// before running the entry script. Sandboxie skips injection when the command contains "--type=".
+// Place the marker after the entry script so RunAsNode treats it as a script argument.
 const sandboxieRunAsNodeProcessTypeArg = '--type=magic-param-for-sandboxie-workaround';
 
 export class OmsBuilderAgent extends EventEmitter<{
@@ -51,20 +54,24 @@ export class OmsBuilderAgent extends EventEmitter<{
       logger.debug(`Asset DB ready`);
     });
 
-    addListenerOnPackageEnabled(async (pkg: Editor.Interface.PackageInfo) => {
+    addListenerOnPackageEnabled((pkg: Editor.Interface.PackageInfo) => {
       logger.debug(`Package enabled: ${pkg.name}`);
       if (!this._filterPackage(pkg)) {
         return;
       }
-      await this._updateBuildOptions();
+      this._updateBuildOptions().catch((error: unknown) => {
+        logger.error(`${logTag}Failed to update build options after package enable: %o`, error);
+      });
     });
 
-    addListenerOnPackageDisabled(async (pkg: Editor.Interface.PackageInfo) => {
+    addListenerOnPackageDisabled((pkg: Editor.Interface.PackageInfo) => {
       logger.debug(`Package disabled: ${pkg.name}`);
       if (!this._filterPackage(pkg)) {
         return;
       }
-      await this._updateBuildOptions();
+      this._updateBuildOptions().catch((error: unknown) => {
+        logger.error(`${logTag}Failed to update build options after package disable: %o`, error);
+      });
     });
   }
 
@@ -87,7 +94,7 @@ export class OmsBuilderAgent extends EventEmitter<{
         serverAgent.childProcess.kill();
       }
     } catch (err) {
-      logger.error(`${logTag}close builder agent failed: ${err}`);
+      logger.error(`${logTag}close builder agent failed: %o`, err);
     } finally {
       this._state = { type: StateType.closed };
     }
@@ -179,13 +186,14 @@ export class OmsBuilderAgent extends EventEmitter<{
     }
 
     const serverAgent = await this._setup();
-    const buildOptions = await this._makeBuildOptions();
+    const buildOptions = this._makeBuildOptions();
     await serverAgent.ipc.invoke('update-build-options', buildOptions);
     const rebuildOptions = {
       ...(options.profiles ? { profiles: options.profiles } : {}),
     };
     logger.debug(`${logTag}Rebuild with options: %o`, rebuildOptions);
-    return await serverAgent.ipc.invoke(options.clean ? 'clean-rebuild' : 'rebuild', rebuildOptions);
+    return await serverAgent.ipc.invoke(options.clean ? 'clean-rebuild' : 'rebuild',
+      rebuildOptions);
   }
 
   async restart() {
@@ -227,8 +235,8 @@ export class OmsBuilderAgent extends EventEmitter<{
     type: StateType.opened;
     serverAgent: ServerAgent;
   } = {
-      type: StateType.closed,
-    };
+    type: StateType.closed,
+  };
 
   private _setupPromise: Promise<ServerAgent> | undefined = undefined;
   private _currentBuilds = new Map<Promise<ProtocolBuildResults>, Set<BuildProfileId>>();
@@ -258,7 +266,8 @@ export class OmsBuilderAgent extends EventEmitter<{
       this._startPingPong(this._state.serverAgent);
       return;
     }
-    logger.error(`${logTag}OMS builder no response after ${this._pingPongDuration}s, will restart.`);
+    logger.error(`${logTag}OMS builder no response after ${this
+      ._pingPongDuration}s, will restart.`);
     await this.close();
     await this.restart();
   }
@@ -304,7 +313,13 @@ export class OmsBuilderAgent extends EventEmitter<{
 
     logger.info(`${logTag}Starting OMS builder with ${runtime.description}`);
     const childProcess = cp.spawn(runtime.executable, childArgs, {
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'],
+      stdio: [
+        'pipe',
+        'pipe',
+        'pipe',
+        'pipe',
+        'ipc',
+      ],
       env: childEnv,
     });
 
@@ -314,12 +329,15 @@ export class OmsBuilderAgent extends EventEmitter<{
     } = promiseWithResolvers<never>();
     const onProcessError = (error: Error) => {
       rejectProcessAborted(new Error(
-        `${logTag}OMS builder using ${runtime.description} failed before bootstrap setup completed: ${error.message}`,
+        `${logTag}OMS builder using ${runtime
+          .description} failed before bootstrap setup completed: ${error.message}`,
       ));
     };
     const onProcessExit = (code: number | null, signal: NodeJS.Signals | null) => {
       rejectProcessAborted(new Error(
-        `${logTag}OMS builder using ${runtime.description} exited before bootstrap setup completed (code ${code ?? 'unknown'}, signal ${signal ?? 'none'})`,
+        `${logTag}OMS builder using ${runtime
+          .description} exited before bootstrap setup completed (code ${code
+          ?? 'unknown'}, signal ${signal ?? 'none'})`,
       ));
     };
     childProcess.once('error', onProcessError);
@@ -382,12 +400,13 @@ export class OmsBuilderAgent extends EventEmitter<{
       closeIpc(`${logTag}OMS builder IPC disconnected`);
     });
     childProcess.once('exit', (code, signal) => {
-      closeIpc(`${logTag}OMS builder exited (code ${code ?? 'unknown'}, signal ${signal ?? 'none'})`);
+      closeIpc(`${logTag}OMS builder exited (code ${code ?? 'unknown'}, signal ${signal
+      ?? 'none'})`);
     });
     childProcess.once('error', (error) => {
       closeIpc(`${logTag}OMS builder process failed: ${error.message}`);
     });
-    const listen_vendor = ipc.listen;
+    const listen_vendor = ipc.listen.bind(ipc);
     ipc.listen = function (...args) {
       const [methodId, callback, ...remainArgs] = args;
       logger.debug(`${logTag}Listening to ${methodId}`);
@@ -417,17 +436,19 @@ export class OmsBuilderAgent extends EventEmitter<{
         resolveBootstrap();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        rejectBootstrap(new Error(`${logTag}OMS builder setup IPC failed using ${runtime.description}: ${message}`));
+        rejectBootstrap(new Error(`${logTag}OMS builder setup IPC failed using ${runtime
+          .description}: ${message}`));
         childProcess.kill();
       }
     });
 
-    ipc.listen('pong', async () => {
+    ipc.listen('pong', () => {
       this._pongReceived = true;
     });
 
     ipc.listen('passive-build-end', () => {
-      // Revision completion is retained for protocol compatibility; runtime work follows the default lane.
+      // Revision completion is retained for protocol compatibility; runtime work follows the
+      // default lane.
     });
 
     ipc.listen('passive-profile-build-end', async ({ profile, result }) => {
@@ -441,14 +462,14 @@ export class OmsBuilderAgent extends EventEmitter<{
       });
     });
 
-    ipc.listen('build-start', async (opts) => {
+    ipc.listen('build-start', (opts) => {
       this._handleBuildStart(opts.profiles);
       broadcastInner(InnerPackageMessageId.buildStart, {
         ...opts,
       });
     });
 
-    ipc.listen('build-end', async (opts) => {
+    ipc.listen('build-end', (opts) => {
       broadcastInner(InnerPackageMessageId.buildEnd, {
         ...opts,
       });
@@ -493,7 +514,8 @@ export class OmsBuilderAgent extends EventEmitter<{
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const embeddedRuntimeIssue = `Electron ${electronVersion} embeds supported Node ${embeddedNodeVersion}, but its RunAsNode probe failed (${message})`;
+        const embeddedRuntimeIssue
+          = `Electron ${electronVersion} embeds supported Node ${embeddedNodeVersion}, but its RunAsNode probe failed (${message})`;
         logger.warn(`${logTag}${embeddedRuntimeIssue}; trying external Node from PATH`);
         return await this._selectExternalNode(embeddedRuntimeIssue);
       }
@@ -505,7 +527,8 @@ export class OmsBuilderAgent extends EventEmitter<{
     return await this._selectExternalNode(embeddedRuntimeIssue);
   }
 
-  private _probeElectronRunAsNode(electronVersion: string, embeddedNodeVersion: string): Promise<void> {
+  private _probeElectronRunAsNode(electronVersion: string, embeddedNodeVersion: string):
+  Promise<void> {
     const probePath = resolve(selfPackagePath, 'dist/worker/run-as-node-probe.cjs');
     const expectedOutput = `oms-run-as-node-probe:${electronVersion}:${embeddedNodeVersion}`;
     return new Promise((resolveProbe, rejectProbe) => {
@@ -527,7 +550,8 @@ export class OmsBuilderAgent extends EventEmitter<{
         }
         const output = stdout.trim();
         if (output !== expectedOutput) {
-          rejectProbe(new Error(`expected ${JSON.stringify(expectedOutput)}, received ${JSON.stringify(output)}`));
+          rejectProbe(new Error(`expected ${JSON.stringify(
+            expectedOutput)}, received ${JSON.stringify(output)}`));
           return;
         }
         resolveProbe();
@@ -543,6 +567,7 @@ export class OmsBuilderAgent extends EventEmitter<{
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(
         `${logTag}Cannot start OMS builder: ${embeddedRuntimeIssue}; external Node from PATH is unavailable (${message}); required Node version is ${supportedNodeVersionRange}`,
+        { cause: error },
       );
     }
     if (!satisfiesSemver(externalNodeVersion, supportedNodeVersionRange)) {
@@ -561,7 +586,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     return new Promise((resolve, reject) => {
       cp.execFile('node', ['-v'], {
         encoding: 'utf8',
-      }, (error, stdout) => {
+      }, (error: Error | null, stdout) => {
         if (error) {
           reject(error);
           return;
@@ -592,7 +617,7 @@ export class OmsBuilderAgent extends EventEmitter<{
 
   private async _updateBuildOptions() {
     this._invalidateDefaultProfileResult();
-    const buildOptions = await this._makeBuildOptions();
+    const buildOptions = this._makeBuildOptions();
     const serverAgent = await this._setupPromise;
     if (!serverAgent) {
       return;
@@ -600,7 +625,7 @@ export class OmsBuilderAgent extends EventEmitter<{
     await serverAgent.ipc.invoke('update-build-options', buildOptions);
   }
 
-  private async _makeBuildOptions(): Promise<BuildOptions> {
+  private _makeBuildOptions(): BuildOptions {
     const pkgs = Editor.Package.getPackages({
       enable: true,
       invalid: false,
@@ -685,7 +710,6 @@ export class OmsBuilderAgent extends EventEmitter<{
   private _invalidateDefaultProfileResult() {
     this._lastDefaultProfileResult = undefined;
   }
-
 }
 
 interface ServerAgent {

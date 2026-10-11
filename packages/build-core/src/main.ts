@@ -1,11 +1,14 @@
 import process from 'node:process';
-import { Ipc, type InvocationMessage, type ClientInvocationMethodId, type ServerInvocationMethodId } from './protocol.js';
+import { Ipc,
+  type InvocationMessage,
+  type ClientInvocationMethodId,
+  type ServerInvocationMethodId } from './protocol.js';
 import { registerMessageHandlers } from './message-handlers.js';
 import { logger } from './logger.js';
 import { ServerContext } from './server-context.js';
 import { installProcessDisconnectShutdown } from './process-lifetime.js';
 
-async function main() {
+function main() {
   logger.debug('oms worker is executing');
 
   const ipc = new Ipc<ServerInvocationMethodId, ClientInvocationMethodId>({
@@ -55,8 +58,10 @@ function isDisconnectedIpcError(err: unknown) {
   return code === 'EPIPE' || code === 'ERR_IPC_CHANNEL_CLOSED';
 }
 
-main().catch((err) => {
+try {
+  main();
+} catch (err) {
   logger.error('oms worker failed', err);
-});
+}
 
 export {};

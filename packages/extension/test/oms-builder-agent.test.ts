@@ -1,3 +1,4 @@
+import process from 'node:process';
 import cp from 'node:child_process';
 import EventEmitter from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -13,14 +14,13 @@ import {
   type RebuildOptions as ProtocolRebuildOptions,
 } from '@oms/build-core/protocol';
 import { OmsBuilderAgent } from '../src/worker/oms-builder-agent';
-import { type logger } from '../src/logger.js';
 
 const originalProcessVersionsDescriptor = Object.getOwnPropertyDescriptor(process, 'versions')!;
 const originalProcessExecPathDescriptor = Object.getOwnPropertyDescriptor(process, 'execPath')!;
 
 vi.mock(import('../src/logger.js'), () => {
   return {
-    logger: console as unknown as typeof logger,
+    logger: console,
   };
 });
 
@@ -38,10 +38,10 @@ beforeEach(() => {
       },
     },
     Profile: {
-      getProject: vi.fn(async () => true),
+      getProject: vi.fn(() => Promise.resolve(true)),
     },
     Message: {
-      request: vi.fn(async () => undefined),
+      request: vi.fn(() => Promise.resolve(undefined)),
       broadcast: vi.fn(),
       __protected__: {
         addBroadcastListener: vi.fn(),
@@ -57,22 +57,49 @@ afterEach(() => {
 });
 
 describe('OMS builder agent process selection', () => {
-  it('uses the current Electron executable as Node when its embedded Node is supported', async () => {
+  it('reports package event update failures', async () => {
+    /// @case
+    /// An enabled project package triggers a build-options update that fails.
+    /// @expect
+    /// The event callback reports the error through the extension logger.
+    const onPackageEvent = vi.spyOn(Editor.Package.__protected__, 'on');
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const agent = new OmsBuilderAgent();
+    const failure = new Error('Cannot read enabled packages');
+    vi.spyOn(Editor.Package, 'getPackages').mockImplementation(() => {
+      throw failure;
+    });
+    const listener = onPackageEvent.mock.calls.find(([event]) => event === 'enable')![1];
+    const result: unknown = listener({
+      name: 'example',
+      path: '/__oms_test__/extensions/example',
+      enable: true,
+      invalid: false,
+    });
+    if (result instanceof Promise) {
+      await result.catch(() => undefined);
+    }
+    await vi.waitFor(() => expect(logError).toHaveBeenCalledWith(expect.any(String), failure));
+    await agent.close();
+  });
+  it(('uses the current Electron executable as Node when its embedded Node is '
+    + 'supported'), async () => {
     /// @case
     /// 1. The extension worker is running in Electron 42 with embedded Node 24.18.
     /// 2. OMS builder setup is requested.
     /// @expect
-    /// The extension marks both RunAsNode commands as Chromium child processes, proves the capability, then starts the builder through the current Electron executable.
+    /// The extension marks both RunAsNode commands as Chromium child processes, proves the
+    /// capability, then starts the builder through the current Electron executable.
     stubHostRuntime({
       electron: '42.6.0',
       node: '24.18.0',
       execPath: 'C:\\Vortex\\Vortex.exe',
     });
     const child = makeSuccessfulBuilderProcess();
-    const spawn = vi.spyOn(cp, 'spawn').mockImplementation((() => {
+    const spawn = vi.spyOn(cp, 'spawn').mockImplementation(() => {
       child.bootstrap();
       return child;
-    }) as typeof cp.spawn);
+    });
     const execFile = mockRuntimeExecFile({
       runAsNode: {
         error: null,
@@ -115,7 +142,13 @@ describe('OMS builder agent process selection', () => {
         '--type=magic-param-for-sandboxie-workaround',
       ],
       expect.objectContaining({
-        stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'],
+        stdio: [
+          'pipe',
+          'pipe',
+          'pipe',
+          'pipe',
+          'ipc',
+        ],
         env: expect.objectContaining({
           ELECTRON_RUN_AS_NODE: '1',
         }),
@@ -125,7 +158,8 @@ describe('OMS builder agent process selection', () => {
     await agent.close();
   });
 
-  it('uses external Node without probing Electron when RunAsNode is disabled for the project', async () => {
+  it(('uses external Node without probing Electron when RunAsNode is disabled '
+    + 'for the project'), async () => {
     /// @case
     /// 1. The project disables Electron RunAsNode while Electron embeds a supported Node version.
     /// 2. PATH resolves to a supported external Node.
@@ -138,10 +172,10 @@ describe('OMS builder agent process selection', () => {
       execPath: 'C:\\Vortex\\Vortex.exe',
     });
     const child = makeSuccessfulBuilderProcess();
-    const spawn = vi.spyOn(cp, 'spawn').mockImplementation((() => {
+    const spawn = vi.spyOn(cp, 'spawn').mockImplementation(() => {
       child.bootstrap();
       return child;
-    }) as typeof cp.spawn);
+    });
     const execFile = mockExternalNodeVersion('v24.0.0');
     const agent = new OmsBuilderAgent();
 
@@ -150,9 +184,7 @@ describe('OMS builder agent process selection', () => {
       affectedFiles: [],
     });
 
-    expect(execFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
-      ['node', ['-v']],
-    ]);
+    expect(execFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([['node', ['-v']]]);
     expect(spawn.mock.calls[0]?.[0]).toBe('node');
     await agent.close();
   });
@@ -162,19 +194,20 @@ describe('OMS builder agent process selection', () => {
     /// 1. The project disables Electron RunAsNode.
     /// 2. PATH does not provide a node executable.
     /// @expect
-    /// Setup fails before spawning and reports the project policy, external failure, and required range.
+    /// Setup fails before spawning and reports the project policy, external failure, and required
+    /// range.
     vi.mocked(Editor.Profile.getProject).mockResolvedValue(false);
     stubHostRuntime({
       electron: '42.6.0',
       node: '24.18.0',
       execPath: 'C:\\Vortex\\Vortex.exe',
     });
-    vi.spyOn(cp, 'execFile').mockImplementation(((...args: unknown[]) => {
+    vi.spyOn(cp, 'execFile').mockImplementation((...args: unknown[]) => {
       const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
       const error = Object.assign(new Error('spawn node ENOENT'), { code: 'ENOENT' });
       queueMicrotask(() => callback(error, '', ''));
       return new EventEmitter() as cp.ChildProcess;
-    }) as typeof cp.execFile);
+    });
     const spawn = vi.spyOn(cp, 'spawn');
     const agent = new OmsBuilderAgent();
 
@@ -190,9 +223,11 @@ describe('OMS builder agent process selection', () => {
     /// 2. The setting is disabled while that builder is still running.
     /// 3. The existing builder is used once more, then manually restarted.
     /// @expect
-    /// The setting change does not restart the process; restart reads the new value and switches to external Node.
+    /// The setting change does not restart the process; restart reads the new value and switches to
+    /// external Node.
     let runAsNodeEnabled = true;
-    vi.mocked(Editor.Profile.getProject).mockImplementation(async () => runAsNodeEnabled);
+    vi.mocked(Editor.Profile.getProject).mockImplementation(() => Promise.resolve(
+      runAsNodeEnabled));
     stubHostRuntime({
       electron: '42.6.0',
       node: '24.18.0',
@@ -201,14 +236,14 @@ describe('OMS builder agent process selection', () => {
     const electronChild = makeSuccessfulBuilderProcess();
     const nodeChild = makeSuccessfulBuilderProcess();
     const children = [electronChild, nodeChild];
-    const spawn = vi.spyOn(cp, 'spawn').mockImplementation((() => {
+    const spawn = vi.spyOn(cp, 'spawn').mockImplementation(() => {
       const child = children.shift();
       if (!child) {
         throw new Error('Unexpected builder process start');
       }
       child.bootstrap();
       return child;
-    }) as typeof cp.spawn);
+    });
     const execFile = mockRuntimeExecFile({
       runAsNode: {
         error: null,
@@ -279,7 +314,8 @@ describe('OMS builder agent process selection', () => {
     },
   ])('uses external Node when the RunAsNode probe $name', async ({ result }) => {
     /// @case
-    /// 1. Electron embeds a supported Node version, but its RunAsNode probe does not prove script execution.
+    /// 1. Electron embeds a supported Node version, but its RunAsNode probe does not prove script
+    /// execution.
     /// 2. PATH resolves to a supported external Node.
     /// @expect
     /// The extension rejects the Electron candidate and starts the builder with external Node.
@@ -289,10 +325,10 @@ describe('OMS builder agent process selection', () => {
       execPath: 'C:\\Vortex\\Vortex.exe',
     });
     const child = makeSuccessfulBuilderProcess();
-    const spawn = vi.spyOn(cp, 'spawn').mockImplementation((() => {
+    const spawn = vi.spyOn(cp, 'spawn').mockImplementation(() => {
       child.bootstrap();
       return child;
-    }) as typeof cp.spawn);
+    });
     const execFile = mockRuntimeExecFile({
       runAsNode: result,
       externalNode: {
@@ -326,7 +362,8 @@ describe('OMS builder agent process selection', () => {
     /// 1. Electron embeds a supported Node version, but the probe output does not match.
     /// 2. PATH does not provide a node executable.
     /// @expect
-    /// Setup fails before spawning and reports the embedded runtime, probe result, external failure, and required range.
+    /// Setup fails before spawning and reports the embedded runtime, probe result, external
+    /// failure, and required range.
     stubHostRuntime({
       electron: '42.6.0',
       node: '24.18.0',
@@ -363,10 +400,10 @@ describe('OMS builder agent process selection', () => {
       execPath: 'C:\\Creator\\Creator.exe',
     });
     const child = makeSuccessfulBuilderProcess();
-    const spawn = vi.spyOn(cp, 'spawn').mockImplementation((() => {
+    const spawn = vi.spyOn(cp, 'spawn').mockImplementation(() => {
       child.bootstrap();
       return child;
-    }) as typeof cp.spawn);
+    });
     const execFile = mockExternalNodeVersion('v24.0.0');
     const agent = new OmsBuilderAgent();
 
@@ -386,7 +423,8 @@ describe('OMS builder agent process selection', () => {
     /// 1. Electron embeds Node 20.15, below the OMS builder requirement.
     /// 2. PATH resolves to Node 20.18, which is also below the requirement.
     /// @expect
-    /// Setup fails before spawning the builder and explains the required range and both detected runtimes.
+    /// Setup fails before spawning the builder and explains the required range and both detected
+    /// runtimes.
     stubHostRuntime({
       electron: '31.3.1',
       node: '20.15.1',
@@ -407,18 +445,19 @@ describe('OMS builder agent process selection', () => {
     /// 1. Electron embeds Node 20.15, below the OMS builder requirement.
     /// 2. PATH does not provide a node executable.
     /// @expect
-    /// Setup fails before spawning the builder and reports both the embedded version and the missing external runtime.
+    /// Setup fails before spawning the builder and reports both the embedded version and the
+    /// missing external runtime.
     stubHostRuntime({
       electron: '31.3.1',
       node: '20.15.1',
       execPath: 'C:\\Creator\\Creator.exe',
     });
-    vi.spyOn(cp, 'execFile').mockImplementation(((...args: unknown[]) => {
+    vi.spyOn(cp, 'execFile').mockImplementation((...args: unknown[]) => {
       const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
       const error = Object.assign(new Error('spawn node ENOENT'), { code: 'ENOENT' });
       queueMicrotask(() => callback(error, '', ''));
       return new EventEmitter() as cp.ChildProcess;
-    }) as typeof cp.execFile);
+    });
     const spawn = vi.spyOn(cp, 'spawn');
     const agent = new OmsBuilderAgent();
 
@@ -428,12 +467,15 @@ describe('OMS builder agent process selection', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('rejects an early child exit, keeps the selected runtime, and allows setup to retry', async () => {
+  it(('rejects an early child exit, keeps the selected runtime, and allows '
+    + 'setup to retry'), async () => {
     /// @case
-    /// 1. Electron embeds a supported Node version, but the selected builder process exits before bootstrapping.
+    /// 1. Electron embeds a supported Node version, but the selected builder process exits before
+    /// bootstrapping.
     /// 2. Setup is requested again and the next process bootstraps normally.
     /// @expect
-    /// The first setup rejects without falling back to PATH Node, and the rejected setup state is cleared for the retry.
+    /// The first setup rejects without falling back to PATH Node, and the rejected setup state is
+    /// cleared for the retry.
     stubHostRuntime({
       electron: '42.6.0',
       node: '24.18.0',
@@ -442,14 +484,14 @@ describe('OMS builder agent process selection', () => {
     const failedChild = makeBuilderProcess();
     const recoveredChild = makeSuccessfulBuilderProcess();
     const spawn = vi.spyOn(cp, 'spawn')
-      .mockImplementationOnce((() => {
+      .mockImplementationOnce(() => {
         queueMicrotask(() => failedChild.emit('exit', 1, null));
         return failedChild;
-      }) as typeof cp.spawn)
-      .mockImplementationOnce((() => {
+      })
+      .mockImplementationOnce(() => {
         recoveredChild.bootstrap();
         return recoveredChild;
-      }) as typeof cp.spawn);
+      });
     const execFile = mockRuntimeExecFile({
       runAsNode: {
         error: null,
@@ -477,7 +519,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. The editor requests an explicit clean rebuild.
     /// 2. Current extension build options are synchronized before the build starts.
     /// @expect
-    /// The agent invokes clean-rebuild without profile filtering and does not send an incremental rebuild request.
+    /// The agent invokes clean-rebuild without profile filtering and does not send an incremental
+    /// rebuild request.
     const builder = setupControlledBuilder();
 
     const rebuildPromise = builder.agent.cleanRebuild();
@@ -509,7 +552,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. Runtime readiness starts the builder for the first time.
     /// 2. The agent has current extension build options and requests only the default profile.
     /// @expect
-    /// Build options are sent through update-build-options before rebuild, and rebuild contains only profile selection.
+    /// Build options are sent through update-build-options before rebuild, and rebuild contains
+    /// only profile selection.
     const builder = setupControlledBuilder();
 
     const ensurePromise = builder.agent.ensureDefaultProfile();
@@ -542,7 +586,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 2. Runtime readiness asks for a build before the rebuild finishes.
     /// 3. Default succeeds, but the full-profile waiter later reports a headless failure.
     /// @expect
-    /// Runtime readiness settles first, then the full rebuild's newer successful default result remains reusable despite the headless failure.
+    /// Runtime readiness settles first, then the full rebuild's newer successful default result
+    /// remains reusable despite the headless failure.
     const builder = setupControlledBuilder();
 
     const rebuildPromise = builder.agent.rebuild();
@@ -624,7 +669,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. A default-profile IPC rebuild remains pending when the builder agent restarts.
     /// 2. Restart closes the old worker and requests a full rebuild from a new worker.
     /// @expect
-    /// The old caller rejects promptly, while restart does not reuse it and completes through the new worker.
+    /// The old caller rejects promptly, while restart does not reuse it and completes through the
+    /// new worker.
     stubHostRuntime({
       electron: '42.6.0',
       node: '24.18.0',
@@ -639,14 +685,14 @@ describe('OMS builder agent default profile ensure', () => {
       onRebuild: (respond) => secondResponses.push(respond),
     });
     const spawn = vi.spyOn(cp, 'spawn')
-      .mockImplementationOnce((() => {
+      .mockImplementationOnce(() => {
         firstChild.bootstrap();
         return firstChild;
-      }) as typeof cp.spawn)
-      .mockImplementationOnce((() => {
+      })
+      .mockImplementationOnce(() => {
         secondChild.bootstrap();
         return secondChild;
-      }) as typeof cp.spawn);
+      });
     mockRuntimeExecFile({
       runAsNode: {
         error: null,
@@ -697,14 +743,14 @@ describe('OMS builder agent default profile ensure', () => {
       onRebuild: (respond) => secondResponses.push(respond),
     });
     const spawn = vi.spyOn(cp, 'spawn')
-      .mockImplementationOnce((() => {
+      .mockImplementationOnce(() => {
         firstChild.bootstrap();
         return firstChild;
-      }) as typeof cp.spawn)
-      .mockImplementationOnce((() => {
+      })
+      .mockImplementationOnce(() => {
         secondChild.bootstrap();
         return secondChild;
-      }) as typeof cp.spawn);
+      });
     mockRuntimeExecFile({
       runAsNode: {
         error: null,
@@ -741,7 +787,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. Runtime readiness has a previous successful build cached.
     /// 2. A new rebuild starts and another default profile request arrives while it is pending.
     /// @expect
-    /// The default profile request joins the current revision instead of returning stale cache or waiting for headless.
+    /// The default profile request joins the current revision instead of returning stale cache or
+    /// waiting for headless.
     const builder = setupControlledBuilder();
 
     const firstEnsurePromise = builder.agent.ensureDefaultProfile();
@@ -779,12 +826,14 @@ describe('OMS builder agent default profile ensure', () => {
     await builder.agent.close();
   });
 
-  it('keeps a full rebuild waiting for every profile while a default-profile-only build is pending', async () => {
+  it(('keeps a full rebuild waiting for every profile while a '
+    + 'default-profile-only build is pending'), async () => {
     /// @case
     /// 1. Runtime readiness starts a default-profile-only build.
     /// 2. A normal rebuild requesting every profile arrives before that build finishes.
     /// @expect
-    /// The normal rebuild starts its own full-profile request and does not settle with the default-profile-only result.
+    /// The normal rebuild starts its own full-profile request and does not settle with the
+    /// default-profile-only result.
     const builder = setupControlledBuilder();
 
     const ensurePromise = builder.agent.ensureDefaultProfile();
@@ -840,7 +889,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. A caller explicitly rebuilds only the headless profile.
     /// 2. The headless output succeeds.
     /// @expect
-    /// The build result is returned without reloading scene/asset-db runtimes or refreshing runtime assets.
+    /// The build result is returned without reloading scene/asset-db runtimes or refreshing runtime
+    /// assets.
     const builder = setupControlledBuilder();
 
     const rebuildPromise = builder.agent.rebuild({ profiles: ['headless'] });
@@ -859,10 +909,12 @@ describe('OMS builder agent default profile ensure', () => {
 
   it('handles a successful passive default profile when headless fails', async () => {
     /// @case
-    /// 1. Runtime readiness has completed once and the worker later finishes a passive full revision.
+    /// 1. Runtime readiness has completed once and the worker later finishes a passive full
+    /// revision.
     /// 2. The passive default profile succeeds while the headless profile fails.
     /// @expect
-    /// Scene/asset-db runtimes use the successful default result and refresh its affected runtime assets.
+    /// Scene/asset-db runtimes use the successful default result and refresh its affected runtime
+    /// assets.
     const builder = setupControlledBuilder();
     const initialBuild = builder.agent.ensureDefaultProfile();
     await builder.waitForRebuildCalls(1);
@@ -911,7 +963,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. A normal full rebuild completes default successfully but fails its headless profile.
     /// 2. The profile map reports default success and headless failure to the full-profile caller.
     /// @expect
-    /// The caller receives both profile results, while the successful default result still reloads runtimes and refreshes its assets.
+    /// The caller receives both profile results, while the successful default result still reloads
+    /// runtimes and refreshes its assets.
     const builder = setupControlledBuilder();
     const rebuildPromise = builder.agent.rebuild();
     await builder.waitForRebuildCalls(1);
@@ -950,7 +1003,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. A normal rebuild succeeds and records the last build result.
     /// 2. Runtime readiness is requested afterwards.
     /// @expect
-    /// The default profile request returns the cached successful result without re-running build side effects.
+    /// The default profile request returns the cached successful result without re-running build
+    /// side effects.
     const builder = setupControlledBuilder();
 
     const rebuildPromise = builder.agent.rebuild();
@@ -975,7 +1029,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. Runtime readiness needs to start a build because no build result is cached.
     /// 2. The project has no other pending rebuild.
     /// @expect
-    /// The build request asks only for runtime/default readiness so headless output does not block runtime startup.
+    /// The build request asks only for runtime/default readiness so headless output does not block
+    /// runtime startup.
     const builder = setupControlledBuilder();
 
     const ensurePromise = builder.agent.ensureDefaultProfile();
@@ -1000,7 +1055,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. asset-db startup asks for a rebuild while it owns the first runtime readiness check.
     /// 2. The build succeeds with one affected file.
     /// @expect
-    /// The builder refreshes affected assets without starting scene or asset-db runtime reloads outside their startup barriers.
+    /// The builder refreshes affected assets without starting scene or asset-db runtime reloads
+    /// outside their startup barriers.
     const builder = setupControlledBuilder();
     const request = vi.mocked(Editor.Message.request);
 
@@ -1044,8 +1100,10 @@ describe('OMS builder agent default profile ensure', () => {
     });
 
     type PackageListener = (pkg: Editor.Interface.PackageInfo) => void | Promise<void>;
-    const packageListenerCalls = vi.mocked(Editor.Package.__protected__.on).mock.calls as unknown as Array<[string, PackageListener]>;
-    const packageEnabledRegistration = packageListenerCalls.find(([eventName]) => eventName === 'enable');
+    const packageListenerCalls = vi.mocked(Editor.Package.__protected__.on).mock
+      .calls as unknown as Array<[string, PackageListener]>;
+    const packageEnabledRegistration = packageListenerCalls.find(([eventName]) =>
+      eventName === 'enable');
     if (!packageEnabledRegistration) {
       throw new Error('Package enable listener was not registered');
     }
@@ -1101,7 +1159,8 @@ describe('OMS builder agent default profile ensure', () => {
     /// 1. A successful default build is cached for runtime readiness.
     /// 2. The builder announces a headless-only revision.
     /// @expect
-    /// Runtime readiness keeps using the cached default result without starting another default build.
+    /// Runtime readiness keeps using the cached default result without starting another default
+    /// build.
     const builder = setupControlledBuilder();
 
     const firstEnsurePromise = builder.agent.ensureDefaultProfile();
@@ -1181,10 +1240,10 @@ function setupControlledBuilder() {
       pendingRebuildResponses.push({ respond, profiles });
     },
   });
-  vi.spyOn(cp, 'spawn').mockImplementation((() => {
+  vi.spyOn(cp, 'spawn').mockImplementation(() => {
     child.bootstrap();
     return child;
-  }) as typeof cp.spawn);
+  });
   mockRuntimeExecFile({
     runAsNode: {
       error: null,
@@ -1198,7 +1257,8 @@ function setupControlledBuilder() {
   }).length;
   const cleanRebuildCallCount = () => vi.mocked(child.send).mock.calls.filter(([message]) => {
     const invocation = message as InvocationMessage;
-    return invocation.direction === InvocationDirection.call && invocation.method === 'clean-rebuild';
+    return invocation.direction === InvocationDirection.call && invocation
+      .method === 'clean-rebuild';
   }).length;
   const rebuildOptions = () => vi.mocked(child.send).mock.calls.flatMap(([message]) => {
     const invocation = message as InvocationMessage;
@@ -1206,7 +1266,8 @@ function setupControlledBuilder() {
       ? [invocation.args as ProtocolRebuildOptions]
       : [];
   });
-  const protocolCalls = () => vi.mocked(child.send).mock.calls.map(([message]) => message as InvocationMessage);
+  const protocolCalls = () => vi.mocked(child.send).mock.calls.map(([message]) =>
+    message as InvocationMessage);
 
   return {
     agent,
@@ -1230,7 +1291,8 @@ function setupControlledBuilder() {
       }
       pendingResponse.respond(toProtocolBuildResults(result, pendingResponse.profiles));
     },
-    respondToRebuild: (index: number, result: ProtocolBuildProfileResult | ProtocolBuildResults) => {
+    respondToRebuild: (index: number, result: ProtocolBuildProfileResult
+      | ProtocolBuildResults) => {
       const [pendingResponse] = pendingRebuildResponses.splice(index, 1);
       if (!pendingResponse) {
         throw new Error(`No pending OMS builder rebuild request at index ${index}`);
@@ -1274,7 +1336,7 @@ function toProtocolBuildResults(
   if (!('ok' in result)) {
     return result;
   }
-  return Object.fromEntries(profiles.map((profile) => [profile, result])) as ProtocolBuildResults;
+  return Object.fromEntries(profiles.map((profile) => [profile, result]));
 }
 
 function stubHostRuntime(options: {
@@ -1307,7 +1369,7 @@ function mockRuntimeExecFile(options: {
   runAsNode: MockExecFileResult;
   externalNode?: MockExecFileResult;
 }) {
-  return vi.spyOn(cp, 'execFile').mockImplementation(((...args: unknown[]) => {
+  return vi.spyOn(cp, 'execFile').mockImplementation((...args: unknown[]) => {
     const executable = args[0] as string;
     const callback = args.at(-1) as (error: Error | null, stdout: string, stderr: string) => void;
     const result = executable === 'node' ? options.externalNode : options.runAsNode;
@@ -1316,15 +1378,15 @@ function mockRuntimeExecFile(options: {
     }
     queueMicrotask(() => callback(result.error, result.stdout, result.stderr ?? ''));
     return new EventEmitter() as cp.ChildProcess;
-  }) as typeof cp.execFile);
+  });
 }
 
 function mockExternalNodeVersion(version: string) {
-  return vi.spyOn(cp, 'execFile').mockImplementation(((...args: unknown[]) => {
+  return vi.spyOn(cp, 'execFile').mockImplementation((...args: unknown[]) => {
     const callback = args.at(-1) as (error: Error | null, stdout: string, stderr: string) => void;
     queueMicrotask(() => callback(null, version, ''));
     return new EventEmitter() as cp.ChildProcess;
-  }) as typeof cp.execFile);
+  });
 }
 
 function makeSuccessfulBuilderProcess(options: BuilderProcessOptions = {}) {
@@ -1349,7 +1411,13 @@ function makeBuilderProcess(options: BuilderProcessOptions = {}) {
   child.stdin = stdin;
   child.stdout = stdout;
   child.stderr = stderr;
-  child.stdio = [stdin, stdout, stderr, log, null];
+  child.stdio = [
+    stdin,
+    stdout,
+    stderr,
+    log,
+    null,
+  ];
   child.connected = true;
   child.exitCode = null;
   child.signalCode = null;
@@ -1390,7 +1458,7 @@ function makeBuilderProcess(options: BuilderProcessOptions = {}) {
       : undefined;
     respond(returnValue);
     return true;
-  }) as BuilderProcessStub['send'];
+  });
   child.disconnect = vi.fn();
   child.ref = vi.fn();
   child.unref = vi.fn();
@@ -1398,7 +1466,9 @@ function makeBuilderProcess(options: BuilderProcessOptions = {}) {
   return child;
 }
 
-type BuilderProcessStub = cp.ChildProcess & {
+type BuilderProcessStub = Omit<cp.ChildProcess, 'send' | 'kill'> & {
+  send: (this: void, ...args: Parameters<cp.ChildProcess['send']>) => boolean;
+  kill: (this: void, ...args: Parameters<cp.ChildProcess['kill']>) => boolean;
   bootstrap: () => void;
 };
 

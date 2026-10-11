@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { requireEditorModule2 } from '@cyclonium/cc-extension-utils/require-editor-module';
 import { OmsWorker } from './oms-worker.js';
 import assert from 'node:assert';
@@ -25,20 +26,22 @@ export async function startWorker() {
   }
 }
 
-export async function openOmsDevtools() {
+export function openOmsDevtools() {
   assert(globalOmsWorker !== undefined, 'OMSWorker not started');
   globalOmsWorker.openDevtools();
 }
 
-export const workerMethods = Object.fromEntries(Object.keys(workerMessageDescriptions).map ((workerMessageName) => {
-  return [
-    workerMessageName,
-    async (...args: unknown[]) => {
-      const omsWorker = ensureOmsWorker();
-      return await omsWorker.request(workerMessageName as keyof typeof workerMessageDescriptions, ...args);
-    },
-  ];
-})) as {
+export const workerMethods = Object.fromEntries(Object.keys(workerMessageDescriptions)
+  .map ((workerMessageName) => {
+    return [
+      workerMessageName,
+      async (...args: unknown[]) => {
+        const omsWorker = ensureOmsWorker();
+        return await omsWorker.request(
+          workerMessageName as keyof typeof workerMessageDescriptions, ...args);
+      },
+    ];
+  })) as {
   [x in keyof typeof workerMessageDescriptions]: (...args: unknown[]) => Promise<unknown>;
 };
 

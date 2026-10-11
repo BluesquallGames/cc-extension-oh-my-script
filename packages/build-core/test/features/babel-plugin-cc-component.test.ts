@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import dedent from 'dedent';
 import { transformCCComponent } from '../../src/features/babel-plugin-cc-component.js';
 import { describe } from 'node:test';
-import { resolve } from 'path';
+import { resolve } from 'node:path';
 
 async function transform(code: string, filename: string | undefined, uuid: string | undefined) {
   const cwd = import.meta.dirname;
@@ -22,7 +22,7 @@ async function transform(code: string, filename: string | undefined, uuid: strin
       }),
     ],
   });
-  if (!transformResult || !transformResult.code) {
+  if (!transformResult?.code) {
     throw new Error('transform failed');
   }
   return transformResult.code;

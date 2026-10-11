@@ -6,7 +6,8 @@ it('rejects pending tasks when the queue aborts', async () => {
   /// 1. One task is running while a different task remains pending.
   /// 2. The queue aborts before the pending task starts.
   /// @expect
-  /// The pending caller rejects immediately, while the running task settles only after its executor actually finishes.
+  /// The pending caller rejects immediately, while the running task settles only after its executor
+  /// actually finishes.
   let releaseRunningTask!: () => void;
   const runningTaskBlocker = new Promise<void>((resolve) => {
     releaseRunningTask = resolve;
@@ -24,7 +25,7 @@ it('rejects pending tasks when the queue aborts', async () => {
   });
   const pendingTask = queue.queueTask({
     type: 'pending',
-    exec: async () => 'pending finished',
+    exec: () => Promise.resolve('pending finished'),
   });
 
   const pendingRejection = expect(pendingTask).rejects.toThrow('Task queue aborted');
@@ -48,7 +49,8 @@ it('rejects later tasks from the active execution batch when the queue aborts', 
   /// 1. Three distinct tasks are queued, and the second starts after the first finishes.
   /// 2. The queue aborts while the second task is running.
   /// @expect
-  /// The third task rejects without executing, while the second still settles only when its executor finishes.
+  /// The third task rejects without executing, while the second still settles only when its
+  /// executor finishes.
   let releaseFirstTask!: () => void;
   const firstTaskBlocker = new Promise<void>((resolve) => {
     releaseFirstTask = resolve;
@@ -84,8 +86,10 @@ it('rejects later tasks from the active execution batch when the queue aborts', 
   });
   const thirdTask = queue.queueTask({
     type: 'third',
-    exec: async () => {
+    exec: () => {
       executions.push('third');
+
+      return Promise.resolve();
     },
   });
 
@@ -108,7 +112,8 @@ it('keeps newly queued tasks behind an aborted running task until it ends', asyn
   /// 1. A running task receives an abort signal but has not finished its executor yet.
   /// 2. A new task is queued before that running executor exits.
   /// @expect
-  /// The new task remains serialized behind the running task and starts only after the original executor settles.
+  /// The new task remains serialized behind the running task and starts only after the original
+  /// executor settles.
   let releaseRunningTask!: () => void;
   const runningTaskBlocker = new Promise<void>((resolve) => {
     releaseRunningTask = resolve;
@@ -130,8 +135,10 @@ it('keeps newly queued tasks behind an aborted running task until it ends', asyn
   const abortPromise = queue.abort();
   const afterAbortTask = queue.queueTask({
     type: 'afterAbort',
-    exec: async () => {
+    exec: () => {
       executions.push('after abort');
+
+      return Promise.resolve();
     },
   });
   await Promise.resolve();
@@ -149,7 +156,8 @@ it('does not merge new work into an aborted running task', async () => {
   /// 1. A running task accepts same-type merges and then receives an abort signal.
   /// 2. Another task of the same type is queued before the aborted executor exits.
   /// @expect
-  /// The new task waits behind the aborted executor and then runs independently instead of merging into it.
+  /// The new task waits behind the aborted executor and then runs independently instead of merging
+  /// into it.
   let releaseRunningTask!: () => void;
   const runningTaskBlocker = new Promise<void>((resolve) => {
     releaseRunningTask = resolve;
@@ -172,9 +180,9 @@ it('does not merge new work into an aborted running task', async () => {
   const abortPromise = queue.abort();
   const taskAfterAbort = queue.queueTask({
     type: 'build',
-    exec: async () => {
+    exec: () => {
       executions.push('second');
-      return 'second';
+      return Promise.resolve('second');
     },
   });
   await Promise.resolve();

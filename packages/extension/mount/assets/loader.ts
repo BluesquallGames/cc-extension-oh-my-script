@@ -11,7 +11,7 @@ declare interface SystemJS {
 
 declare const System: SystemJS;
 
-import { HTML5, PREVIEW, EDITOR, BUILD, NATIVE, EDITOR_NOT_IN_PREVIEW } from 'cc/env';
+import { HTML5, PREVIEW, EDITOR, NATIVE, EDITOR_NOT_IN_PREVIEW } from 'cc/env';
 import { cclegacy } from 'cc';
 
 let omsBaseDir = '';
@@ -27,7 +27,7 @@ if (EDITOR) {
     fileURLToPath,
   } = r('url');
   const fs = r('fs');
-  // @ts-expect-error
+  // @ts-expect-error The editor injects Editor outside the mounted asset's type environment.
   omsBaseDir = ps.join(Editor.Project.tmpDir, 'oms/out', ps.sep);
   const omsBaseURL = pathToFileURL(omsBaseDir);
 
@@ -73,7 +73,8 @@ if (EDITOR) {
     return vendorResolve.call(this, id, ...args);
   };
 
-  systemJSPrototype.instantiate = async function (id: string, parentURL: string | undefined, ...args: unknown[]) {
+  systemJSPrototype.instantiate = async function (id: string, parentURL: string
+    | undefined, ...args: unknown[]) {
     if (id.startsWith(omsBaseURL)) {
       console.debug(`${logTag}Instantiate ${id}`);
       omsSystemInfo.instantiatedModules.push(id);
@@ -89,22 +90,25 @@ if (EDITOR) {
             register = [dependencies, declare];
           };
           const exec = (path: string) => {
-            let code = '';
+            let code: string;
             try {
               code = fs.readFileSync(path, 'utf8');
             } catch (err) {
-              throw new Error(`Failed to read module ${path}: ${err}`);
+              throw new Error(`Failed to read module ${path}: ${String(err)}`, { cause: err });
             }
-            let fn: Function;
+            let fn: (system: SystemJS) => void;
             try {
-              fn = new Function('System', code + `\n//# sourceURL=${pathToFileURL(path).href}`);
+              // System.register bundles execute against the editor's module registry.
+              // eslint-disable-next-line @typescript-eslint/no-implied-eval
+              fn = new Function('System', code + `\n//# sourceURL=${pathToFileURL(path)
+                .href}`) as typeof fn;
             } catch (err) {
-              throw new Error(`Failed to read module ${path}: ${err}`);
+              throw new Error(`Failed to read module ${path}: ${String(err)}`, { cause: err });
             }
             try {
               fn(System);
             } catch (err) {
-              throw new Error(`Failed to execute module ${path}: ${err}`);
+              throw new Error(`Failed to execute module ${path}: ${String(err)}`, { cause: err });
             }
           };
           try {
@@ -134,13 +138,15 @@ if (EDITOR) {
     return vendorContext;
   };
 
-  async function retryByInterval<T>(execute: () => Promise<T> | T, interval: number, timeout: number, title: string) {
+  async function retryByInterval<T>(execute: () => Promise<T> | T, interval: number,
+    timeout: number, title: string) {
     const t0 = Date.now();
     for (let iTry = 0; ; ++iTry) {
       try {
         const result = await execute();
         if (iTry > 0) {
-          console.info(`${logTag}Note: ${title} eventually succeeded after ${iTry} tries. This is not an error.`);
+          console.info(
+            `${logTag}Note: ${title} eventually succeeded after ${iTry} tries. This is not an error.`);
         }
         return result;
       } catch (err) {
@@ -176,21 +182,22 @@ if (EDITOR) {
   };
 
   // const vendorInstantiate = systemJSPrototype.instantiate;
-  // systemJSPrototype.instantiate = function (id: string, parentURL: string | undefined, ...args: unknown[]) {
+  // systemJSPrototype.instantiate = function (id: string, parentURL: string | undefined, ...args:
+  // unknown[]) {
   //   if (id.startsWith(omsHostBaseURLPrefix)) {
   //   }
   // };
 }
 
-async function prepareInEditor(id: string, parent: string) {
+function prepareInEditor(id: string, parent: string) {
   const r = require;
   const path = r('path').join(omsBaseDir, id);
   const specifier = r('url').pathToFileURL(path).href;
-  const resolved = await import.meta.resolve(specifier, parent);
+  const resolved = import.meta.resolve(specifier, parent);
   return resolved;
 }
 
-async function prepareInWeb(id: string, parent) {
+function prepareInWeb(id: string, parent: string) {
   void parent;
   return `/oms/${id}`;
 }
@@ -198,14 +205,14 @@ async function prepareInWeb(id: string, parent) {
 export async function load(id: string, parent: string) {
   let specifier = id;
   if (EDITOR) {
-    specifier = await prepareInEditor(id, parent);
+    specifier = prepareInEditor(id, parent);
   } else if (HTML5 && PREVIEW) {
-    specifier = await prepareInWeb(id, parent);
+    specifier = prepareInWeb(id, parent);
   }
   await import(specifier);
 }
 
-export async function loadBundleEntry(bundleId: string, parent: string) {
+export async function loadBundleEntry(bundleId: string, _parent: string) {
   try {
     return await import(`${omsURLPrefix}${makeOmsEntryFileName(`bundle-${bundleId}`)}.js`);
   } catch (err) {
@@ -265,12 +272,12 @@ function normalizeExportId(exportId: string) {
 }
 
 export function saveRequiringFrames() {
-  const frames: {
+  const frames: Array<{
     module: unknown;
     uuid: string;
     script: unknown;
     importMeta: unknown;
-  }[] = [];
+  }> = [];
   const RF = cclegacy._RF;
   for (; ;) {
     const frame = RF.peek();

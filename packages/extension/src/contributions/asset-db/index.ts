@@ -21,7 +21,7 @@ const firstBuildSyncTaskMessage = `Building ${selfExtensionName} project scripts
 const firstBuildSyncTaskDetail = 'Waiting for first build';
 const firstBuildTimeoutSec = 2 * 60;
 
-export async function load() {
+export function load() {
   firstBuildResult = undefined;
   runtimePhase = AssetDBRuntimePhase.starting;
   pendingReadyReloadReason = undefined;

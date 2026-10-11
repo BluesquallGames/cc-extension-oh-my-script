@@ -40,7 +40,7 @@ declare global {
 let iReload = 0;
 
 export const methods = {
-  async reloadScripts(reason?: string) {
+  reloadScripts(reason?: string) {
     logger.info(`Reloading scene scripts...${iReload++}. Reason: ${reason}`);
     globalScriptRuntime.get()?.reload(reason).then(() => {
       logger.info('Scene scripts reloaded successfully.');

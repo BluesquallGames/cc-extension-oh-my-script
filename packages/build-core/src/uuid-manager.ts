@@ -9,7 +9,7 @@ export class UUIDManager {
   }
 
   async loadCentralized(path: string) {
-    let centralized: Record<string, string> = {};
+    let centralized: Record<string, string>;
     try {
       const content = await fs.readFile(path, 'utf8');
       centralized = JSON.parse(content);
@@ -60,7 +60,7 @@ export class UUIDManager {
     return this.getByKey(await this._getPathKey(path)) !== undefined;
   }
 
-  *centralizedModules(): Generator<[string, string]> {
+  * centralizedModules(): Generator<[string, string]> {
     for (const [k, v] of Object.entries(this._map)) {
       if (v.centralized) {
         yield [k, v.uuid];
@@ -159,7 +159,7 @@ export class UUIDManager {
   }
 }
 
-function isValidUUID(input: string) {
+function isValidUUID(_input: string) {
   // https://stackoverflow.com/a/38191078/10602525
   // return /^[0-9A-F]{8}-[0-9A-F]{4}-[4][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/i.test(input);
   return true;

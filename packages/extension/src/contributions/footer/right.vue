@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, PropType, ref, watchEffect } from 'vue';
+import { onMounted, onUnmounted, PropType, ref } from 'vue';
 import { BuildStateType, RightPanelState } from './state.js';
 import dayjs from 'dayjs';
+
+defineOptions({ name: 'OmsFooterRight' });
 
 const props = defineProps({
   state: {
@@ -43,19 +45,25 @@ function getAgoTime(time: number) {
 </script>
 
 <template>
-<div class="oms-right">
-  <span v-if="state.state === BuildStateType.never">N/A</span>
+  <div class="oms-right">
+    <span v-if="state.state === BuildStateType.never">N/A</span>
 
-  <span v-else-if="state.state === BuildStateType.building">
-    <ui-icon color value="refresh"></ui-icon>
-  </span>
+    <span v-else-if="state.state === BuildStateType.building">
+      <ui-icon
+        color
+        value="refresh"
+      />
+    </span>
 
-  <span v-else-if="state.state === BuildStateType.completed">
-    <ui-icon color value="check"></ui-icon>
-    <span>{{ ago }}</span>
-  </span>
-  <span v-else></span>
-</div>
+    <span v-else-if="state.state === BuildStateType.completed">
+      <ui-icon
+        color
+        value="check"
+      />
+      <span>{{ ago }}</span>
+    </span>
+    <span v-else />
+  </div>
 </template>
 
 <style lang="less" scoped>

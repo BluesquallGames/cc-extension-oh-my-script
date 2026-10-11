@@ -17,6 +17,8 @@ export function installProcessDisconnectShutdown(
     }
     shutdownPromise = (async () => {
       const forceExitTimer = setTimeout(() => {
+        // Orphaned workers must exit even if cleanup leaves active handles.
+        // eslint-disable-next-line n/no-process-exit
         process.exit(0);
       }, disconnectCleanupTimeoutMs);
       forceExitTimer.unref();
@@ -26,6 +28,8 @@ export function installProcessDisconnectShutdown(
         // Cleanup must never keep an orphaned build-core process alive.
       } finally {
         clearTimeout(forceExitTimer);
+        // Cleanup is complete; no parent remains to own this worker.
+        // eslint-disable-next-line n/no-process-exit
         process.exit(0);
       }
     })();

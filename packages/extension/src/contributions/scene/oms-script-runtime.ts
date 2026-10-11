@@ -38,7 +38,9 @@ export class OmsScriptRuntimeError extends Error {
     try {
       return JSON.stringify(cause);
     } catch {
-      return `${cause}`;
+      // Preserve the diagnostic representation when the cause cannot be serialized as JSON.
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      return String(cause);
     }
   }
 }
@@ -82,7 +84,7 @@ export class OmsScriptRuntime {
       });
     }
 
-    this.reload(reason);
+    void this.reload(reason);
     await this._awaitReload();
   }
 
@@ -123,7 +125,8 @@ export class OmsScriptRuntime {
         await reloadPromise;
         return;
       } catch (err) {
-        if (err instanceof ReloadInterruptError && this._reloadPromise && this._reloadPromise !== reloadPromise) {
+        if (err instanceof ReloadInterruptError && this._reloadPromise && this
+          ._reloadPromise !== reloadPromise) {
           continue;
         }
         throw err;
@@ -141,6 +144,6 @@ export class OmsScriptRuntime {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
+
   var __oms_import__: OmsGlobalImport | undefined;
 }

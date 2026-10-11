@@ -1,5 +1,5 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import '../src/features/registry.js';
 import { REGISTRY, SystemJS } from '../src/core.js';
 import { describe, it, assert } from 'vitest';
@@ -13,45 +13,54 @@ const resolveIfNotPlainOrUrl = (input: string, parent: string) => {
 };
 
 const registryManagements = new WeakMap<SystemJS, RegistryManagement>();
-const getOrCreateRegistryManagement = function(loader: SystemJS) {
+const getOrCreateRegistryManagement = function (loader: SystemJS) {
   let registryManagement = registryManagements.get(loader);
   if (!registryManagement) {
     registryManagement = new RegistryManagement(loader);
     registryManagements.set(loader, registryManagement);
   }
   return registryManagement;
-}
-SystemJS.prototype.get = function(...args: Parameters< RegistryManagement['get']>) {
+};
+SystemJS.prototype.get = function (...args: Parameters<RegistryManagement['get']>) {
   return getOrCreateRegistryManagement(this).get(...args);
-}
-SystemJS.prototype.set = function(...args: Parameters< RegistryManagement['set']>) {
+};
+SystemJS.prototype.set = function (...args: Parameters<RegistryManagement['set']>) {
   return getOrCreateRegistryManagement(this).set(...args);
-}
-SystemJS.prototype.has = function(...args: Parameters< RegistryManagement['has']>) {
+};
+SystemJS.prototype.has = function (...args: Parameters<RegistryManagement['has']>) {
   return getOrCreateRegistryManagement(this).has(...args);
-}
-SystemJS.prototype.delete = function(...args: Parameters< RegistryManagement['delete']>) {
+};
+SystemJS.prototype.delete = function (...args: Parameters<RegistryManagement['delete']>) {
   return getOrCreateRegistryManagement(this).delete(...args);
-}
-SystemJS.prototype.entries = function(...args: Parameters< RegistryManagement['entries']>) {
+};
+SystemJS.prototype.entries = function (...args: Parameters<RegistryManagement['entries']>) {
   return getOrCreateRegistryManagement(this).entries(...args);
-}
+};
 
 const SystemLoader = SystemJS;
 
 SystemLoader.prototype[IMPORT_MAP] = { imports: {}, scopes: {} };
-SystemLoader.prototype.prepareImport = () => {};
+SystemLoader.prototype.prepareImport = () => {
+  // No import preparation is needed in this test loader.
+};
 
 describe('Core API', function () {
   const loader = new SystemLoader();
-  loader.resolve = x => x;
+  loader.resolve = (x) => x;
 
   it('Should be an instance of itself', function () {
     assert(loader instanceof SystemLoader);
   });
 
   it('Supports loading', async function () {
-    loader.instantiate = x => [[], _export => ({ execute () { _export('y', 42) } })];
+    loader.instantiate = (_x) => [
+      [],
+      (_export) => ({
+        execute() {
+          _export('y', 42);
+        },
+      }),
+    ];
     const x = await loader.import('x');
     assert.equal(x.y, 42);
   });
@@ -70,8 +79,12 @@ describe('Core API', function () {
   // TODO: namespace Object property definitions
 
   it('Supports System.register', async function () {
-    loader.instantiate = x => {
-      loader.register([], _export => ({ execute () { _export('y', 42) } }));
+    loader.instantiate = (_x) => {
+      loader.register([], (_export) => ({
+        execute() {
+          _export('y', 42);
+        },
+      }));
       return loader.getRegister();
     };
     const y = await loader.import('y');
@@ -79,11 +92,15 @@ describe('Core API', function () {
   });
 
   it('Supports createContext hook', async function () {
-    loader.instantiate = x => {
-      loader.register([], (_export, _context) => ({ execute () { _export('meta', _context.meta) } }));
+    loader.instantiate = (_x) => {
+      loader.register([], (_export, _context) => ({
+        execute() {
+          _export('meta', _context.meta);
+        },
+      }));
       return loader.getRegister();
     };
-    const createContext = loader.createContext;
+    const createContext = loader.createContext.bind(loader);
     loader.createContext = function (id) {
       const context = createContext(id);
       context.custom = 'yay';
@@ -95,9 +112,16 @@ describe('Core API', function () {
 
   describe('Tracing API', function () {
     it('Supports tracing loads', async function () {
-      loader.instantiate = x => [[], _export => ({ execute () { _export('y', 42) } })];
+      loader.instantiate = (_x) => [
+        [],
+        (_export) => ({
+          execute() {
+            _export('y', 42);
+          },
+        }),
+      ];
       const loaded = [];
-      loader.onload = function (err, x) {
+      loader.onload = function (_err, x) {
         loaded.push(x);
       };
       const z = await loader.import('z');
@@ -107,17 +131,18 @@ describe('Core API', function () {
     });
 
     it('Supports tracing load failures', async function () {
-      loader.instantiate = x => { throw new Error('Problem') };
+      loader.instantiate = (_x) => {
+        throw new Error('Problem');
+      };
       const errors = [];
-      loader.onload = function (err, id, deps) {
+      loader.onload = function (err, _id, _deps) {
         console.log(err);
         errors.push(err);
       };
       try {
         await loader.import('f');
         assert.fail('Should have caught');
-      }
-      catch (e) {
+      } catch (e) {
         assert.equal(e.err, errors[0].err);
       }
     });
@@ -127,64 +152,71 @@ describe('Core API', function () {
       try {
         await loader.import('f');
         assert.fail('Should have caught');
-      }
-      catch (e) {
+      } catch (e) {
         err = e;
       }
       try {
         await loader.import('f');
         assert.fail('Should have caught');
-      }
-      catch (e) {
+      } catch (e) {
         assert.equal(e, err);
       }
     });
 
-    it("Should indicate the error source", async function () {
+    it('Should indicate the error source', async function () {
       loader.instantiate = (x) => {
-        if (x === "b") {
-          throw new Error("Instantiate Error");
+        if (x === 'b') {
+          throw new Error('Instantiate Error');
         }
         return [
-          ["b"],
+          ['b'],
           function (_e, _c) {
             return {
-              setters: function () {},
-              execute: function () {},
+              setters: function () {
+                // This fixture ignores dependency exports.
+              },
+              execute: function () {
+                // This fixture has no execution work.
+              },
             };
           },
         ];
       };
 
       let sourceId;
-      loader.onload = function (err, id, deps, isSource) {
-        if (err && isSource) sourceId = id;
+      loader.onload = function (err, id, _deps, isSource) {
+        if (err && isSource) {
+          sourceId = id;
+        }
       };
 
       try {
-        await loader.import("a");
-        assert.fail("Should have caught");
-      } catch (err) {
-        assert.equal(sourceId, "b");
-        delete loader[REGISTRY]["a"];
-        delete loader[REGISTRY]["b"];
+        await loader.import('a');
+        assert.fail('Should have caught');
+      } catch (_err) {
+        assert.equal(sourceId, 'b');
+        delete loader[REGISTRY].a;
+        delete loader[REGISTRY].b;
       }
     });
 
-    it("Should fire onload for all errored sources and their parents just once through", async function () {
+    it(('Should fire onload for all errored sources and their parents just once '
+      + 'through'), async function () {
       let instantiateThrown;
       loader.instantiate = (x) => {
-        if (!instantiateThrown && x === "b") {
+        if (!instantiateThrown && x === 'b') {
           instantiateThrown = true;
-          throw new Error("Instantiate Error");
+          throw new Error('Instantiate Error');
         }
         return [
-          ["b"],
+          ['b'],
           function (_e, _c) {
             return {
-              setters: function () {},
+              setters: function () {
+                // This fixture ignores dependency exports.
+              },
               execute: function () {
-                throw new Error("Execute Error");
+                throw new Error('Execute Error');
               },
             };
           },
@@ -192,40 +224,42 @@ describe('Core API', function () {
       };
 
       const errors = [];
-      loader.onload = function (err, id, deps) {
-        if (err) errors.push(id);
+      loader.onload = function (err, id, _deps) {
+        if (err) {
+          errors.push(id);
+        }
       };
 
       try {
-        await loader.import("b");
-        assert.fail("Should have caught");
+        await loader.import('b');
+        assert.fail('Should have caught');
       } catch (err) {
         assert.match(err.message, /instantiate/i);
         assert.equal(errors.length, 1);
         assert.equal(errors.length, 1);
-        assert.equal(errors[0], "b");
+        assert.equal(errors[0], 'b');
       }
 
       try {
-        await loader.import("a");
-        assert.fail("Should have caught");
-      } catch (err) {
+        await loader.import('a');
+        assert.fail('Should have caught');
+      } catch (_err) {
         assert.equal(errors.length, 2);
-        assert.equal(errors[1], "a");
+        assert.equal(errors[1], 'a');
       }
 
-      delete loader[REGISTRY]["a"];
-      delete loader[REGISTRY]["b"];
+      delete loader[REGISTRY].a;
+      delete loader[REGISTRY].b;
       errors.length = 0;
 
       try {
-        await loader.import("a");
-        assert.fail("Should have caught");
+        await loader.import('a');
+        assert.fail('Should have caught');
       } catch (err) {
         assert.match(err.message, /execute/i);
         assert.equal(errors.length, 2);
-        assert.equal(errors[0], "b");
-        assert.equal(errors[1], "a");
+        assert.equal(errors[0], 'b');
+        assert.equal(errors[1], 'a');
       }
     });
   });
@@ -251,10 +285,10 @@ describe('Core API', function () {
       assert.equal(x, _x);
     });
 
-    it('warns with invalid System.set', async function () {
+    it('warns with invalid System.set', function () {
       let numCalls = 0, lastWarn;
       const originalWarn = console.warn;
-      console.warn = msg => {
+      console.warn = (msg) => {
         numCalls++;
         lastWarn = msg;
       };
@@ -264,10 +298,10 @@ describe('Core API', function () {
       assert.match(lastWarn.message, /is not a valid URL to set in the module registry/);
     });
 
-    it('does not warn with valid System.set', async function () {
-      let numCalls = 0, lastWarn;
+    it('does not warn with valid System.set', function () {
+      let numCalls = 0, _lastWarn;
       const originalWarn = console.warn;
-      console.warn = msg => {
+      console.warn = (msg) => {
         numCalls++;
         lastWarn = msg;
       };
@@ -284,11 +318,11 @@ describe('Core API', function () {
     });
 
     it('Supports iteration', async function () {
-      loader.set('http://h', {a: 'b'});
+      loader.set('http://h', { a: 'b' });
       await loader.import('http://h');
 
       let foundH = false;
-      for (let entry of loader.entries()) {
+      for (const entry of loader.entries()) {
         if (entry[0] === 'http://h' && entry[1].a === 'b') {
           foundH = true;
         }
@@ -298,37 +332,38 @@ describe('Core API', function () {
     });
 
     it('Supports System.entries', async function () {
-      loader.set('http://i', {a: 'b'});
+      loader.set('http://i', { a: 'b' });
       await loader.import('http://i');
 
-      assert([...loader.entries()].some(entry => entry[0] === 'http://i' && entry[1].a === 'b'));
-    })
+      assert([...loader.entries()].some((entry) => entry[0] === 'http://i' && entry[1].a === 'b'));
+    });
 
     it('Supports System.getImportMap', function () {
       const importMap = loader.getImportMap();
 
       assert(
-        Object.hasOwn(importMap, 'imports') && 
-        Object.hasOwn(importMap, 'scopes') && 
-        Object.hasOwn(importMap, 'depcache') && 
-        Object.hasOwn(importMap, 'integrity')
+        Object.hasOwn(importMap, 'imports')
+        && Object.hasOwn(importMap, 'scopes')
+        && Object.hasOwn(importMap, 'depcache')
+        && Object.hasOwn(importMap, 'integrity'),
       );
-    })
+    });
   });
 });
 
-describe('Loading Cases', function() {
+describe('Loading Cases', function () {
   const loader = new SystemLoader();
   const baseUrl = path.resolve('test/fixtures').replace(/\\/g, '/') + '/';
-  loader.resolve = (id, parent) => resolveIfNotPlainOrUrl(id, parent || baseUrl);
+  loader.resolve = (id, parent) => resolveIfNotPlainOrUrl(id, parent?.length ? parent : baseUrl);
   loader.instantiate = async function (path) {
-    const source = await new Promise((resolve, reject) => fs.readFile(path, (err, source) => err ? reject(err) : resolve(source.toString())));
+    const source = await new Promise<string>((resolve, reject) => fs.readFile(path, (err,
+      source) => err ? reject(err) : resolve(source.toString())));
     global.System = loader;
     eval(source + '//# sourceURL=' + path);
     return this.getRegister();
   };
 
-  describe('Simple tests', function() {
+  describe('Simple tests', function () {
     it('Should import a module', async function () {
       const m = await loader.import('./register-modules/no-imports.js');
       assert(m);
@@ -360,14 +395,14 @@ describe('Loading Cases', function() {
       let thrown = false;
       try {
         new m.q().foo();
-      }
-      catch(e) {
+      } catch (e) {
         thrown = true;
         assert.equal(e, 'g');
       }
 
-      if (!thrown)
+      if (!thrown) {
         throw new Error('Supposed to throw');
+      }
     });
 
     it('should resolve various import syntax', async function () {
@@ -382,11 +417,12 @@ describe('Loading Cases', function() {
 
     it('should support import.meta.url', async function () {
       const m = await loader.import('./register-modules/moduleUrl.js');
-      assert.equal(m.url, path.resolve('test/fixtures/register-modules/moduleUrl.js').replace(/\\/g, '/'));
+      assert.equal(m.url, path.resolve('test/fixtures/register-modules/moduleUrl.js')
+        .replace(/\\/g, '/'));
     });
   });
 
-  describe('Circular dependencies', function() {
+  describe('Circular dependencies', function () {
     it('should resolve circular dependencies', async function () {
       const m1 = await loader.import('./register-modules/circular1.js');
       const m2 = await loader.import('./register-modules/circular2.js');
@@ -413,10 +449,10 @@ describe('Loading Cases', function() {
     });
   });
 
-  describe('Loading order', function() {
+  describe('Loading order', function () {
     async function assertLoadOrder(module, exports) {
       const m = await loader.import('./register-modules/' + module);
-      exports.forEach(function(name) {
+      exports.forEach(function (name) {
         assert.equal(m[name], name);
       });
     }
@@ -430,11 +466,21 @@ describe('Loading Cases', function() {
     });
 
     it('should load in order (s)', async function () {
-      await assertLoadOrder('s.js', ['s', 'c', 'a', 'b']);
+      await assertLoadOrder('s.js', [
+        's',
+        'c',
+        'a',
+        'b',
+      ]);
     });
 
     it('should load in order (_a)', async function () {
-      await assertLoadOrder('_a.js', ['b', 'd', 'g', 'a']);
+      await assertLoadOrder('_a.js', [
+        'b',
+        'd',
+        'g',
+        'a',
+      ]);
     });
 
     it('should load in order (_e)', async function () {
@@ -457,53 +503,59 @@ describe('Loading Cases', function() {
     });
     it('should support async graphs', async function () {
       const loader = new SystemLoader();
-      loader.resolve = function (id) { return id };
+      loader.resolve = function (id) {
+        return id;
+      };
       loader.instantiate = function (id) {
         if (id === 'main') {
           return [
             ['dep'],
-            function(_export, _context) {
-              var value
+            function (_export, _context) {
+              let value;
               return {
                 setters: [
-                  function(dep) {
-                    value = dep.default
+                  function (dep) {
+                    value = dep.default;
                   },
                 ],
-                execute: async function() {
+                execute: function () {
                   _export('default', value);
+
+                  return Promise.resolve();
                 },
-              }
+              };
             },
-          ]
+          ];
         }
 
         if (id === 'dep') {
           return [
             [],
-            function(_export, _context) {
+            function (_export, _context) {
               return {
                 setters: [],
-                execute: async function() {
-                  _export("default", 42)
+                execute: function () {
+                  _export('default', 42);
+
+                  return Promise.resolve();
                 },
-              }
+              };
             },
-          ]
+          ];
         }
       };
 
       const m = await loader.import('main');
       assert.equal(m.default, 42);
     });
-    it('Concurrent top level import threads', async function() {
-        // Use two different top level entry is on purpose:
-        // currently top level lop would be cached.
-        const thread1 = loader.import('./tla/concurrent-top-level-import-threads/main.js');
-        const thread2 = loader.import('./tla/concurrent-top-level-import-threads/dep.js');
-        const main = await thread1;
-        const dep = await thread2;
-        assert.equal(main.stamp, dep.stamp);
+    it('Concurrent top level import threads', async function () {
+      // Use two different top level entry is on purpose:
+      // currently top level lop would be cached.
+      const thread1 = loader.import('./tla/concurrent-top-level-import-threads/main.js');
+      const thread2 = loader.import('./tla/concurrent-top-level-import-threads/dep.js');
+      const main = await thread1;
+      const dep = await thread2;
+      assert.equal(main.stamp, dep.stamp);
     });
   });
 
@@ -548,9 +600,10 @@ describe('Loading Cases', function() {
     });
 
     // TODO: Fix Babel output for this one
-    // Plus add tests for reexporting live bindings, namespaces exported themselves with reexports with live bindings
+    // Plus add tests for reexporting live bindings, namespaces exported themselves with reexports
+    // with live bindings
     it.skip('should support re-exporting overwriting', async function () {
-      var m = await loader.import('./register-modules/export-star2.js');
+      const m = await loader.import('./register-modules/export-star2.js');
       assert.equal(m.bar, 'bar');
       assert.equal(typeof m.foo, 'function');
     });
@@ -563,21 +616,21 @@ describe('Loading Cases', function() {
       try {
         await loader.import(module);
         assert.fail('Should have failed');
-      }
-      catch(e) {
+      } catch (e) {
         return e.toString();
       }
     }
 
     it('Should throw if instantiate hook doesnt instantiate', async function () {
       const loader = new SystemLoader();
-      loader.resolve = x => x;
-      loader.instantiate = () => {};
+      loader.resolve = (x) => x;
+      loader.instantiate = () => {
+        // Deliberately omit registration to test the missing-module error.
+      };
       try {
         await loader.import('x');
         assert.fail('Should have failed');
-      }
-      catch (e) {
+      } catch (e) {
         assert.ok(e.toString().includes('Module x did not instantiate'));
       }
     });
@@ -586,11 +639,12 @@ describe('Loading Cases', function() {
       // prototype fallback
       delete loader.resolve;
       const err = await getImportError('plain-name');
-      assert.ok(err.toString().includes("Unable to resolve bare specifier 'plain-name'"));
+      assert.ok(err.toString().includes('Unable to resolve bare specifier \'plain-name\''));
     });
 
     it('should throw if on syntax error', async function () {
-      loader.resolve = (id, parentUrl) => resolveIfNotPlainOrUrl(id, parentUrl || testPath);
+      loader.resolve = (id, parentUrl) => resolveIfNotPlainOrUrl(id,
+        parentUrl?.length ? parentUrl : testPath);
       const err = await getImportError('./register-modules/main.js');
       assert.equal(err, 'Error: dep error');
     });
@@ -602,25 +656,24 @@ describe('Loading Cases', function() {
 
     it('Should support System.delete for retrying execution errors', async function () {
       const loader = new SystemLoader();
-      loader.resolve = x => x;
+      loader.resolve = (x) => x;
       let thrown = false;
       loader.instantiate = () => {
-        loader.register([], _export => ({
-          execute () {
+        loader.register([], (_export) => ({
+          execute() {
             if (!thrown) {
               thrown = true;
               throw new Error('Execution Error');
             }
             _export('ok', true);
-          }
+          },
         }));
         return loader.getRegister();
       };
       try {
         await loader.import('x');
         assert.fail('Should have failed');
-      }
-      catch (e) {
+      } catch (e) {
         assert.equal(e.toString(), 'Error: Execution Error');
       }
       loader.delete('x');
@@ -630,21 +683,24 @@ describe('Loading Cases', function() {
 
     it('Should always support retrying instantiation errors', async function () {
       const loader = new SystemLoader();
-      loader.resolve = x => x;
+      loader.resolve = (x) => x;
       let thrown = false;
       loader.instantiate = () => {
         if (!thrown) {
           thrown = true;
           throw new Error('Instantiate Error');
         }
-        loader.register([], _export => ({ execute () { _export('ok', true) } }));
+        loader.register([], (_export) => ({
+          execute() {
+            _export('ok', true);
+          },
+        }));
         return loader.getRegister();
       };
       try {
         await loader.import('x');
         assert.fail('Should have failed');
-      }
-      catch (e) {
+      } catch (e) {
         assert.equal(e.toString(), 'Error: Instantiate Error');
       }
       loader.delete('x');
@@ -654,7 +710,8 @@ describe('Loading Cases', function() {
 
     it('404 error', async function () {
       const err = await getImportError('./register-modules/load-non-existent.js');
-      assert.equal(err, 'Error: ENOENT: no such file or directory, open \'' + testPath.replace(/\//g, path.sep) + 'register-modules' + path.sep + 'non-existent.js\'');
+      assert.equal(err, 'Error: ENOENT: no such file or directory, open \'' + testPath
+        .replace(/\//g, path.sep) + 'register-modules' + path.sep + 'non-existent.js\'');
     });
   });
 });

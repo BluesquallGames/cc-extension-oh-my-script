@@ -3,10 +3,12 @@ import { createReactiveVueApp } from '../../utils/vue3-panel/index.js';
 import { defineVuePanel, PanelSetupOptions, VuePanel } from '../../utils/vue3-panel/vue3-panel.js';
 import Right from './right.vue';
 import { readFileSync } from 'fs-extra';
-import { join } from 'node:path';
+
 import { BuildStateType, RightPanelState } from './state.js';
-import { addInnerPackageMessageListener, InnerPackageMessageArgs, InnerPackageMessageId } from '../../inner-package-messaging.js';
-// @ts-expect-error
+import { addInnerPackageMessageListener,
+  InnerPackageMessageArgs,
+  InnerPackageMessageId } from '../../inner-package-messaging.js';
+// @ts-expect-error Vite supplies this virtual style module at build time.
 import styleLocation from '@/style-location';
 
 export default defineVuePanel(class RightPanel extends VuePanel<[]> {
@@ -37,8 +39,10 @@ export default defineVuePanel(class RightPanel extends VuePanel<[]> {
     this._appData = data;
     this._rootComponentExposes = exposedMethods;
     this._closeController = new AbortController();
-    addInnerPackageMessageListener(InnerPackageMessageId.buildStart, this._onBuildStart.bind(this), { signal: this._closeController.signal });
-    addInnerPackageMessageListener(InnerPackageMessageId.buildEnd, this._onBuildEnd.bind(this), { signal: this._closeController.signal });
+    addInnerPackageMessageListener(InnerPackageMessageId.buildStart, this._onBuildStart
+      .bind(this), { signal: this._closeController.signal });
+    addInnerPackageMessageListener(InnerPackageMessageId.buildEnd, this._onBuildEnd.bind(
+      this), { signal: this._closeController.signal });
     return app;
   }
 
@@ -54,7 +58,7 @@ export default defineVuePanel(class RightPanel extends VuePanel<[]> {
 
   private _closeController = new AbortController();
 
-  private _onBuildStart(state: InnerPackageMessageArgs<InnerPackageMessageId.buildStart>[0]) {
+  private _onBuildStart(_state: InnerPackageMessageArgs<InnerPackageMessageId.buildStart>[0]) {
     this._appData.state = {
       state: BuildStateType.building,
     };

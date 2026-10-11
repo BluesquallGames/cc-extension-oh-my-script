@@ -3,8 +3,6 @@ import { vol } from 'memfs';
 import { ReloadInterruptError, SceneModuleSystem } from '../src/contributions/scene/module-system';
 import { OmsScriptRuntime } from '../src/contributions/scene/oms-script-runtime';
 import { setTimeout } from 'node:timers/promises';
-import { type logger } from '../src/logger.js';
-import { nextTick } from 'node:process';
 
 vi.mock('node:fs', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -54,7 +52,7 @@ vi.mock('cc/editor/populate-internal-constants', () => {
 });
 vi.mock(import('../src/logger.js'), () => {
   return {
-    logger: console as unknown as typeof logger,
+    logger: console,
   };
 });
 vi.hoisted(() => {
@@ -132,7 +130,8 @@ describe('module system', () => {
     await expect(moduleSystem.import('oms://some-plugin/a')).resolves.toMatchObject({
       value: 42,
     });
-    await expect(moduleSystem.import('a')).rejects.toThrowError(`'a' is not a valid OMS entry module.`);
+    await expect(moduleSystem.import('a')).rejects.toThrowError(
+      `'a' is not a valid OMS entry module.`);
   });
 
   it('does not install global import by default', async () => {
@@ -171,8 +170,8 @@ describe('module system', () => {
     /// 2. The editor global SystemJS import hook is present but unusable.
     /// @expect
     /// The module system supplies built-in cc externals itself and never calls editor SystemJS.
-    const editorSystemImport = vi.fn(async () => {
-      throw new Error('editor SystemJS should not be used');
+    const editorSystemImport = vi.fn(() => {
+      return Promise.reject(new Error('editor SystemJS should not be used'));
     });
     vi.stubGlobal('System', {
       import: editorSystemImport,
@@ -313,18 +312,19 @@ describe('OMS script runtime', () => {
     /// The import rejects with an OMS runtime error while leaving the global import installed.
     const runtime = new OmsScriptRuntime({
       label: 'asset-db',
-      ensureBuild: async () => ({
+      ensureBuild: () => Promise.resolve(({
         ok: false,
         error: {
           message: 'build boom',
         },
-      }),
+      })),
     });
 
     runtime.installGlobalImport();
 
     const omsImport = getOmsImport();
-    await expect(omsImport('oms://some-plugin')).rejects.toThrowError('OMS build failed in asset-db: build boom');
+    await expect(omsImport('oms://some-plugin')).rejects.toThrowError(
+      'OMS build failed in asset-db: build boom');
     expect(globalThis).toHaveProperty('__oms_import__');
   });
 
@@ -333,7 +333,8 @@ describe('OMS script runtime', () => {
     /// 1. The first lazy import sees a failed runtime build.
     /// 2. The next lazy import sees a successful build.
     /// @expect
-    /// Runtime readiness is retried and later imports recover without reinstalling the global function.
+    /// Runtime readiness is retried and later imports recover without reinstalling the global
+    /// function.
     vol.fromJSON({
       'metadata.js': makeMetadataJs([
         ['main', false],
@@ -346,26 +347,27 @@ describe('OMS script runtime', () => {
     let buildCount = 0;
     const runtime = new OmsScriptRuntime({
       label: 'asset-db',
-      ensureBuild: async () => {
+      ensureBuild: () => {
         buildCount += 1;
         if (buildCount === 1) {
-          return {
+          return Promise.resolve({
             ok: false,
             error: {
               message: 'first build failed',
             },
-          };
+          });
         }
-        return {
+        return Promise.resolve({
           ok: true,
           affectedFiles: [],
-        };
+        });
       },
     });
     runtime.installGlobalImport();
 
     const omsImport = getOmsImport();
-    await expect(omsImport('oms://some-plugin')).rejects.toThrowError('OMS build failed in asset-db: first build failed');
+    await expect(omsImport('oms://some-plugin')).rejects.toThrowError(
+      'OMS build failed in asset-db: first build failed');
     await expect(omsImport('oms://some-plugin')).resolves.toMatchObject({
       value: 40,
     });
@@ -373,7 +375,8 @@ describe('OMS script runtime', () => {
   });
 });
 
-function makeMetadataJs(entries: Array<[bundle: string, editor: boolean]>, exportEntries: Record<string, string> = {}) {
+function makeMetadataJs(entries: Array<[bundle: string, editor: boolean]>, exportEntries:
+Record<string, string> = {}) {
   return `
   System.register([], (function (exports) {
     'use strict';

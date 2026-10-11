@@ -5,15 +5,15 @@ import { requestSelfWorkerMessage } from '../../utils/request-self.js';
 
 const logTag = `[builder.default-hooks]`;
 
-export const load: BuildHook.load = async () => {
+export const load: BuildHook.load = () => {
   logger.debug(`${logTag} load.`);
 };
 
-export const unload: BuildHook.unload = async () => {
+export const unload: BuildHook.unload = () => {
   logger.debug(`${logTag} unload.`);
 };
 
-export const onBeforeBuild: BuildHook.onBeforeBuild = async (options, result) => {
+export const onBeforeBuild: BuildHook.onBeforeBuild = (options, result) => {
   logger.debug(`${logTag} on-before-build. Options: %o\n.Result: %o`, options, result);
   if (options.preview) {
     logger.debug(`The build request is emitted for previewing, ignored.`);

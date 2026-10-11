@@ -1,12 +1,15 @@
 import { type OmsBuilderAgent } from './oms-builder-agent.js';
-import type { BuildProfileId, BuildProfileResult, BuildProfileResults } from '@oms/build-core/protocol';
+import type {
+  BuildProfileId,
+  BuildProfileResult,
+  BuildProfileResults,
+} from '@oms/build-core/protocol';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-empty-object-type
-export interface WorkerMessageDescription<TSignature extends (...args: any) => any> {
+export interface WorkerMessageDescription<TSignature extends (...args: never[]) => unknown> {
+  readonly signature?: TSignature;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function defineWorkerMessage<TSignature extends (...args: any) => any>() {
+function defineWorkerMessage<TSignature extends (...args: never[]) => unknown>() {
   return {
   } as WorkerMessageDescription<TSignature>;
 }
@@ -21,12 +24,14 @@ export interface RebuildOptions {
 export const workerMessageDescriptions = {
   'rebuild': defineWorkerMessage<(opts?: RebuildOptions) => Promise<BuildProfileResults>>(),
   'ensure-default-profile': defineWorkerMessage<() => Promise<BuildProfileResult>>(),
-  'restart': defineWorkerMessage<() => void>(),
-  'inline-uuids': defineWorkerMessage<() => void>(),
-  'build-prod': defineWorkerMessage<(opts: Parameters<OmsBuilderAgent['buildProd']>[0]) => void>(),
+  'restart': defineWorkerMessage<OmsBuilderAgent['restart']>(),
+  'inline-uuids': defineWorkerMessage<OmsBuilderAgent['inlineUUIDs']>(),
+  'build-prod': defineWorkerMessage<OmsBuilderAgent['buildProd']>(),
 } as const;
 
 export type WorkerMessageId = keyof typeof workerMessageDescriptions;
 
-export type WorkerMessageSignature<T extends WorkerMessageId> =
-  (typeof workerMessageDescriptions)[T] extends WorkerMessageDescription<infer Signature> ? Signature : never;
+export type WorkerMessageSignature<T extends WorkerMessageId>
+  = (typeof workerMessageDescriptions)[T] extends WorkerMessageDescription<infer Signature>
+    ? Signature
+    : never;

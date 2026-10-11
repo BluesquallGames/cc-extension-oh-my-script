@@ -75,7 +75,7 @@ export function rollupPluginNodeBuiltinModules(opts: {
   return {
     name: pluginName,
 
-    async resolveId(source) {
+    resolveId(source) {
       if (source.startsWith('node:') || nodeUnscopedBuiltinModules.includes(source)) {
         if (opts.supportsNativeModules) {
           return {
@@ -106,7 +106,8 @@ export function rollupPluginNodeBuiltinModules(opts: {
       }
 
       if (id === nodeBuiltinModuleLoaderModuleId) {
-        const template = await this.fs.readFile(join(helpersDir, 'node-builtin-module-loader.ts.ejs'), { encoding: 'utf8' });
+        const template = await this.fs.readFile(join(helpersDir,
+          'node-builtin-module-loader.ts.ejs'), { encoding: 'utf8' });
         const source = Ejs.render(template, {
           // nop for now
         });

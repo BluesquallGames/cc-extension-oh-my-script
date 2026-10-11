@@ -89,7 +89,7 @@ export class OmsProjectConfigWatcher extends EventEmitter<{
   private _fsWatcher: chokidar.FSWatcher;
   private _readyPromise: Promise<void>;
   private _effectiveConfigFile = '';
-  private _availableConfigFiles: Set<string> = new Set();
+  private _availableConfigFiles = new Set<string>();
 
   private _onAvailableConfigFilesChange(callback?: (error?: unknown) => void) {
     const effectiveConfigFile = [...this._availableConfigFiles.values()].sort()[0] ?? '';

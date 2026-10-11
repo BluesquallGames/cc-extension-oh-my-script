@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { registerMessageHandlers } from '../src/message-handlers.js';
-import { Ipc, type ClientInvocationMethodId, type InvocationMessage, type ServerInvocationMethodId } from '../src/protocol.js';
+import { Ipc,
+  type ClientInvocationMethodId,
+  type ServerInvocationMethodId } from '../src/protocol.js';
 import { ServerContext } from '../src/server-context.js';
 import { logger } from '../src/logger.js';
 
@@ -16,8 +18,10 @@ afterEach(async () => {
 
 it('delivers passive profile completion over IPC before the full revision ends', async () => {
   /// @case
-  /// 1. A real watcher builds default and headless profiles through registered IPC message handlers.
-  /// 2. A source touch starts a passive revision whose headless bundle is substantially larger than default.
+  /// 1. A real watcher builds default and headless profiles through registered IPC message
+  /// handlers.
+  /// 2. A source touch starts a passive revision whose headless bundle is substantially larger than
+  /// default.
   /// @expect
   /// The client receives both passive profile completions before build-end and passive-build-end.
   const project = await fs.mkdtemp(join(tmpdir(), 'oms-message-handlers-'));
@@ -31,19 +35,19 @@ it('delivers passive profile completion over IPC before the full revision ends',
     '};',
   ].join('\n'));
   await fs.outputFile(runtimeEntry, 'export const marker = "before-ipc-runtime-end";');
-  await fs.outputFile(join(project, 'src', 'index.headless.ts'), 'export { values } from "./headless-heavy";');
+  await fs.outputFile(join(project, 'src', 'index.headless.ts'),
+    'export { values } from "./headless-heavy";');
   await fs.outputFile(join(project, 'src', 'headless-heavy.ts'), [
     'export const values = [',
     Array.from({ length: 50_000 }, (_, index) => `${index},`).join(''),
     '];',
   ].join('\n'));
 
-  let serverIpc!: Ipc<ServerInvocationMethodId, ClientInvocationMethodId>;
   const clientIpc = new Ipc<ClientInvocationMethodId, ServerInvocationMethodId>({
-    send: (message) => serverIpc.dispatch(message as InvocationMessage),
+    send: (message) => serverIpc.dispatch(message),
   });
-  serverIpc = new Ipc<ServerInvocationMethodId, ClientInvocationMethodId>({
-    send: (message) => clientIpc.dispatch(message as InvocationMessage),
+  const serverIpc = new Ipc<ServerInvocationMethodId, ClientInvocationMethodId>({
+    send: (message) => clientIpc.dispatch(message),
   });
   const registry = registerMessageHandlers(new ServerContext(serverIpc));
   const initialBuildEnd = deferred<void>();

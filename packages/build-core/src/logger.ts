@@ -1,3 +1,5 @@
+import process from 'node:process';
+import { format } from 'node:util';
 import { createWriteStream } from 'node:fs';
 import winston from 'winston';
 
@@ -31,7 +33,7 @@ const logStream = (() => {
     });
     return stream;
   } catch (err) {
-    console.error(`createWriteStream failed: ${err}`);
+    console.error(`createWriteStream failed: ${String(err)}`);
     return undefined;
   }
 })();
@@ -46,9 +48,9 @@ const dropAfterIpcDisconnect = winston.format((info) => {
 const printf = () => winston.format.printf(({ level, message, timestamp }) => {
   let output = '';
   if (timestamp) {
-    output += `${timestamp} `;
+    output += format('%s ', timestamp);
   }
-  output += `${level}: ${message}`;
+  output += format('%s: %s', level, message);
   return output;
 });
 

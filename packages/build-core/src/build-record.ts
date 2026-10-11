@@ -37,7 +37,8 @@ export type InternalBuildResult = {
   };
 };
 
-export function mergeBuildResults(a: InternalBuildResult, b: InternalBuildResult): InternalBuildResult {
+export function mergeBuildResults(a: InternalBuildResult, b: InternalBuildResult):
+InternalBuildResult {
   if (a.ok && b.ok) {
     return {
       ok: true,
@@ -117,12 +118,14 @@ export class BuildRecord {
       logger.debug(`${this._title} Build failed: %o`, error);
       result = {
         ...buildFailureResult(this._title, error),
-        inferredFiles: error && typeof error === 'object' && 'watchFiles' in error && Array.isArray(error.watchFiles)
+        inferredFiles: error && typeof error === 'object' && 'watchFiles' in error
+          && Array.isArray(error.watchFiles)
           ? error.watchFiles
           : [],
       };
     }
-    // Rollup preserves addWatchFile() paths verbatim, including relative paths and mixed separators.
+    // Rollup preserves addWatchFile() paths verbatim, including relative paths and mixed
+    // separators.
     // Normalize at the Rollup-to-OMS boundary so inferredFiles contain absolute native paths.
     return {
       ...result,
@@ -208,7 +211,7 @@ export class BuildRecord {
     const projectDefineSignature = JSON.stringify(projectDefine.define);
 
     const uuidProvider = options.uuidProvider;
-    const inputPlugins: (rollup.Plugin | undefined)[] = [
+    const inputPlugins: Array<rollup.Plugin | undefined> = [
       {
         name: 'oms:uuid',
 
@@ -220,7 +223,8 @@ export class BuildRecord {
           const uuid = uuidProvider(options.id);
           const previousUUID = this.cache.get(cacheKey);
           if (uuid !== previousUUID) {
-            logger.debug(`UUID of ${options.id} changed from ${previousUUID} to ${uuid}, invalidate its cache`);
+            logger.debug(`UUID of ${options
+              .id} changed from ${previousUUID} to ${uuid}, invalidate its cache`);
             this.cache.set(cacheKey, uuid);
             return true;
           }
@@ -278,7 +282,8 @@ export class BuildRecord {
         projectDefine,
         uuidProvider: options.uuidProvider,
         supportsNativeModules: !!this._headless,
-        nodeResolveExportConditions: [this._headless ? 'headless' : undefined].filter((condition): condition is string => condition !== undefined),
+        nodeResolveExportConditions: [this._headless ? 'headless' : undefined].filter((
+          condition): condition is string => condition !== undefined),
         target: this._buildOptions.profileBuildConfig?.target,
         sourcemap: this._sourceMaps,
         decorators: true,
@@ -308,12 +313,15 @@ export class BuildRecord {
         if (warning.code && this._suppressRollupWarningCodes.includes(warning.code)) {
           return;
         }
-        const message = warning.message || String(warning);
+        const message = warning.message;
         if (warning.code === 'SOURCEMAP_ERROR') {
           logger.debug(`${this._title} Rollup warning [${warning.code}]: ${message}`);
           return;
         }
-        logger.warn(`${this._title} Rollup warning${warning.plugin ? ` (${warning.plugin})` : ''}${warning.code ? ` [${warning.code}]` : ''}: ${message}`);
+        logger.warn(`${this._title} Rollup warning${warning.plugin
+          ? ` (${warning
+            .plugin})`
+          : ''}${warning.code ? ` [${warning.code}]` : ''}: ${message}`);
       },
       perf: true,
       treeshake: this._treeShake,
@@ -351,7 +359,8 @@ export class BuildRecord {
       const emittedFiles = new Set(writeResult.output.map((output) => output.fileName));
       await this._reconcileEmittedFiles(emittedFiles);
       const outputSummary = await summarizeOutputDir(this._outDir);
-      logger.info(`${this._title} Rollup write done in ${Date.now() - writeStart}ms (${outputSummary.files} files, ${formatBytes(outputSummary.bytes)})`);
+      logger.info(`${this._title} Rollup write done in ${Date.now(
+      ) - writeStart}ms (${outputSummary.files} files, ${formatBytes(outputSummary.bytes)})`);
       if (rollupBuild.getTimings) {
         logger.debug(`${this._title} Rollup timings: %o`, rollupBuild.getTimings());
       }
@@ -454,7 +463,7 @@ function collectErrorStacks(error: unknown): string[] {
     return [];
   }
   const parts = [
-    error.stack || error.message || error.name,
+    error.stack?.length ? error.stack : error.message.length ? error.message : error.name,
   ];
   const cause = error.cause;
   if (cause) {

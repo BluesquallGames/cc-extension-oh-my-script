@@ -4,7 +4,7 @@ import { logger } from '../logger';
 export const get: unknown[] = [
   {
     url: `/${'oms'}/*`,
-    async handle(request: {
+    handle(request: {
       params: [subpath: string];
     }, response: {
       status: number;

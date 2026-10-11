@@ -5,7 +5,7 @@ import { logger } from '../../logger.js';
 import { join } from 'node:path';
 import { cclegacy, js } from 'cc';
 import { TaskQueue } from '@oms/task-queue';
-import console from 'node:console';
+
 import { HotConsole } from './hot-console.js';
 
 const omsURLPrefix = 'oms://';
@@ -22,9 +22,9 @@ export class ReloadInterruptError extends Error {
   }
 }
 
-type ReloadTaskMap = {
+interface ReloadTaskMap {
   reload: () => Promise<void>;
-};
+}
 
 export interface SceneModuleSystemOptions {
   globalImport?: boolean;
@@ -54,7 +54,7 @@ export class SceneModuleSystem {
     }
     return this._reloadTaskQueue.queueTask({
       type: 'reload',
-      exec: async (ctx) => {
+      exec: async (_ctx) => {
         this._runningReloadState.interruptController = new AbortController();
         this._runningReloadState.seqId = this._nextReloadSeqId++;
         this._runningReloadState.pending = true;
@@ -89,7 +89,7 @@ export class SceneModuleSystem {
   private _registryManagement: RegistryManagement;
   private _globalImport: boolean;
   private _externalSystemJSModules: string[] = [];
-  private _instantiatedHotModules: Set<string> = new Set();
+  private _instantiatedHotModules = new Set<string>();
   private _omsModuleDir: string;
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   private _registeredClasses = new Set<Function>();
@@ -161,7 +161,7 @@ export class SceneModuleSystem {
     };
   }
 
-  private _resolve(id: string, parent?: string, meta?: ModuleRequestMeta): string {
+  private _resolve(id: string, parent?: string, _meta?: ModuleRequestMeta): string {
     if (this._externalSystemJSModules.includes(id)) {
       return id;
     }
@@ -170,7 +170,11 @@ export class SceneModuleSystem {
     try {
       url = new URL(id, parent);
     } catch (err) {
-      throw new Error(`${this._runningReloadingLogTag}Failed to resolve module ${id}(${parent ? `from ${parent})` : ''}):  ${err}`);
+      throw new Error(
+        `${this._runningReloadingLogTag}Failed to resolve module ${id}`
+        + `(${parent ? `from ${parent})` : ''}): ${String(err)}`,
+        { cause: err },
+      );
     }
 
     if (url.href.startsWith(omsURLPrefix)) {
@@ -180,7 +184,8 @@ export class SceneModuleSystem {
     return url.href;
   }
 
-  private async _instantiate(id: string, parent?: string, meta?: ModuleRequestMeta): Promise<Registration> {
+  private async _instantiate(id: string, parent?: string, meta?: ModuleRequestMeta):
+  Promise<Registration> {
     if (this._externalSystemJSModules.includes(id)) {
       return this._instantiateExternalSystemJSModule(id, parent, meta);
     }
@@ -195,7 +200,8 @@ export class SceneModuleSystem {
     throw new Error(`${this._runningReloadingLogTag}Unable to instantiate module ${id}`);
   }
 
-  private async _instantiateExternalSystemJSModule(id: string, parent?: string, meta?: ModuleRequestMeta): Promise<Registration> {
+  private async _instantiateExternalSystemJSModule(id: string, _parent?: string, _meta?:
+  ModuleRequestMeta): Promise<Registration> {
     const m = await importBuiltinExternalModule(id);
     this._checkReloadState();
     return makeExternalModuleRegistration(m);
@@ -205,7 +211,8 @@ export class SceneModuleSystem {
     await this._evaluateSystemJSModuleFile(path);
     const register = this._systemJS.getRegister();
     if (!register) {
-      throw new Error(`${this._runningReloadingLogTag}${path} does not provide a SystemJS register.`);
+      throw new Error(`${this
+        ._runningReloadingLogTag}${path} does not provide a SystemJS register.`);
     }
     return register;
   }
@@ -213,11 +220,14 @@ export class SceneModuleSystem {
   private async _evaluateSystemJSModuleFile(url: string) {
     const path = fileURLToPath(url);
     logger.debug(`${this._runningReloadingLogTag}Evaluate ${path}`);
-    let code = '';
+    let code: string;
     try {
       code = await fs.readFile(path, 'utf8');
     } catch (err) {
-      throw new Error(`${this._runningReloadingLogTag}Failed to read module ${path}: ${err}`);
+      throw new Error(
+        `${this._runningReloadingLogTag}Failed to read module ${path}: ${String(err)}`,
+        { cause: err },
+      );
     }
     this._checkReloadState();
     this._evaluateWrap(code, url);
@@ -230,26 +240,36 @@ export class SceneModuleSystem {
     };
     let fn: (...args: unknown[]) => void;
     try {
+      // System.register bundles execute with the loader's explicit intrinsics.
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       fn = new Function(...Object.keys(intrinsics), code + `\n//# sourceURL=${url}`) as typeof fn;
     } catch (err) {
-      throw new Error(`${this._runningReloadingLogTag}Failed to read module ${url}: ${err}`);
+      throw new Error(
+        `${this._runningReloadingLogTag}Failed to read module ${url}: ${String(err)}`,
+        { cause: err },
+      );
     }
     try {
       fn(...Object.values(intrinsics));
     } catch (err) {
-      throw new Error(`${this._runningReloadingLogTag}Failed to execute module ${url}: ${err}`);
+      throw new Error(
+        `${this._runningReloadingLogTag}Failed to execute module ${url}: ${String(err)}`,
+        { cause: err },
+      );
     }
   }
 
-  private _onModuleLoad(err: unknown, id: string, deps: string[] | undefined, isErrSource: boolean) {
+  private _onModuleLoad(_err: unknown, _id: string, _deps: string[] | undefined,
+    _isErrSource: boolean) {
+    // No extra tracing is needed for loaded modules.
   }
 
   private _setupClassRegistrationContext() {
     const onClassRegistered = this._onClassRegistered.bind(this);
-    // @ts-expect-error
+    // @ts-expect-error Creator's declarations omit this class registration event.
     EditorExtends.on('class-registered', onClassRegistered);
     return () => {
-      // @ts-expect-error
+      // @ts-expect-error Creator's declarations omit this class registration event.
       EditorExtends.removeListener('class-registered', onClassRegistered);
     };
   }
@@ -264,7 +284,8 @@ export class SceneModuleSystem {
     for (const registeredClass of this._registeredClasses) {
       js.unregisterClass(registeredClass);
     }
-    logger.debug(`${this._runningReloadingLogTag}Unregister ${[...this._registeredClasses].map((c) => c.name).join(', ')}`);
+    logger.debug(`${this._runningReloadingLogTag}Unregister ${[...this
+      ._registeredClasses].map((c) => c.name).join(', ')}`);
     this._registeredClasses.clear();
     cclegacy._RF.reset();
   }
@@ -273,14 +294,16 @@ export class SceneModuleSystem {
     for (const id of this._instantiatedHotModules) {
       const result = this._registryManagement.delete(id);
       if (!result) {
-        logger.warn(`${this._runningReloadingLogTag}Failed to invalidate module ${id}, maybe it's being executing?`);
+        logger.warn(`${this
+          ._runningReloadingLogTag}Failed to invalidate module ${id}, maybe it's being executing?`);
       }
     }
     this._instantiatedHotModules.clear();
   }
 
   private async _reloadOmsModules() {
-    const { default: metadata } = (await this._systemJS.import(`${omsURLPrefix}metadata.js`, undefined)) as {
+    const { default: metadata } = (await this._systemJS.import(
+      `${omsURLPrefix}metadata.js`, undefined)) as {
       default: OMSMetadata;
     };
     this._omsMetadata = metadata;
@@ -387,12 +410,12 @@ function isModuleRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function saveRequiringFrames() {
-  const frames: {
+  const frames: Array<{
     module: unknown;
     uuid: string;
     script: unknown;
     importMeta: unknown;
-  }[] = [];
+  }> = [];
   const RF = cclegacy._RF;
   for (; ;) {
     const frame = RF.peek();

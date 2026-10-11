@@ -86,12 +86,14 @@ beforeEach(() => {
 });
 
 describe('scene OMS runtime startup', () => {
-  it('waits for the built project scripts to execute before completing scene contribution load', async () => {
+  it(('waits for the built project scripts to execute before completing scene '
+    + 'contribution load'), async () => {
     /// @case
     /// 1. Vortex loads the OMS scene contribution while its initial worker build is pending.
     /// 2. The build completes and the real OMS runtime executes the built project entry.
     /// @expect
-    /// Scene contribution load stays pending until the project entry has executed, so deserialization cannot race class registration.
+    /// Scene contribution load stays pending until the project entry has executed, so
+    /// deserialization cannot race class registration.
     const startupBuild = deferred<BuildProfileResult>();
     editorRequest.mockReturnValue(startupBuild.promise);
     vol.fromJSON({

@@ -4,23 +4,21 @@ import { promiseWithResolvers, type PromiseWithResolvers } from './utils/promise
 import EventEmitter from 'node:events';
 
 export class TaskExecuteContext extends EventEmitter<{
-  merge: [args: any];
+  merge: [args: unknown[] | undefined];
   abort: [];
 }> {
-  constructor(public readonly initialMergeArgs: any[][] = []) {
+  constructor(public readonly initialMergeArgs: unknown[][] = []) {
     super();
   }
 
   acceptMerge = false;
 }
 
-export class TaskQueue<TTaskMap extends {
-  [x: string]: (ctx: TaskExecuteContext) => any;
-}> {
+export class TaskQueue<TTaskMap extends Record<string, (ctx: TaskExecuteContext) => unknown>> {
   queueTask<TType extends Extract<keyof TTaskMap, string>>(task: {
     type: TType;
     exec: (ctx: TaskExecuteContext) => Promise<ReturnType<TTaskMap[TType]>>;
-    mergeArgs?: any[];
+    mergeArgs?: unknown[];
   }): Promise<ReturnType<TTaskMap[TType]>> {
     if (this._runningTask && !this._runningTask.aborting && this._runningTask.type === task.type) {
       if (this._runningTask.ctx.acceptMerge) {
@@ -28,7 +26,7 @@ export class TaskQueue<TTaskMap extends {
         this._runningTask.ctx.emit('merge', task.mergeArgs);
         return this._runningTask.execPromiseWithResolvers.promise.then(
           (value) => {
-            return value;
+            return value as ReturnType<TTaskMap[TType]>;
           },
           (reason) => {
             throw new MergedTaskExecError(reason);
@@ -42,11 +40,11 @@ export class TaskQueue<TTaskMap extends {
         if (task.mergeArgs !== undefined) {
           pendingTask.initialMergeArgs.push(task.mergeArgs);
         }
-        return pendingTask.execPromiseWithResolvers.promise;
+        return pendingTask.execPromiseWithResolvers.promise as Promise<ReturnType<TTaskMap[TType]>>;
       }
     }
     logger.debug(`Queue task: [${task.type}]`);
-    const execPromiseWithResolvers = promiseWithResolvers<ReturnType<TTaskMap[TType]>>();
+    const execPromiseWithResolvers = promiseWithResolvers<unknown>();
     const taskId = this._nextTaskId++;
     this._pendingTasks.push({
       id: taskId,
@@ -60,7 +58,7 @@ export class TaskQueue<TTaskMap extends {
       logger.debug(`Start execute task queue`);
       this._executeTasks();
     }
-    return execPromiseWithResolvers.promise;
+    return execPromiseWithResolvers.promise as Promise<ReturnType<TTaskMap[TType]>>;
   }
 
   abort() {
@@ -80,8 +78,8 @@ export class TaskQueue<TTaskMap extends {
     id: number;
     type: string;
     exec: (ctx: TaskExecuteContext) => unknown;
-    initialMergeArgs: any[][];
-    execPromiseWithResolvers: PromiseWithResolvers<any>;
+    initialMergeArgs: unknown[][];
+    execPromiseWithResolvers: PromiseWithResolvers<unknown>;
   }> = [];
 
   private _runningTask: undefined | {
@@ -89,7 +87,7 @@ export class TaskQueue<TTaskMap extends {
     type: string;
     ctx: TaskExecuteContext;
     aborting: boolean;
-    execPromiseWithResolvers: PromiseWithResolvers<any>;
+    execPromiseWithResolvers: PromiseWithResolvers<unknown>;
   };
 
   private _runningPromise: Promise<void> | undefined;

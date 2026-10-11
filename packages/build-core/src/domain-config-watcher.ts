@@ -84,8 +84,9 @@ export class OmsDomainConfigWatcher extends EventEmitter<{
     partitions: [],
     exports: {},
   };
+
   private _effectiveConfigFile: string | undefined = undefined;
-  private _availableConfigFiles: Set<string> = new Set();
+  private _availableConfigFiles = new Set<string>();
 
   private _onAvailableConfigFilesChange(callback?: () => void) {
     const effectiveConfigFile = [...this._availableConfigFiles.values()].sort()[0] ?? '';
@@ -101,7 +102,7 @@ export class OmsDomainConfigWatcher extends EventEmitter<{
     (async () => {
       this._config = await readOmsDomainConfig(this._domainRoot, {
         preferredSourceRoot: this._preferredSourceRoot,
-        configFile: this._effectiveConfigFile || null,
+        configFile: this._effectiveConfigFile ?? null,
         context: this._context,
       });
       logger.debug('OMS domain config updated for %s: %o', this._domainRoot, this._config);

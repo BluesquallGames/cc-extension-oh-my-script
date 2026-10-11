@@ -3,13 +3,13 @@ const Base64KeyChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
 const Reg_Dash = /-/g;
 const Reg_Uuid = /^[0-9a-fA-F-]{36}$/;
 const Reg_NormalizedUuid = /^[0-9a-fA-F]{32}$/;
-const Reg_CompressedUuid = /^[0-9a-zA-Z+/]{22,23}$/;
-const Reg_CompressedSubAssetUuid = /^([0-9a-zA-Z+/]{22,23})((@[0-9a-fA-F]{5,})+)+$/;
+const _Reg_CompressedUuid = /^[0-9a-zA-Z+/]{22,23}$/;
+const _Reg_CompressedSubAssetUuid = /^([0-9a-zA-Z+/]{22,23})((@[0-9a-fA-F]{5,})+)+$/;
 const Reg_subAssetUuid = /([^@]{32,36})((@[0-9a-fA-F]{5,})+)+$/;
-const Reg_UuidInLibPath = /.*[/\\][0-9a-fA-F]{2}[/\\]([0-9a-fA-F-]{8,}((@[0-9a-fA-F]{5,})+)?).*/;
+const _Reg_UuidInLibPath = /.*[/\\][0-9a-fA-F]{2}[/\\]([0-9a-fA-F-]{8,}((@[0-9a-fA-F]{5,})+)?).*/;
 
 export function compressUuid(uuid: string, min: boolean) {
-  const result = uuid.match(Reg_subAssetUuid);
+  const result = Reg_subAssetUuid.exec(uuid);
   if (!result) {
     return compressNormalUuid(uuid, min);
   }
@@ -30,7 +30,7 @@ function compressNormalUuid(uuid: string, min: boolean) {
 function compressHex(hexString: string, reservedHeadLength: number) {
   const length = hexString.length;
   let i;
-  if (typeof reservedHeadLength !== 'undefined') {
+  if (reservedHeadLength !== undefined) {
     i = reservedHeadLength;
   } else {
     i = length % 3;

@@ -1,3 +1,4 @@
+import process from 'node:process';
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /// Modified from https://github.com/systemjs/systemjs/blob/main/src/system-core.js
 
@@ -26,22 +27,24 @@ type PromiseLike<T> = Promise<T> | T;
 
 export type Dependencies = string[];
 
-export type ExportFunction = {
+export interface ExportFunction {
   (name: string, value: unknown): void;
   (bindings: Record<string, unknown>): void;
-};
+}
 
-export type DeclareContext = {
+export interface DeclareContext {
   import: (importId: string, meta?: ModuleRequestMeta) => Promise<unknown>;
   meta: unknown;
-};
+}
 
 export type Declare = (_export: ExportFunction, context?: DeclareContext) => {
   execute: undefined | (() => PromiseLike<void>);
   setters?: ImporterSetter[];
 };
 
-export type Registration = [dependencies: Dependencies, declare: Declare, meta?: ModuleRequestMeta[]];
+export type Registration = [dependencies: Dependencies,
+declare: Declare,
+meta?: ModuleRequestMeta[]];
 
 type ImporterSetter = (value: unknown) => void;
 
@@ -77,14 +80,14 @@ interface Load {
 
   // On execution we have populated:
   // the execution error if any
-  er: undefined | unknown;
+  er: unknown;
   // in the case of TLA, the execution promise
   E: undefined | null | Promise<unknown>;
 
   // On execution, L, I, E cleared
 
   // Promise for top-level completion
-  C?: unknown | Promise<unknown>;
+  C?: unknown;
 
   // parent instantiator / executor
   p?: Load;
@@ -111,7 +114,7 @@ export class SystemJS {
       })
       .then((resolvedId) => {
         const load = this._getOrCreateLoad(resolvedId, undefined, meta);
-        return load.C || this._topLevelLoad(load);
+        return load.C ?? this._topLevelLoad(load);
       });
   }
 
@@ -124,7 +127,7 @@ export class SystemJS {
     return {
       url: id,
       resolve: (id: string, parentUrl?: string) => {
-        return Promise.resolve(this.resolve(id, parentUrl || id));
+        return Promise.resolve(this.resolve(id, parentUrl?.length ? parentUrl : id));
       },
     };
   }
@@ -133,7 +136,8 @@ export class SystemJS {
     return id;
   }
 
-  instantiate(id: string, parentUrl?: string, meta?: ModuleRequestMeta): PromiseLike<Registration | undefined> {
+  instantiate(id: string, parentUrl?: string, meta?: ModuleRequestMeta):
+  PromiseLike<Registration | undefined> {
     return;
   }
 
@@ -168,6 +172,7 @@ export class SystemJS {
           }
           function _export(name: string, value: unknown): void;
           function _export(bindings: Record<string, unknown>): void;
+
           function _export(name: string | Record<string, unknown>, value?: unknown) {
           // note if we have hoisted exports (including reexports)
             load.h = true;
@@ -186,19 +191,20 @@ export class SystemJS {
                 }
               }
 
-              if (name && name.__esModule) {
+              if (name?.__esModule) {
                 ns.__esModule = name.__esModule;
               }
             }
-            if (changed)
-              for (let i = 0; i < importerSetters.length; i++) {
-                const setter = importerSetters[i];
+            if (changed) {
+              for (const setter of importerSetters) {
                 if (setter) {
                   setter(ns);
                 }
               }
+            }
             return value;
           }
+
           const declared = registration[1](_export, registration[1].length === 2
             ? {
               import: (importId, meta) => {
@@ -207,11 +213,13 @@ export class SystemJS {
               meta: this.createContext(id),
             }
             : undefined);
-          load.e = declared.execute || function () {};
+          load.e = declared.execute ?? function () {
+            // Modules without an execute hook have no execution work.
+          };
           return [
             registration[0],
-            declared.setters || [],
-            registration[2] || [],
+            declared.setters ?? [],
+            registration[2] ?? [],
           ] as const;
         },
         (err) => {
@@ -235,9 +243,11 @@ export class SystemJS {
                   if (setter) {
                     depLoad.i.push(setter);
                     // only run early setters when there are hoisted exports of that module
-                    // the timing works here as pending hoisted export calls will trigger through importerSetters
-                    if (depLoad.h || !depLoad.I)
+                    // the timing works here as pending hoisted export calls will trigger through
+                    // importerSetters
+                    if (depLoad.h || !depLoad.I) {
                       setter(depLoad.n);
+                    }
                   }
                   return depLoad;
                 });
@@ -249,7 +259,9 @@ export class SystemJS {
       });
 
     if (!process.env.SYSTEM_BROWSER) {
-      linkPromise.catch(function () {});
+      linkPromise.catch(function () {
+        // The top-level import promise reports this failure to the consumer.
+      });
     }
 
     // Capital letter = a promise function
@@ -303,7 +315,8 @@ export class SystemJS {
       });
   }
 
-  private _instantiateAll(load: Load, parent: Load, loaded: Record<string, boolean>): void | Promise<unknown> {
+  private _instantiateAll(load: Load, parent: Load, loaded: Record<string, boolean>):
+    void | Promise<unknown> {
     if (loaded[load.id]) {
       return;
     }
@@ -315,12 +328,13 @@ export class SystemJS {
           load.p = parent;
         }
         return Promise.all(load.d!.map((dep) => {
-          return this._instantiateAll(dep, parent, loaded);
+          return Promise.resolve(this._instantiateAll(dep, parent, loaded));
         }));
       })
       .catch((err) => {
-        if (load.er)
+        if (load.er) {
           throw err;
+        }
         load.e = null;
         triggerOnload(this, load, err, false);
         throw err;
@@ -337,10 +351,14 @@ export class SystemJS {
     seen[load.id] = true;
 
     if (!load.e) {
-      if (load.er)
+      if (load.er) {
+        // JavaScript modules may throw any value; preserve its identity on re-import.
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
         throw load.er;
-      if (load.E)
+      }
+      if (load.E) {
         return load.E;
+      }
       return;
     }
 
@@ -350,17 +368,18 @@ export class SystemJS {
     // To inspect the state:
     // - If `load.er` is truthy, the execution has threw or has been rejected;
     // - otherwise, either the `load.E` is a promise, means it's under async execution, or
-    // - the `load.E` is null, means the load has completed the execution or has been async resolved.
+    // - the `load.E` is null, means the load has completed the execution or has been async
+    // resolved.
     const exec = load.e;
     load.e = null;
 
     // deps execute first, unless circular
-    let depLoadPromises: undefined | Promise<unknown>[];
+    let depLoadPromises: undefined | Array<Promise<unknown>>;
     load.d!.forEach((depLoad) => {
       try {
         const depLoadPromise = this._postOrderExec(depLoad, seen);
         if (depLoadPromise) {
-          (depLoadPromises = depLoadPromises || []).push(depLoadPromise);
+          (depLoadPromises ??= []).push(depLoadPromise);
         }
       } catch (err) {
         load.er = err;
@@ -418,6 +437,8 @@ function loadToId(load: Load) {
 function triggerOnload(loader: SystemJS, load: Load, err: unknown, isErrSource: boolean) {
   loader.onload(err, load.id, load.d?.map(loadToId), !!isErrSource);
   if (err) {
+    // Forward the module's original thrown value through the loader hooks.
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
     throw err;
   }
 }

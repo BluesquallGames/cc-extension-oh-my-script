@@ -1,6 +1,8 @@
 // @ts-check
 
-import stf from '@shrinktofit/eslint-plugin';
+import stf from '@shrinktofit/eslint-config';
+import stfNode from '@shrinktofit/eslint-config/node';
+import stfVue from '@shrinktofit/eslint-config/vue';
 import { defineConfig, globalIgnores } from 'eslint/config';
 
 export default defineConfig([
@@ -9,6 +11,10 @@ export default defineConfig([
     '**/lib/*',
     '**/dist/*',
     '**/.deploy/*',
+    '**/.vitepress/cache/**',
+    // Fixtures intentionally contain invalid syntax and consumer-specific type errors.
+    'packages/oms-systemjs/test/fixtures/**',
+    'tests/plugin/artifacts/**',
   ]),
   {
     settings: {
@@ -17,44 +23,55 @@ export default defineConfig([
       },
     },
   },
-  // @ts-expect-error
   ...stf.configs.recommended,
+  ...stfNode.configs.recommended,
+  ...stfVue.configs.recommended,
   {
     languageOptions: {
       parserOptions: {
         tsconfigRootDir: import.meta.dirname,
         project: [
-          'tsconfig.json',
           'packages/*/tsconfig.json',
+          'packages/*/test/tsconfig.json',
+          'packages/build-core/helpers/tsconfig.json',
+          'packages/extension/mount/tsconfig.json',
+          'tsconfig.eslint.json',
         ],
-        projectService: {
-          allowDefaultProject: [
-            'eslint.config.mjs',
-            'vite.config.ts',
-            'packages/*/vite.config.ts',
-            'types/*.d.ts',
-          ],
-        },
       },
     },
   },
   {
     rules: {
       'n/no-extraneous-import': 'off',
+      // Both APIs exist in the supported Node range; their experimental flags ended later.
+      'n/no-unsupported-features/node-builtins': ['error',
+        {
+          ignores: ['import.meta.dirname', 'readline/promises'],
+        }],
     },
   },
   {
-    files: ['*.vue'],
+    files: ['**/*.vue'],
+    languageOptions: {
+      parserOptions: {
+        extraFileExtensions: ['.vue'],
+        project: false,
+        projectService: true,
+      },
+    },
     rules: {
       'n/no-unsupported-features/node-builtins': 'off',
     },
   },
   {
-    files: ['*.ts'],
+    files: ['**/*.ts'],
     rules: {
-      '@typescript-eslint/ban-ts-comment': ['on', {
-        'ts-expect-error': true,
-      }],
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        {
+          'ts-expect-error': 'allow-with-description',
+        },
+      ],
     },
   },
 ]);
