@@ -1,0 +1,10 @@
+{
+  "mode": "pre",
+  "tag": "alpha",
+  "initialVersions": {
+    "@oms/docs": "0.0.0",
+    "oh-my-script": "0.0.1-alpha.7",
+    "@oms/plugin": "0.0.0"
+  },
+  "changesets": []
+}

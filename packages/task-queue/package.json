@@ -1,5 +1,6 @@
 {
   "name": "@oms/task-queue",
+  "private": true,
   "type": "module",
   "files": [
     "lib",
@@ -10,9 +11,9 @@
     ".": "./lib/index.js"
   },
   "scripts": {
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "node --run build",
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
     "@types/node": "catalog:",

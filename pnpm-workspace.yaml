@@ -10,6 +10,7 @@ supportedArchitectures:
   os:
   - win32
   - darwin
+  - linux
   cpu:
   - x64
   - arm64

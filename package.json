@@ -5,6 +5,11 @@
   "scripts": {
     "lint": "eslint . --max-warnings 0",
     "build": "turbo run build",
+    "test": "turbo run test && node --run test:plugin",
+    "test:plugin": "node tests/plugin/check-types.js && node tests/plugin/check-compatibility.js",
+    "changeset": "changeset",
+    "version": "changeset version && pnpm install --lockfile-only",
+    "release": "changeset publish",
     "dev": "turbo watch build",
     "docs:dev": "pnpm --dir docs dev",
     "docs:build": "pnpm --dir docs build",
@@ -13,6 +18,7 @@
     "publish": "exm publish oh-my-script"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.1",
     "@shrinktofit/eslint-config": "^0.0.17",
     "eslint": "^10.12.0",
     "turbo": "^2.9.16"

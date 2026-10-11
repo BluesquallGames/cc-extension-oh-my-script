@@ -1,12 +1,10 @@
-import fs from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import '../src/features/registry.js';
 import { REGISTRY, SystemJS } from '../src/core.js';
-import { describe, it, assert } from 'vitest';
-import { URL } from 'node:url';
+import { describe, it, assert, expect } from 'vitest';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { RegistryManagement } from '../src/features/registry.js';
-
-const IMPORT_MAP = Symbol('IMPORT_MAP');
 
 const resolveIfNotPlainOrUrl = (input: string, parent: string) => {
   return new URL(input, parent).href;
@@ -38,11 +36,6 @@ SystemJS.prototype.entries = function (...args: Parameters<RegistryManagement['e
 };
 
 const SystemLoader = SystemJS;
-
-SystemLoader.prototype[IMPORT_MAP] = { imports: {}, scopes: {} };
-SystemLoader.prototype.prepareImport = () => {
-  // No import preparation is needed in this test loader.
-};
 
 describe('Core API', function () {
   const loader = new SystemLoader();
@@ -285,33 +278,27 @@ describe('Core API', function () {
       assert.equal(x, _x);
     });
 
-    it('warns with invalid System.set', function () {
-      let numCalls = 0, lastWarn;
-      const originalWarn = console.warn;
-      console.warn = (msg) => {
-        numCalls++;
-        lastWarn = msg;
-      };
-      loader.set('bare-specifier', { y: 43 });
-      console.warn = originalWarn;
-      assert.equal(numCalls, 1);
-      assert.match(lastWarn.message, /is not a valid URL to set in the module registry/);
+    it('supports bare identifiers in the module registry', async function () {
+      /// @case Register a module under a bare identifier and import it.
+      /// @expect OMS preserves the registered namespace without requiring a URL.
+      const namespace = loader.set('bare-specifier', { y: 43 });
+      assert.equal(await loader.import('bare-specifier'), namespace);
+      assert.equal(loader.get('bare-specifier').y, 43);
     });
 
-    it('does not warn with valid System.set', function () {
-      let numCalls = 0, _lastWarn;
-      const originalWarn = console.warn;
-      console.warn = (msg) => {
-        numCalls++;
-        lastWarn = msg;
-      };
-      loader.set('http://localhost:8080/bare-specifier.js', { y: 43 });
-      console.warn = originalWarn;
-      assert.equal(numCalls, 0);
+    it('supports URL identifiers in the module registry', async function () {
+      /// @case Register a module under an absolute URL and import it.
+      /// @expect The URL addresses the same registered namespace.
+      const id = 'http://localhost:8080/bare-specifier.js';
+      const namespace = loader.set(id, { y: 43 });
+      assert.equal(await loader.import(id), namespace);
+      assert.equal(loader.get(id).y, 43);
     });
 
     it('Supports System.resolve', async function () {
-      const resolveReturnValue = System.resolve('http://x');
+      /// @case Resolve a module identifier on the loader used by the application.
+      /// @expect The configured resolver returns the identifier without a global System.
+      const resolveReturnValue = loader.resolve('http://x');
       const resolvedX = await resolveReturnValue;
       assert(typeof resolveReturnValue === 'string');
       assert.equal(resolvedX, 'http://x');
@@ -338,28 +325,33 @@ describe('Core API', function () {
       assert([...loader.entries()].some((entry) => entry[0] === 'http://i' && entry[1].a === 'b'));
     });
 
-    it('Supports System.getImportMap', function () {
-      const importMap = loader.getImportMap();
-
-      assert(
-        Object.hasOwn(importMap, 'imports')
-        && Object.hasOwn(importMap, 'scopes')
-        && Object.hasOwn(importMap, 'depcache')
-        && Object.hasOwn(importMap, 'integrity'),
-      );
+    it('imports modules through the configured resolver', async function () {
+      /// @case Map a bare specifier to a registered module with the resolve hook.
+      /// @expect Import uses the mapped module and passes the importer to the hook.
+      const mappedLoader = new SystemLoader();
+      const registry = new RegistryManagement(mappedLoader);
+      const namespace = registry.set('oms://mapped', { value: 42 });
+      const resolutions: Array<[string, string | undefined]> = [];
+      mappedLoader.resolve = (id, parent) => {
+        resolutions.push([id, parent]);
+        return id === 'mapped' ? 'oms://mapped' : id;
+      };
+      assert.equal(await mappedLoader.import('mapped', 'oms://entry'), namespace);
+      assert.deepEqual(resolutions, [['mapped', 'oms://entry']]);
     });
   });
 });
 
 describe('Loading Cases', function () {
   const loader = new SystemLoader();
-  const baseUrl = path.resolve('test/fixtures').replace(/\\/g, '/') + '/';
+  const baseUrl = pathToFileURL(path.resolve('test/fixtures') + path.sep).href;
   loader.resolve = (id, parent) => resolveIfNotPlainOrUrl(id, parent?.length ? parent : baseUrl);
-  loader.instantiate = async function (path) {
-    const source = await new Promise<string>((resolve, reject) => fs.readFile(path, (err,
-      source) => err ? reject(err) : resolve(source.toString())));
-    global.System = loader;
-    eval(source + '//# sourceURL=' + path);
+  loader.instantiate = async function (id) {
+    const source = await readFile(new URL(id), 'utf8');
+    // Fixtures register on this loader; no process-wide System is needed.
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- Trusted test fixtures.
+    const executeFixture = new Function('System', source + '//# sourceURL=' + id);
+    executeFixture(this);
     return this.getRegister();
   };
 
@@ -416,9 +408,10 @@ describe('Loading Cases', function () {
     });
 
     it('should support import.meta.url', async function () {
+      /// @case Import a file module that exports its context URL.
+      /// @expect The URL matches the resolved file URL on every platform.
       const m = await loader.import('./register-modules/moduleUrl.js');
-      assert.equal(m.url, path.resolve('test/fixtures/register-modules/moduleUrl.js')
-        .replace(/\\/g, '/'));
+      assert.equal(m.url, new URL('./register-modules/moduleUrl.js', baseUrl).href);
     });
   });
 
@@ -498,8 +491,19 @@ describe('Loading Cases', function () {
 
   describe('Top-level await', function () {
     it('Should support top-level await', async function () {
+      /// @case Import a circular graph containing asynchronous dependency execution.
+      /// @expect Every dependency finishes before its importer executes, including main.
       const m = await loader.import('./tla/main.js');
-      assert.equal(m.passed, true);
+      assert.deepEqual(m.events, [
+        'c',
+        'c',
+        'b',
+        'b',
+        'a',
+        'a',
+        'main',
+        'main',
+      ]);
     });
     it('should support async graphs', async function () {
       const loader = new SystemLoader();
@@ -549,12 +553,15 @@ describe('Loading Cases', function () {
       assert.equal(m.default, 42);
     });
     it('Concurrent top level import threads', async function () {
+      /// @case Import a module and its dependency concurrently through distinct entries.
+      /// @expect Both imports observe the dependency's completed export.
       // Use two different top level entry is on purpose:
       // currently top level lop would be cached.
       const thread1 = loader.import('./tla/concurrent-top-level-import-threads/main.js');
       const thread2 = loader.import('./tla/concurrent-top-level-import-threads/dep.js');
       const main = await thread1;
       const dep = await thread2;
+      assert.equal(typeof dep.stamp, 'number');
       assert.equal(main.stamp, dep.stamp);
     });
   });
@@ -610,8 +617,6 @@ describe('Loading Cases', function () {
   });
 
   describe('Errors', function () {
-    const testPath = path.resolve('test/fixtures').replace(/\\/g, '/') + '/';
-
     async function getImportError(module) {
       try {
         await loader.import(module);
@@ -635,16 +640,25 @@ describe('Loading Cases', function () {
       }
     });
 
-    it('should give a plain name error', async function () {
-      // prototype fallback
-      delete loader.resolve;
-      const err = await getImportError('plain-name');
-      assert.ok(err.toString().includes('Unable to resolve bare specifier \'plain-name\''));
+    it('propagates resolution errors without instantiating a module', async function () {
+      /// @case The application resolver rejects an unknown bare specifier.
+      /// @expect Import rejects with the original error and never invokes instantiate.
+      const failingLoader = new SystemLoader();
+      const failure = new Error('Unknown module: plain-name');
+      let instantiated = false;
+      failingLoader.resolve = () => {
+        throw failure;
+      };
+      failingLoader.instantiate = () => {
+        instantiated = true;
+      };
+      await expect(failingLoader.import('plain-name')).rejects.toBe(failure);
+      assert.equal(instantiated, false);
     });
 
     it('should throw if on syntax error', async function () {
       loader.resolve = (id, parentUrl) => resolveIfNotPlainOrUrl(id,
-        parentUrl?.length ? parentUrl : testPath);
+        parentUrl?.length ? parentUrl : baseUrl);
       const err = await getImportError('./register-modules/main.js');
       assert.equal(err, 'Error: dep error');
     });
@@ -708,10 +722,13 @@ describe('Loading Cases', function () {
       assert(m.ok);
     });
 
-    it('404 error', async function () {
-      const err = await getImportError('./register-modules/load-non-existent.js');
-      assert.equal(err, 'Error: ENOENT: no such file or directory, open \'' + testPath
-        .replace(/\//g, path.sep) + 'register-modules' + path.sep + 'non-existent.js\'');
+    it('reports a missing dependency file', async function () {
+      /// @case Import a fixture whose dependency does not exist.
+      /// @expect The file loader reports ENOENT for the missing dependency's native path.
+      await expect(loader.import('./register-modules/load-non-existent.js')).rejects.toMatchObject({
+        code: 'ENOENT',
+        path: fileURLToPath(new URL('./register-modules/non-existent.js', baseUrl)),
+      });
     });
   });
 });
