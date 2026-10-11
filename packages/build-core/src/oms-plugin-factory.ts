@@ -21,7 +21,10 @@ import type { Domain } from './domain.js';
 import type { ProjectDefineResult } from './env.js';
 import { logger } from './logger.js';
 import type { OmsPlugin, OmsPluginContext } from '@oms/plugin';
-import { rollupPluginAssetUUID } from './features/rollup-plugin-asset-uuid.js';
+import {
+  rollupPluginAssetUUID,
+  transformAssetUUIDImports,
+} from './features/rollup-plugin-asset-uuid.js';
 
 const rollupPluginCommonJS
   = rollupPluginCommonJS_ as unknown as typeof rollupPluginCommonJS_.default;
@@ -172,6 +175,7 @@ function createOmsRuntimeBabelPlugin({
     babelrc: false,
     skipPreflightCheck: true,
     plugins: [
+      transformAssetUUIDImports,
       uuidProvider
         ? [transformCCComponent({
           uuidProvider,

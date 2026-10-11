@@ -1,6 +1,8 @@
 import { OmsBuilderAgent } from './oms-builder-agent.js';
-import { workerMessageDescriptions,
-  type WorkerMessageSignature } from './worker-message-descriptions.js';
+import {
+  workerMessageDescriptions,
+  type WorkerMessageSignature,
+} from './worker-message-descriptions.js';
 
 const omsBuilderAgent = new OmsBuilderAgent();
 omsBuilderAgent.addListener('setup', () => {

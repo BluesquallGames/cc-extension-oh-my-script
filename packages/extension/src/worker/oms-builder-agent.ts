@@ -16,8 +16,10 @@ import {
   type ServerInvocationMethodId,
 } from '@oms/build-core/protocol';
 import { addEditorBroadcastListener } from '../utils/editor/common.js';
-import { addListenerOnPackageEnabled,
-  addListenerOnPackageDisabled } from '../utils/editor/extension.js';
+import {
+  addListenerOnPackageEnabled,
+  addListenerOnPackageDisabled,
+} from '../utils/editor/extension.js';
 import type { RebuildOptions } from './worker-message-descriptions.js';
 import { setTimeout } from 'node:timers/promises';
 import EventEmitter from 'node:events';

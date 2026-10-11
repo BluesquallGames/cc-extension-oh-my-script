@@ -73,7 +73,22 @@ OMS 提供内置的 `?uuid` 导入，普通源码和插件生成的模块均可�
 import uuid from '../assets/images/icon.png?uuid';
 ```
 
-路径可以是绝对路径、相对 importer 的路径或通过已有模块解析器解析的 specifier（包括 alias）。初期只接受项目 `assets` 目录内的文件；资源文件与同路径的 `.meta` 必须存在，且 metadata 必须包含非空字符串 `uuid`。模块默认导出该根 UUID，不选择 `subMetas` 中的 UUID，不输出资源内容。非法路径、缺失文件及无效 metadata 会使构建失败。
+路径可以是绝对路径、相对 importer 的路径或通过已有模块解析器解析的 specifier（包括 alias）。初期只接受项目 `assets` 目录内的文件；资源文件与同路径的 `.meta` 必须存在。未指定属性时，模块默认导出 metadata 的根 UUID，不输出资源内容。
+
+静态导入或重新导出可以通过 import attribute 选择导入器产物：
+
+```ts
+import frameUuid from '../assets/images/icon.png?uuid' with {
+  importer: 'sprite-frame',
+};
+import textureUuid from '../assets/images/icon.png?uuid' with {
+  importer: 'texture',
+};
+```
+
+`importer` 必须是非空字符串。OMS 按该标识严格匹配 metadata 根节点和递归 `subMetas` 中的资源；恰好匹配一个时，导出该项自身的非空字符串 `uuid`。零个或多个匹配都会报错，不选择第一个、不拼接 UUID 后缀。同一文件的不同 importer 是独立模块；导入器标识不限制为图片类型。
+
+保留 `?uuid` 以便 TypeScript 6 消费项目通过 `declare module '*?uuid'` 声明默认导出为 `string`；该版本尚不支持根据 import attributes 区分模块声明。消费项目的 `module` 配置需支持 import attributes，例如 `preserve`、`esnext` 或 `nodenext`。非法路径、缺失文件及无效 metadata 会使构建失败。
 
 OMS 登记资源文件与 `.meta` 的依赖，负责修改重建及缺失文件的恢复。插件只需生成 `?uuid` 导入；虚拟模块的相对导入仍应通过 `this.resolve(source, originalFile, options)` 转发。该功能属于 OMS 内置模块加载行为，不增加公开插件 hooks；UUID 引用也不负责生产资源入包。
 

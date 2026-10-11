@@ -6,9 +6,11 @@ import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { OmsBuilder } from '../src/oms-builder.js';
 import { ServerContext } from '../src/server-context.js';
-import type { PassiveBuildEndInfo,
+import type {
+  PassiveBuildEndInfo,
   ClientInvocationMethodId,
-  ServerInvocationMethodId } from '../src/protocol.js';
+  ServerInvocationMethodId,
+} from '../src/protocol.js';
 import { Ipc, InvocationDirection } from '../src/protocol.js';
 import { build as buildVite } from 'vite';
 
@@ -233,6 +235,231 @@ it(('imports asset root UUIDs from relative, absolute, aliased and '
       expect(code).not.toContain('?uuid');
     }
     expect(await fs.readdir(join(project, 'src'))).toEqual(['index.headless.ts', 'index.ts']);
+  } finally {
+    await builder.close();
+  }
+});
+
+it('keeps root, child and nested importer selections distinct', async () => {
+  /// @case
+  /// One asset is imported without attributes and with several importer selectors, including
+  /// a nested resource referenced by a plugin-generated module.
+  /// @expect
+  /// Dev and production builds preserve each selected resource's own UUID, and virtual module
+  /// resolution forwards the selector without requiring an intermediate source file.
+  const project = await createProject();
+  const asset = join(project, 'assets/example.png');
+  const values = [
+    'root-uuid',
+    'root-uuid',
+    'texture-uuid',
+    'frame-uuid',
+    'custom-uuid',
+    'frame-uuid',
+  ];
+  await fs.outputFile(asset, 'asset contents');
+  await fs.outputJson(`${asset}.meta`, {
+    uuid: 'root-uuid',
+    importer: 'image',
+    subMetas: {
+      texture: {
+        uuid: 'texture-uuid',
+        importer: 'texture',
+      },
+      atlas: {
+        uuid: 'atlas-uuid',
+        importer: 'atlas',
+        subMetas: {
+          frame: {
+            uuid: 'frame-uuid',
+            importer: 'sprite-frame',
+          },
+        },
+      },
+      custom: {
+        uuid: 'custom-uuid',
+        importer: 'custom-view',
+      },
+    },
+  });
+  await fs.outputFile(join(project, 'src/index.ts'), [
+    'import root from "../assets/example.png?uuid";',
+    'import image from "../assets/example.png?uuid" with { importer: "image" };',
+    'import texture from "../assets/example.png?uuid" with { importer: "texture" };',
+    'import frame from "@image?uuid" with { importer: "sprite-frame" };',
+    `import custom from ${JSON.stringify(asset.replaceAll('\\', '/') + '?uuid')}`
+    + ' with { importer: "custom-view" };',
+    'import virtual from "generated-frame";',
+    'export const values = [root, image, texture, frame, custom, virtual];',
+  ].join('\n'));
+  await fs.outputFile(join(project, 'src/index.headless.ts'),
+    'export { values } from "./index.js";');
+  await fs.outputFile(join(project, 'oms.config.js'), [
+    `const originalFile = ${JSON.stringify(join(project, 'src/view.custom'))};`,
+    'export default {',
+    'profiles: { headless: { include: [] } },',
+    `resolve: { alias: { "@image": ${JSON.stringify(asset)} } },`,
+    'plugins: [{ name: "test:importer-virtual", enforce: "pre",',
+    'async resolveId(source, parent, options) {',
+    'if (source === "generated-frame") return "\\0generated-frame";',
+    'if (parent === "\\0generated-frame" && options.attributes.importer !== "sprite-frame")'
+    + ' this.error("Missing importer attribute");',
+    'if (parent === "\\0generated-frame") return this.resolve(source, originalFile, options);',
+    '},',
+    'load(id) { if (id === "\\0generated-frame") return '
+    + JSON.stringify('export { default } from "../assets/example.png?uuid"'
+      + ' with { importer: "sprite-frame" };') + '; }',
+    '}] };',
+  ].join('\n'));
+  const builder = createBuilder(project);
+  try {
+    await builder.updateBuildOptions({ extensionBuildOptions: [] });
+    expect(await builder.rebuild()).toMatchObject({
+      default: { ok: true },
+      headless: { ok: true },
+    });
+    const webBuildDir = join(project, 'build-web');
+    await builder.buildProd({
+      buildDir: webBuildDir,
+      debug: true,
+      sourceMaps: false,
+      platform: 'web',
+      headless: false,
+    });
+    for (const outDir of [join(project, 'temp/oms/out'), join(webBuildDir, 'oms')]) {
+      const code = await fs.readFile(join(outDir, 'bundle-main.js'), 'utf8');
+      for (const uuid of new Set(values)) {
+        expect(code).toContain(uuid);
+      }
+      expect(code).not.toContain('atlas-uuid');
+      expect(code).not.toContain('?uuid');
+    }
+    const buildDir = join(project, 'build-headless');
+    await builder.buildProd({
+      buildDir,
+      debug: true,
+      sourceMaps: false,
+      platform: 'nodejs',
+      headless: true,
+    });
+    for (const outDir of [join(project, 'temp/oms/out-headless'), join(buildDir, 'oms')]) {
+      await fs.outputJson(join(outDir, 'package.json'), { type: 'module' });
+      const namespace = await import(pathToFileURL(join(outDir, 'bundle-main.headless.js')).href);
+      expect(namespace.values).toEqual(values);
+    }
+  } finally {
+    await builder.close();
+  }
+});
+
+it.each([
+  [
+    'missing',
+    '{"uuid":"root","importer":"image"}',
+    'sprite-frame',
+    'found 0',
+  ],
+  [
+    'siblings',
+    '{"subMetas":{"a":{"uuid":"a","importer":"sprite-frame"},'
+    + '"b":{"uuid":"b","importer":"sprite-frame"}}}',
+    'sprite-frame',
+    'found 2',
+  ],
+  [
+    'root and nested',
+    '{"uuid":"a","importer":"sprite-frame","subMetas":{"nested":{"subMetas":'
+    + '{"b":{"uuid":"b","importer":"sprite-frame"}}}}}',
+    'sprite-frame',
+    'found 2',
+  ],
+  [
+    'invalid UUID',
+    '{"uuid":"root","subMetas":{"frame":{"importer":"sprite-frame","uuid":""}}}',
+    'sprite-frame',
+    'non-empty uuid',
+  ],
+  [
+    'empty importer',
+    '{"uuid":"root"}',
+    '',
+    'non-empty importer',
+  ],
+] as const)('rejects invalid importer selections (%s)', async (
+  _scenario, metadata, importer, message,
+) => {
+  /// @case
+  /// An importer selector is empty, absent from metadata, ambiguous, or matches an invalid UUID.
+  /// @expect
+  /// The build fails with a diagnostic instead of selecting the root or an arbitrary match.
+  const project = await createProject();
+  const asset = join(project, 'assets/example.png');
+  await fs.outputFile(asset, 'asset contents');
+  await fs.outputFile(`${asset}.meta`, metadata);
+  await fs.outputFile(join(project, 'src/index.ts'),
+    'export { default as uuid } from "../assets/example.png?uuid"'
+    + ` with { importer: ${JSON.stringify(importer)} };`);
+  const builder = createBuilder(project);
+  try {
+    await builder.updateBuildOptions({ extensionBuildOptions: [] });
+    expect(await builder.rebuild()).toMatchObject({
+      default: {
+        ok: false,
+        error: { message: expect.stringContaining(message) },
+      },
+    });
+  } finally {
+    await builder.close();
+  }
+});
+
+it('recovers importer selections after missing and ambiguous metadata', async () => {
+  /// @case
+  /// A selector initially has no match; metadata adds a match, adds a duplicate, then restores
+  /// a unique match with a different UUID while the importing source stays unchanged.
+  /// @expect
+  /// Metadata alone recovers failed builds and refreshes the selected UUID without stale cache.
+  const project = await createProject();
+  const asset = join(project, 'assets/example.png');
+  await fs.outputFile(asset, 'asset contents');
+  await fs.outputJson(`${asset}.meta`, { uuid: 'root-uuid', importer: 'image' });
+  await fs.outputFile(join(project, 'src/index.ts'),
+    'export { default as uuid } from "../assets/example.png?uuid"'
+    + ' with { importer: "sprite-frame" };');
+  const builder = createBuilder(project);
+  try {
+    await builder.updateBuildOptions({ extensionBuildOptions: [] });
+    expect(await builder.rebuild()).toMatchObject({ default: { ok: false } });
+    await delay(150);
+    for (const uuid of ['first-frame', 'ambiguous', 'second-frame']) {
+      const completion = nextPassiveBuild(builder);
+      await fs.outputJson(`${asset}.meta`, {
+        uuid: 'root-uuid',
+        importer: 'image',
+        subMetas: {
+          frame: {
+            uuid,
+            importer: 'sprite-frame',
+          },
+          ...(uuid === 'ambiguous'
+            ? {
+              duplicate: {
+                uuid: 'duplicate-frame',
+                importer: 'sprite-frame',
+              },
+            }
+            : {}),
+        },
+      });
+      expect(await completion).toMatchObject({
+        profileResults: { default: { ok: uuid !== 'ambiguous' } },
+      });
+      if (uuid !== 'ambiguous') {
+        expect(await fs.readFile(join(project, 'temp/oms/out/bundle-main.js'), 'utf8'))
+          .toContain(uuid);
+      }
+      await delay(150);
+    }
   } finally {
     await builder.close();
   }

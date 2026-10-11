@@ -5,9 +5,11 @@ import Right from './right.vue';
 import { readFileSync } from 'fs-extra';
 
 import { BuildStateType, RightPanelState } from './state.js';
-import { addInnerPackageMessageListener,
+import {
+  addInnerPackageMessageListener,
   InnerPackageMessageArgs,
-  InnerPackageMessageId } from '../../inner-package-messaging.js';
+  InnerPackageMessageId,
+} from '../../inner-package-messaging.js';
 // @ts-expect-error Vite supplies this virtual style module at build time.
 import styleLocation from '@/style-location';
 

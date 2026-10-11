@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { registerMessageHandlers } from '../src/message-handlers.js';
-import { Ipc,
+import {
+  Ipc,
   type ClientInvocationMethodId,
-  type ServerInvocationMethodId } from '../src/protocol.js';
+  type ServerInvocationMethodId,
+} from '../src/protocol.js';
 import { ServerContext } from '../src/server-context.js';
 import { logger } from '../src/logger.js';
 

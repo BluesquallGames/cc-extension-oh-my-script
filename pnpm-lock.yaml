@@ -27,8 +27,8 @@ importers:
         specifier: ^2.31.1
         version: 2.31.1(@types/node@25.6.0)
       '@shrinktofit/eslint-config':
-        specifier: ^0.0.17
-        version: 0.0.17(@typescript-eslint/parser@8.71.1(eslint@10.12.0)(typescript@6.0.3))(eslint@10.12.0)
+        specifier: ^0.0.18
+        version: 0.0.18(@typescript-eslint/parser@8.71.1(eslint@10.12.0)(typescript@6.0.3))(eslint@10.12.0)
       eslint:
         specifier: ^10.12.0
         version: 10.12.0
@@ -1908,8 +1908,8 @@ packages:
   '@shikijs/vscode-textmate@10.0.2':
     resolution: {integrity: sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg==}
 
-  '@shrinktofit/eslint-config@0.0.17':
-    resolution: {integrity: sha512-DbDVBKLG35TQkAYAUgSB+0HhRiUwwhn5lvLQoW6GzbbDMCVSuBTGs4XH4nN6/fBfWzgzo1we3cwtpLqBIWAdQA==}
+  '@shrinktofit/eslint-config@0.0.18':
+    resolution: {integrity: sha512-I/hdtVaxJnBRhqlcQogI3BW3LT4LSVssdrAi9YFNtnWa8d6k9SMlNdjSsKS6IDV/71XSzPeqcg0F8O2QbReVzA==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
     peerDependencies:
       eslint: ^10.0.0
@@ -5934,7 +5934,7 @@ snapshots:
 
   '@shikijs/vscode-textmate@10.0.2': {}
 
-  '@shrinktofit/eslint-config@0.0.17(@typescript-eslint/parser@8.71.1(eslint@10.12.0)(typescript@6.0.3))(eslint@10.12.0)':
+  '@shrinktofit/eslint-config@0.0.18(@typescript-eslint/parser@8.71.1(eslint@10.12.0)(typescript@6.0.3))(eslint@10.12.0)':
     dependencies:
       '@eslint/js': 10.0.1(eslint@10.12.0)
       '@stylistic/eslint-plugin': 5.10.0(eslint@10.12.0)
