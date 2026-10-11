@@ -1,9 +1,11 @@
 {
   "name": "@oms/plugin",
-  "version": "0.0.0",
+  "version": "0.0.1-alpha.0",
   "description": "OMS public plugin API",
   "type": "module",
-  "files": ["lib"],
+  "files": [
+    "lib"
+  ],
   "exports": "./lib/index.js",
   "repository": {
     "type": "git",

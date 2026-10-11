@@ -6,5 +6,7 @@
     "oh-my-script": "0.0.1-alpha.7",
     "@oms/plugin": "0.0.0"
   },
-  "changesets": []
+  "changesets": [
+    "initial-plugin-release"
+  ]
 }
