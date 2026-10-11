@@ -4,7 +4,7 @@ System.register(['./depa.js', './depb.js', './depc.js'], function (_export) {
   return {
     setters: [,, function (_depC) {
       reporter = _depC.reporter;
-      _export('passed', _depC.passed);
+      _export('events', _depC.events);
     }],
     execute: function () {
       reporter('main');

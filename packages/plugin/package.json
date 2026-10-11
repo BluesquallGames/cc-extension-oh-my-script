@@ -5,6 +5,15 @@
   "type": "module",
   "files": ["lib"],
   "exports": "./lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BluesquallGames/cc-extension-oh-my-script.git",
+    "directory": "packages/plugin"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit",

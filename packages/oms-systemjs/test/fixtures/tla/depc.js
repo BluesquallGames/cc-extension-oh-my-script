@@ -1,14 +1,12 @@
 System.register([], function (_export) {
   var reporter;
 
-  var state = 0;
-  var expected = ['c', 'b', 'c', 'b', 'a', 'a', 'main', 'main'];
-  var failed = false;
+  var events = [];
   function reporter (name) {
-    if (expected[state++] !== name)
-      failed = true;
+    events.push(name);
   }
   _export('reporter', reporter);
+  _export('events', events);
 
   return {
     setters: [],
@@ -17,7 +15,6 @@ System.register([], function (_export) {
       return new Promise(resolve => setTimeout(resolve, 10))
       .then(function () {
         reporter('c');
-        _export('passed', !failed);
       });
     }
   };

@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import fs from 'fs-extra';
 import { tmpdir } from 'node:os';
+import { stripVTControlCharacters } from 'node:util';
 import { dirname, join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { Domain, type DomainProfile, readOmsDomainConfig } from '../src/domain.js';
@@ -786,7 +787,7 @@ it('reports syntax errors from entry source without wrapping them as unexpected'
     expect(result.error.message).toContain('test-build failed:');
     expect(result.error.message).toContain('oms-entry');
     expect(result.error.message).toContain('Unexpected token');
-    expect(result.error.message).toContain('export const = ;');
+    expect(stripVTControlCharacters(result.error.message)).toContain('export const = ;');
     expect(result.error.stack).toContain('SyntaxError');
     expect(result.error.message).not.toContain('Unexpected build error');
   }
